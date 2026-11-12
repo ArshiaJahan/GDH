@@ -4,6 +4,7 @@ import { CampaignBriefRow } from "./CampaignBriefRow";
 import { CampaignContinueRow } from "./CampaignContinueRow";
 import { GateRow } from "./GateRow";
 import { SkillLoadRow } from "./SkillLoadRow";
+import { TaskContextRow } from "./TaskContextRow";
 
 /** Harness-written messages Chat shows with their own row instead of a chat bubble, by the meta
  *  key that marks them (first match wins). Each component takes { m }. */
@@ -12,6 +13,7 @@ export const META_ROWS: [string, ComponentType<{ m: Msg }>][] = [
   ["gate", GateRow],
   ["campaign_brief", CampaignBriefRow],
   ["campaign_continue", CampaignContinueRow],
+  ["task_context", TaskContextRow],
 ];
 
 export function metaRow(m: Msg): ComponentType<{ m: Msg }> | null {

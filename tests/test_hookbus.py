@@ -479,14 +479,14 @@ async def test_hook_context_consent(app, folder):
 
 def test_migration_v3_tables(tmp_path):
     db = DB(tmp_path / "m.db")
-    assert db.user_version() == SCHEMA_VERSION == 3
+    assert db.user_version() == SCHEMA_VERSION and SCHEMA_VERSION >= 3  # v4+: later features' tables
     names = {r["name"] for r in db.all("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"hook_trust", "gate_runs", "ladder_evidence", "campaigns", "campaign_sessions", "fleet_waves",
             "fleet_units"} <= names
     cols = {r["name"] for r in db.all("PRAGMA table_info(campaigns)")}
     assert {"claim_session", "claim_heartbeat", "breaker", "phases", "autopilot"} <= cols
     db.close()
-    assert DB(tmp_path / "m.db").user_version() == 3  # reopening is a no-op
+    assert DB(tmp_path / "m.db").user_version() == SCHEMA_VERSION  # reopening is a no-op
 
 
 def test_config_sections(app, cfg):

@@ -9,8 +9,9 @@ import logging
 import sqlite3
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 from .config import data_dir
 
@@ -356,9 +357,82 @@ def _v3_citadel(c: sqlite3.Connection) -> None:
         c.execute(stmt)
 
 
+V4_TASK_BOARD = [
+    # Kanban boards and their ordered columns; is_done marks "done columns" (search leaves their
+    # tasks out unless include_done).
+    """CREATE TABLE IF NOT EXISTS task_boards (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, sort_order REAL NOT NULL DEFAULT 0,
+      created_at REAL NOT NULL, updated_at REAL NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS task_columns (
+      id TEXT PRIMARY KEY, board_id TEXT NOT NULL REFERENCES task_boards(id) ON DELETE CASCADE,
+      name TEXT NOT NULL, sort_order REAL NOT NULL DEFAULT 0, is_done INTEGER NOT NULL DEFAULT 0,
+      created_at REAL NOT NULL)""",
+    "CREATE INDEX IF NOT EXISTS task_columns_board ON task_columns(board_id, sort_order)",
+    # The one global code counter (Task00001, Task00002, …): next number to hand out. Numbers are
+    # taken inside a write transaction and never reused, even after a task is deleted.
+    "CREATE TABLE IF NOT EXISTS task_counter (id INTEGER PRIMARY KEY CHECK (id = 1), next INTEGER NOT NULL)",
+    "INSERT OR IGNORE INTO task_counter (id, next) VALUES (1, 1)",
+    # labels, assignees: json lists of strings. due: YYYY-MM-DD or NULL. archived_at set = in
+    # "Recently deleted" (restorable). agent_touched: the agent created or changed it at least once.
+    """CREATE TABLE IF NOT EXISTS board_tasks (
+      id TEXT PRIMARY KEY, num INTEGER NOT NULL UNIQUE,
+      board_id TEXT NOT NULL REFERENCES task_boards(id) ON DELETE CASCADE,
+      column_id TEXT NOT NULL REFERENCES task_columns(id), position REAL NOT NULL DEFAULT 0,
+      title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', priority TEXT NOT NULL DEFAULT 'none',
+      labels TEXT NOT NULL DEFAULT '[]', due TEXT, assignees TEXT NOT NULL DEFAULT '[]',
+      created_by TEXT NOT NULL DEFAULT 'user', agent_touched INTEGER NOT NULL DEFAULT 0,
+      archived_at REAL, created_at REAL NOT NULL, updated_at REAL NOT NULL)""",
+    "CREATE INDEX IF NOT EXISTS board_tasks_column ON board_tasks(column_id, position)",
+    "CREATE INDEX IF NOT EXISTS board_tasks_board ON board_tasks(board_id, archived_at)",
+    """CREATE TABLE IF NOT EXISTS task_subtasks (
+      id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES board_tasks(id) ON DELETE CASCADE,
+      title TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL DEFAULT 0)""",
+    "CREATE INDEX IF NOT EXISTS task_subtasks_task ON task_subtasks(task_id, position)",
+    """CREATE TABLE IF NOT EXISTS task_checklist (
+      id TEXT PRIMARY KEY, subtask_id TEXT NOT NULL REFERENCES task_subtasks(id) ON DELETE CASCADE,
+      title TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL DEFAULT 0)""",
+    "CREATE INDEX IF NOT EXISTS task_checklist_subtask ON task_checklist(subtask_id, position)",
+    # author: user | agent (by_agent marks the agent's comments); session_id: where the agent was.
+    """CREATE TABLE IF NOT EXISTS task_comments (
+      id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES board_tasks(id) ON DELETE CASCADE,
+      author TEXT NOT NULL, by_agent INTEGER NOT NULL DEFAULT 0, body TEXT NOT NULL,
+      session_id TEXT, created_at REAL NOT NULL)""",
+    "CREATE INDEX IF NOT EXISTS task_comments_task ON task_comments(task_id, created_at)",
+    """CREATE TABLE IF NOT EXISTS task_activity (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES board_tasks(id) ON DELETE CASCADE,
+      actor TEXT NOT NULL, action TEXT NOT NULL, text TEXT NOT NULL, session_id TEXT, ts REAL NOT NULL)""",
+    "CREATE INDEX IF NOT EXISTS task_activity_task ON task_activity(task_id, ts)",
+    # Sessions that work on a task (a session can show the tasks it's linked to).
+    """CREATE TABLE IF NOT EXISTS task_sessions (
+      task_id TEXT NOT NULL REFERENCES board_tasks(id) ON DELETE CASCADE, session_id TEXT NOT NULL,
+      linked_at REAL NOT NULL, PRIMARY KEY (task_id, session_id))""",
+    "CREATE INDEX IF NOT EXISTS task_sessions_session ON task_sessions(session_id)",
+]
+# The board every database starts with ("Game"); Done is its done column.
+DEFAULT_BOARD = ("brd_game", "Game", [("col_backlog", "Backlog", 0), ("col_todo", "To do", 0),
+                                      ("col_doing", "In progress", 0), ("col_review", "Review", 0),
+                                      ("col_done", "Done", 1)])
+
+
+def _v4_task_board(c: sqlite3.Connection) -> None:
+    """v4: the Kanban task board (boards, columns, tasks with Task00001 codes, subtasks and
+    checklists, comments, activity, linked sessions) and its default "Game" board."""
+    for stmt in V4_TASK_BOARD:
+        c.execute(stmt)
+    if not c.execute("SELECT 1 FROM task_boards LIMIT 1").fetchone():
+        ts = time.time()
+        bid, name, cols = DEFAULT_BOARD
+        c.execute("INSERT INTO task_boards (id, name, sort_order, created_at, updated_at) VALUES (?, ?, 0, ?, ?)",
+                  [bid, name, ts, ts])
+        for i, (cid, cname, done) in enumerate(cols):
+            c.execute("INSERT INTO task_columns (id, board_id, name, sort_order, is_done, created_at) "
+                      "VALUES (?, ?, ?, ?, ?, ?)", [cid, bid, cname, i, done, ts])
+
+
 # Versioned migrations: PRAGMA user_version is the last one applied. Each runs once, in its own
 # transaction together with the version bump. Append new steps; never change a released one.
 MIGRATIONS: list[tuple[int, Any]] = [(1, _v1_session_columns), (2, _v2_storage), (3, _v3_citadel)]
+MIGRATIONS.append((4, _v4_task_board))
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 
@@ -440,6 +514,23 @@ class DB:
     def execute(self, sql: str, params: Iterable[Any] = ()) -> sqlite3.Cursor:
         with self._lock:
             return self._conn.execute(sql, tuple(params))
+
+    @contextmanager
+    def transaction(self) -> Iterator["DB"]:
+        """All-or-nothing writes: holds the lock and a write transaction (BEGIN IMMEDIATE, so another
+        process can't interleave either); commits at the end, rolls back if the block raises.
+        Re-entrant: inside another transaction it just joins it."""
+        with self._lock:
+            if self._conn.in_transaction:
+                yield self
+                return
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                yield self
+            except BaseException:
+                self._conn.execute("ROLLBACK")
+                raise
+            self._conn.execute("COMMIT")
 
     def executemany(self, sql: str, rows: Iterable[Iterable[Any]]) -> None:
         with self._lock:

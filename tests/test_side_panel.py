@@ -30,7 +30,7 @@ def test_context_breakdown(client, state):
     assert ctx["parts"]["messages"] == 1000
     assert ctx["parts"]["skills"] > 500  # delegation skill is on by default
     assert ctx["parts"]["tools"] > 0 and ctx["parts"]["system"] > 0
-    assert 0 < ctx["fraction"] < 0.01
+    assert 0 < ctx["fraction"] < 0.015  # system, ~25 tool specs (task board included), skills, the message
 
 
 def test_compact_keeps_originals_and_recent_turns(client, state):

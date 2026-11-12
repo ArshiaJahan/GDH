@@ -120,12 +120,23 @@ class AgentRunner:
                    f"Model tiers: {tiers}\n"
                    f"Delegation: max_parallel {mp.get('claude_codex', 4)} API subagents + {mp.get('codex_cli', 2)} "
                    f"Codex CLI runs; confirm_over_usd = {d.get('confirm_over_usd')}; "
-                   f"job_budget_usd = {d.get('job_budget_usd')}\nToday: {dt.date.today().isoformat()}")
+                   f"job_budget_usd = {d.get('job_budget_usd')}\nToday: {dt.date.today().isoformat()}"
+                   + "".join(f"\n{n}" for n in self._prompt_notes(session)))
         # The project context pack a session_start hook froze into the session (WP2 context.pack):
         # {text, sources, sha, built_at}; its text goes in verbatim. Absent in most sessions.
         if isinstance(cp := settings.get("context_pack"), dict) and cp.get("text"):
             seg.append(str(cp["text"]))
         return seg
+
+    def _prompt_notes(self, session: dict) -> list[str]:
+        out = []
+        for fn in getattr(self.app, "prompt_notes", None) or []:
+            try:
+                if note := fn(session):
+                    out.append(str(note))
+            except Exception:  # noqa: BLE001 — a broken note is left out, never fails the turn
+                log.warning("prompt note failed", exc_info=True)
+        return out
 
     def tool_specs(self, session: dict) -> list:
         specs = self.app.tools.specs(role="main", session=session)  # session: Tool.when filters

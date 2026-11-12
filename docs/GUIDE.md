@@ -15,6 +15,7 @@ transcription, sound and music. Everything runs locally; the backend listens on 
 - [Adding API keys](#adding-api-keys)
 - [Configuration](#configuration)
 - [Pages and panels](#pages-and-panels)
+- [Task board](#task-board)
 - [Sessions](#sessions)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [How delegation works](#how-delegation-works)
@@ -138,7 +139,7 @@ keep an explicit **Save**.
   levels, how each model expresses "no thinking", and a `display_name` (Opus 5.5, Sonnet 5.5,
   Haiku 5.5, Fable 5.1, GPT-6 Astra, GPT-6.1 Sol, GPT-6.1 Terra, GPT-6 Luna). The app shows
   models by that name plus the tier routing to them, e.g. "GPT-6.1 Sol · codex.standard", in
-  Settings, the side panel, subagent cards, My usage, Tasks, `/model`, approvals, background
+  Settings, the side panel, subagent cards, My usage, Schedule, `/model`, approvals, background
   tasks and Artifacts. Entries without `display_name` (older config files, custom models) get a
   name derived from the ID. Model IDs and prices were checked against provider docs on
   2026-11-05 and again on 2026-11-06.
@@ -147,13 +148,17 @@ keep an explicit **Save**.
 
 **Sidebar.** Your sessions: pinned ones, then groups, then the rest, with search over titles and
 message text. See [Sessions](#sessions). The footer has Archived and Trash, then one row of icon
-buttons (names in their tooltips) for Artifacts, ElevenLabs, Tasks, Skills & MCP, My usage,
+buttons (names in their tooltips) for Artifacts, ElevenLabs, Tasks (the task board), Schedule,
+Campaigns, Skills & MCP, My usage,
 Settings and the theme switch (system / light / dark). The list fades out at the bottom while
 there's more to scroll.
 
 **Chat.** Streaming replies with collapsible thinking and tool calls, subagent cards (tier,
 effort meter, status, tokens, cost, stop), inline players for ElevenLabs audio, and drag and
-drop attachments. Slash commands are `/model`, `/effort`, `/mode`, `/compact` and `/clear`.
+drop attachments. Slash commands are `/model`, `/effort`, `/mode`, `/compact`, `/clear`,
+`/skill` and `/task` (see [Task board](#task-board)). A task code such as `Task00012` in a message
+(yours or the agent's) shows as a chip that opens the task; the chat header shows the tasks
+linked to the session.
 **Approval cards** appear here for effort above high (Approve / Run at high instead / Cancel),
 shell commands, edits in Ask mode, deletes, large ElevenLabs generations, shared-tool jobs and MCP
 tools that aren't read-only (see [MCP tools and modes](#how-delegation-works)).
@@ -237,7 +242,10 @@ agent) or to **Send to chat** (the session's composer) instead.
 Sections your plan can't use are hidden. Voice design and cloning link to ElevenLabs' own
 consent and verification flow.
 
-**Tasks.** Scheduled prompts (cron or presets). Each run starts a new session with its own
+**Tasks.** The Kanban task board you and the agent share; see [Task board](#task-board).
+
+**Schedule.** Scheduled prompts (cron or presets); this page was called Tasks before the task
+board arrived. Each run starts a new session with its own
 model, effort, folder and mode. Schedules only fire while the app is running. Cron lines use
 standard weekday numbers (0 and 7 are Sunday, `1-5` is Monday to Friday) and day names
 (`mon-fri`); custom lines also accept `once:2026-12-01T09:00` and `every:30m`.
@@ -321,6 +329,75 @@ replays what a window missed during a short disconnect; a window that was away l
 Appearance sets a background image, GIF or video per theme,
 with fit, dim, blur and panel opacity. Video pauses when the window is hidden or on battery
 under 20%, and shows a still frame when Reduce motion is on.
+
+## Task board
+
+The **Tasks** page (Kanban icon in the sidebar footer) is a board you and the agent both work
+on. The database starts with one board, **Game**, with the columns Backlog, To do, In progress,
+Review and Done; Done is a *done column* (its tasks count as finished and searches leave them out
+unless asked). Add, rename, reorder (Move left / right in a column's … menu) and delete columns,
+mark any column as a done column, and add, rename, switch and delete boards from the board menu
+next to the title. Deleting a column moves its tasks to another column of the board; deleting a
+board deletes its tasks too and asks first, and the last board can't be deleted.
+
+**Codes.** Every task gets a code from one global counter: `Task00001`, `Task00002`, … (five
+digits, more after `Task99999`). A number is taken inside a database write transaction, so two
+windows or the agent creating tasks at the same time never get the same one, and it is never
+handed out again, even after the task is deleted for good. Everywhere a task is named (the
+filter bar, `/task`, the agent tools, the REST API) the code works in any case, or as the bare
+number: `Task00012`, `task12`, `#12`, `00012` and `12` are the same task.
+
+**Cards** show the code, title, priority, labels, the due date (red once it's overdue and the
+task isn't in a done column), subtask progress, comment count and assignees' initials ("Me" is
+you, the robot is the agent). A small robot next to the code marks tasks the agent created or
+changed. Drag cards between and within columns, or use **Add task** at the bottom of a column. The
+filter bar narrows the board by text or code, assignee (or Unassigned), label, priority and due
+date (overdue, today, within 7 days, no date).
+
+**Task drawer.** Click a card to edit everything: title, board and column, priority, due date,
+labels, assignees (any name; "me" and "agent" are special), the Markdown description, subtasks
+with their own checklists (tick, rename with a double-click, reorder, remove), the sessions
+linked to it (click one to open it), comments (the agent's are marked), and the history of the
+last 30 changes. **Archive** moves a task to **Recently deleted** (header button), where it can be
+restored to its column or deleted for good. Changes from the agent or another window appear at
+once (`task.*` events on the live connection).
+
+**`/task` in the composer** (with autocomplete for subcommands, codes and column names):
+
+| Command | What it does |
+|---|---|
+| `/task new <title> #label !high @column` | Create a task; `#label` (repeatable), `!none\|low\|medium\|high\|urgent` and `@column` are optional (`@in-progress` for names with spaces) |
+| `/task <code>` | Put the task into this conversation (a collapsed "Task attached" row with its fields, description, subtasks and last comments) and link the session to it |
+| `/task move <code> <column>` | Move it to a column of its board |
+| `/task done <code>` | Move it to its board's done column |
+| `/task list [words]` | Open the Tasks page filtered by the words |
+| `/task link <code>` | Link this session to the task |
+| `/task` | Open the Tasks page |
+
+**The agent** has the tools `task_boards`, `task_search`, `task_get`, `task_create`,
+`task_update` (fields, moving between columns and boards with `position` top or bottom,
+assignees replace / add / remove, and subtask and checklist ops `add rename toggle move remove
+add_item rename_item toggle_item move_item remove_item`, applied all or nothing), `task_comment`,
+`task_archive` and `task_restore`. Its results always name tasks by code. A task it creates is
+linked to its session. One line in the system prompt tells it the board exists and to refer to
+tasks by code, so "what's left on Task00012?" works. In Plan only mode the board is read-only for
+the agent; subagents can be given the three read tools, never the others. A session can turn the
+tools off with the setting `task_board = false`.
+
+**REST** (next to the scheduled tasks, which keep `/api/tasks` and `/api/tasks/{id}`):
+
+| Endpoint | |
+|---|---|
+| `GET /api/tasks/boards` | boards with columns and task counts, people, priorities |
+| `POST /api/tasks/boards`, `PATCH/DELETE /api/tasks/boards/{id}` (`?force=true`) | boards |
+| `POST /api/tasks/boards/{id}/columns`, `POST /api/tasks/boards/{id}/order`, `PATCH/DELETE /api/tasks/columns/{id}` (`?move_to=`) | columns |
+| `GET /api/tasks/search?q=&assignee=&label=&priority=&due=&board=&column=&include_done=&archived=` | search |
+| `GET /api/tasks/archived`, `GET /api/tasks/suggest?q=`, `GET /api/tasks/by-session/{id}` | Recently deleted, code autocomplete, a session's tasks |
+| `POST /api/tasks/items`, `GET/PATCH/DELETE /api/tasks/items/{code}`, `GET /api/tasks/by-code/{code}` | tasks (`DELETE` only from Recently deleted) |
+| `POST /api/tasks/items/{code}/subtasks` `{ops}`, `/comments`, `/done`, `/archive`, `/restore`, `/sessions`, `/attach`; `DELETE …/sessions/{id}` | the rest |
+
+The tables (migration 4) are `task_boards`, `task_columns`, `board_tasks`, `task_counter`,
+`task_subtasks`, `task_checklist`, `task_comments`, `task_activity` and `task_sessions`.
 
 ## Sessions
 
@@ -730,7 +807,10 @@ parameters). They also cover:
     provider never fails the turn
 - the Skills & MCP assistant: creating a skill, refusing to overwrite one, approval before
   adding an MCP server (declining adds nothing), the effort gate, installing from a URL
-- scheduled tasks and Settings
+- scheduled tasks (Schedule) and Settings
+- the task board (`tests/test_task_board.py`): codes handed out in order and never reused,
+  also from two connections at once; code parsing; the tools, with subtask ops all or nothing,
+  Plan only mode and subagents; search filters including due dates; events; the REST API
 - the Codex CLI harness against a fake `codex` binary, and the Agent SDK harness with a
   stubbed `query`
 - updates: version order, `latest.json` detection (announced once, half-written files ignored),

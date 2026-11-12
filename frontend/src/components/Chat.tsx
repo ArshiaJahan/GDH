@@ -11,6 +11,7 @@ import { SafeMarkdown } from "./SafeMarkdown";
 import { NoKeyNotice, SetupChecklist } from "./SetupChecklist";
 import { metaRow } from "./rows";
 import { SessionLimitBanner } from "./LimitsBanner";
+import { SessionTasks } from "./SessionTasks";
 import { toolRenderers } from "./toolRenderers";
 import { EffortMeter, ProviderDot, fmtUsd, modelLabel, tiersOf, useModelCatalog } from "./ui";
 
@@ -115,6 +116,7 @@ export function Chat() {
       <header className="flex items-center gap-2 px-4 h-11 border-b border-line surface shrink-0" data-tauri-drag-region>
         <h1 className="font-medium truncate">{session.title}</h1>
         <span className="chip whitespace-nowrap shrink-0"><ProviderDot model={session.model} />{modelLabel(session.model)} <EffortMeter effort={session.effort} /> {session.effort}</span>
+        <SessionTasks sessionId={session.id} />
         <div className="ml-auto flex items-center gap-1">
           {(running || backgroundBusy) && <button className="btn" title={running ? "Stop the agent and everything it started" : "Stop this session's background subagents and commands"} onClick={() => post(`/sessions/${sid}/stop`)}><Square size={12} /> Stop</button>}
           <button className="btn btn-ghost px-1.5" title={sidePanelOpen ? "Hide side panel" : "Show side panel"} aria-label="Side panel" aria-pressed={sidePanelOpen} onClick={actions.toggleSidePanel}><PanelRight size={16} /></button>

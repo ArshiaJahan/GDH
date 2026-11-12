@@ -2,6 +2,7 @@ import { ArrowUp, Paperclip, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { get, patch, post, upload } from "../lib/api";
 import { actions, useStore, type Session } from "../lib/store";
+import { parseTaskCommand, TASK_SUBCOMMANDS, taskCompletion, taskPick, taskSuggestions, type TaskHit } from "../lib/taskCodes";
 import { Popover } from "./Popover";
 import { modelLabel } from "./ui";
 
@@ -106,7 +107,23 @@ export function Composer({ session, running }: { session: Session; running: bool
     { cmd: "/compact", hint: "Summarize older turns to free context", args: [] },
     { cmd: "/clear", hint: "Start fresh; history stays visible", args: [] },
     { cmd: "/skill", hint: "Use a skill in this message", args: skills.map((s) => s.name) },
+    { cmd: "/task", hint: "Task board: new, <code>, move, done, list, link", args: TASK_SUBCOMMANDS.map(([s]) => s) },
   ], [modelChoices, skills]);
+
+  // /task autocomplete: task codes from the board (matched by the backend) and its column names.
+  const [taskHits, setTaskHits] = useState<TaskHit[]>([]);
+  const [taskCols, setTaskCols] = useState<string[]>([]);
+  const completion = taskCompletion(text);
+  const codeQuery = completion && completion.field !== "column" ? completion.partial : null;
+  useEffect(() => {
+    if (codeQuery === null) return;
+    const t = setTimeout(() => get<TaskHit[]>(`/tasks/suggest?q=${encodeURIComponent(codeQuery)}&limit=8`).then(setTaskHits).catch(() => setTaskHits([])), 100);
+    return () => clearTimeout(t);
+  }, [codeQuery]);
+  const wantsColumns = completion?.field === "column";
+  useEffect(() => {
+    if (wantsColumns && !taskCols.length) get("/tasks/boards").then((r) => setTaskCols(r.boards.flatMap((b: any) => b.columns.map((c: any) => c.name)))).catch(() => {});
+  }, [wantsColumns]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const suggestions = useMemo(() => {
     if (!text.startsWith("/") || text.includes("\n")) return [];
@@ -114,12 +131,13 @@ export function Composer({ session, running }: { session: Session; running: bool
     const hasSpace = /\s/.test(text);
     if (!hasSpace) return commands.filter((x) => x.cmd.startsWith(c)).map((x) => ({ value: x.cmd + (x.args.length ? " " : ""), label: x.cmd, hint: x.hint }));
     if (c === "/skill" && /^\/skill \S+\s/.test(text)) return []; // the skill is chosen; the rest is the message
+    if (c === "/task") return taskSuggestions(text, taskHits, taskCols);
     const cmd = commands.find((x) => x.cmd === c);
     // /model also matches real names ("/model sol" finds gpt-6.1-sol and codex.standard); the value stays the ID or tier key.
     const match = (a: string) => a.startsWith(arg) || (c === "/model" && !!arg && modelLabel(a).toLowerCase().includes(arg.toLowerCase()));
     const hint = (a: string) => (c === "/mode" ? MODES[a] : c === "/model" ? modelLabel(a) : c === "/skill" ? shortDesc(skills.find((s) => s.name === a)!) : "");
     return (cmd?.args ?? []).filter(match).slice(0, 12).map((a) => ({ value: `${c} ${a}`, label: a, hint: hint(a) }));
-  }, [text, commands]);
+  }, [text, commands, taskHits, taskCols]);
 
   const addFiles = async (files: FileList | File[]) => {
     setBusy(true);
@@ -165,6 +183,8 @@ export function Composer({ session, running }: { session: Session; running: bool
         case "/clear":
           await post(`/sessions/${session.id}/clear`);
           return true;
+        case "/task":
+          return await runTask(line);
         case "/skill": {
           const [name, ...more] = rest;
           if (!name || !skills.some((s) => s.name === name)) return actions.toast(name ? `No skill named ${name}` : "Usage: /skill <name> [message]", "error"), true;
@@ -178,6 +198,49 @@ export function Composer({ session, running }: { session: Session; running: bool
       return true;
     }
     return false;
+  };
+
+  /** /task …: the board's commands (see lib/taskCodes.ts parseTaskCommand). */
+  const runTask = async (line: string): Promise<boolean> => {
+    const c = parseTaskCommand(line);
+    const open = (code: string) => ({ label: "Open", run: () => actions.go("board", { task: code }) });
+    switch (c.kind) {
+      case "board":
+        actions.go("board");
+        break;
+      case "list":
+        actions.go("board", { q: c.query });
+        break;
+      case "error":
+        actions.toast(c.message, "error");
+        break;
+      case "new": {
+        const t = await post("/tasks/items", { title: c.title, labels: c.labels, priority: c.priority, column: c.column });
+        actions.toast(`Created ${t.code} in ${t.column}`, "info", open(t.code));
+        break;
+      }
+      case "open": {
+        const t = await post(`/tasks/items/${c.code}/attach`, { session_id: session.id });
+        actions.toast(`${t.code} is now in this conversation and linked to this session`, "info", open(t.code));
+        break;
+      }
+      case "move": {
+        const t = await patch(`/tasks/items/${c.code}`, { column: c.column });
+        actions.toast(`${t.code} moved to ${t.column}`, "info", open(t.code));
+        break;
+      }
+      case "done": {
+        const t = await post(`/tasks/items/${c.code}/done`);
+        actions.toast(`${t.code} moved to ${t.column}`, "info", open(t.code));
+        break;
+      }
+      case "link": {
+        const t = await post(`/tasks/items/${c.code}/sessions`, { session_id: session.id });
+        actions.toast(`This session is linked to ${t.code}`, "info", open(t.code));
+        break;
+      }
+    }
+    return true;
   };
 
   const sendMessage = async (t: string, sk: string | null) => {
@@ -281,7 +344,8 @@ export function Composer({ session, running }: { session: Session; running: bool
                 // `/model sol`: a partial name or label picks the highlighted model instead of setting "sol".
                 const modelArg = text.trim().match(/^\/model\s+(.+)$/)?.[1];
                 const pickModel = modelArg !== undefined && !modelChoices.includes(modelArg);
-                if (suggestions.length && suggestions[sel].value.trim() !== text.trim() && (pickModel || !text.includes(" ") || /^\/skill \S*$/.test(text))) choose(suggestions[sel].value);
+                const pickTask = /^\/task\s/.test(text) && taskPick(text, taskCols); // a half-typed task code or column
+                if (suggestions.length && suggestions[sel].value.trim() !== text.trim() && (pickModel || pickTask || !text.includes(" ") || /^\/skill \S*$/.test(text))) choose(suggestions[sel].value);
                 else send();
               }
             }}

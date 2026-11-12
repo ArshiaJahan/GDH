@@ -1,7 +1,7 @@
 import {
   Archive, ArchiveRestore, ArrowLeft, AudioLines, BarChart3, CalendarClock, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, Download, Ellipsis, FolderInput,
   Flag, FolderOpen, FolderPlus, FolderSearch, Hand, ListFilter, LoaderCircle, Mail, MailOpen, Monitor, Moon, Pencil, Pin, PinOff, Plus, Puzzle,
-  RotateCcw, Search, Settings, Sparkles, Sun, Trash2, TriangleAlert, X,
+  RotateCcw, Search, Settings, Sparkles, SquareKanban, Sun, Trash2, TriangleAlert, X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { get } from "../lib/api";
@@ -489,7 +489,8 @@ export function Sidebar() {
   const nav: { page: Page; label: string; icon: any }[] = [
     { page: "artifacts", label: "Artifacts", icon: FolderOpen },
     { page: "elevenlabs", label: "ElevenLabs", icon: AudioLines },
-    { page: "tasks", label: "Tasks", icon: CalendarClock },
+    { page: "board", label: "Tasks", icon: SquareKanban },
+    { page: "schedule", label: "Schedule", icon: CalendarClock },
     { page: "campaigns", label: "Campaigns", icon: Flag },
     { page: "skills", label: "Skills & MCP", icon: Puzzle },
     { page: "usage", label: "My usage", icon: BarChart3 },

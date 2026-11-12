@@ -1,7 +1,9 @@
 // "Markdown-lite" for text people type: fenced code blocks, `inline code`, **bold** and
 // *italic*, nothing else (no headings, lists or HTML), so a user's message keeps its own
-// line breaks and spacing. Also strips markdown from short previews (sidebar search snippets).
+// line breaks and spacing. Task codes (Task00001) become chips that open the task. Also strips
+// markdown from short previews (sidebar search snippets).
 import type { ReactNode } from "react";
+import { withTaskChips } from "../components/TaskChip";
 
 const FENCE = /```[^\n`]*\n?([\s\S]*?)(?:```|$)/g;
 const INLINE = /(`[^`\n]+`|\*\*[^*\n]+\*\*|__[^_\n]+__|(?<![\w*])\*[^*\s][^*\n]*\*(?![\w*]))/g;
@@ -13,14 +15,14 @@ function inline(text: string, key: string): ReactNode[] {
   for (const m of text.matchAll(INLINE)) {
     const tok = m[0];
     const at = m.index ?? 0;
-    if (at > last) out.push(text.slice(last, at));
+    if (at > last) out.push(...withTaskChips(text.slice(last, at), `${key}-p${i}`));
     const k = `${key}-${i++}`;
     if (tok.startsWith("`")) out.push(<code key={k} className="font-mono text-[0.88em] px-1 py-px rounded bg-[var(--code-bg)]">{tok.slice(1, -1)}</code>);
-    else if (tok.startsWith("**") || tok.startsWith("__")) out.push(<strong key={k} className="font-semibold">{tok.slice(2, -2)}</strong>);
-    else out.push(<em key={k}>{tok.slice(1, -1)}</em>);
+    else if (tok.startsWith("**") || tok.startsWith("__")) out.push(<strong key={k} className="font-semibold">{withTaskChips(tok.slice(2, -2), k)}</strong>);
+    else out.push(<em key={k}>{withTaskChips(tok.slice(1, -1), k)}</em>);
     last = at + tok.length;
   }
-  if (last < text.length) out.push(text.slice(last));
+  if (last < text.length) out.push(...withTaskChips(text.slice(last), `${key}-end`));
   return out;
 }
 

@@ -17,7 +17,8 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 
 const SHORTCUTS: [string, string][] = [["⌘N", "New session (joins the current session's group)"], ["⌘K", "Search artifacts, media, files and links"], ["⌘,", "Settings"],
   ["⌘J", "Show or hide the terminal"], ["⌘/", "This list"], ["Enter", "Send message"], ["⇧Enter", "New line"],
-  ["/", "Slash commands: /model /effort /mode /compact /clear /skill"],
+  ["/", "Slash commands: /model /effort /mode /compact /clear /skill /task"],
+  ["/task", "Task board: /task new <title> #label !high @column, /task Task00001, /task move <code> <column>, /task done <code>, /task list, /task link <code>"],
   ["⌘⇧[ / ⌘⇧]", "Previous / next session in the sidebar"], ["F2", "Rename the current session"],
   ["⌘⇧P", "Pin or unpin the current session"], ["⌘⌫", "Move the current session to Trash (Undo in the toast)"],
   ["⌘-click / ⇧-click", "Select several sessions for bulk actions; Esc clears"],
@@ -39,7 +40,8 @@ function Shortcuts({ onClose }: { onClose: () => void }) {
 const ArtifactsPage = lazy(() => import("./pages/Artifacts").then((m) => ({ default: m.ArtifactsPage })));
 const ElevenLabsPage = lazy(() => import("./pages/ElevenLabs").then((m) => ({ default: m.ElevenLabsPage })));
 const SkillsPage = lazy(() => import("./pages/Skills").then((m) => ({ default: m.SkillsPage })));
-const TasksPage = lazy(() => import("./pages/Tasks").then((m) => ({ default: m.TasksPage })));
+const BoardPage = lazy(() => import("./pages/Board").then((m) => ({ default: m.BoardPage })));
+const SchedulePage = lazy(() => import("./pages/Schedule").then((m) => ({ default: m.SchedulePage })));
 const CampaignsPage = lazy(() => import("./pages/Campaigns").then((m) => ({ default: m.CampaignsPage })));
 const UsagePage = lazy(() => import("./pages/Usage").then((m) => ({ default: m.UsagePage })));
 const SettingsPage = lazy(() => import("./pages/Settings").then((m) => ({ default: m.SettingsPage })));
@@ -149,7 +151,7 @@ export default function App() {
   if (!ready) return <div className="h-full flex items-center justify-center text-muted">Starting Workspace…</div>;
 
   const main = page === "chat" ? <Chat /> : page === "artifacts" ? <ArtifactsPage /> : page === "elevenlabs" ? <ElevenLabsPage />
-    : page === "tasks" ? <TasksPage /> : page === "campaigns" ? <CampaignsPage /> : page === "skills" ? <SkillsPage /> : page === "usage" ? <UsagePage /> : <SettingsPage />;
+    : page === "board" ? <BoardPage /> : page === "schedule" ? <SchedulePage /> : page === "campaigns" ? <CampaignsPage /> : page === "skills" ? <SkillsPage /> : page === "usage" ? <UsagePage /> : <SettingsPage />;
 
   return (
     <>

@@ -50,7 +50,7 @@ export type Limits = { global: LimitPause | null; sessions: Record<string, Limit
 /** A transient status line under the chat (e.g. "Rate limited, retrying in 8s"). */
 export type AgentStatus = { kind: string; text: string; retry_in_s?: number; until?: number; attempt?: number; max_attempts?: number };
 
-export type Page = "chat" | "artifacts" | "elevenlabs" | "tasks" | "campaigns" | "skills" | "usage" | "settings";
+export type Page = "chat" | "artifacts" | "elevenlabs" | "board" | "schedule" | "campaigns" | "skills" | "usage" | "settings";
 export type Theme = "system" | "light" | "dark";
 
 type State = {

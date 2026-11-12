@@ -9,7 +9,9 @@ import { ModalFooter } from "../components/ui";
 
 type Task = { id: string; name: string; prompt: string; schedule: string; model: string; effort: string; folder: string | null; mode: string; enabled: boolean; next_run: number | null; runs: any[] };
 
-export function TasksPage() {
+/** Schedule: scheduled and recurring prompts (backend features/tasks_feature.py, REST /api/tasks).
+ *  Not the task board, which is the Tasks page (pages/Board.tsx). */
+export function SchedulePage() {
   useModelCatalog();
   const [data, setData] = useState<{ tasks: Task[]; running: any[] } | null>(null);
   const [editing, setEditing] = useState<Partial<Task> | null>(null);
@@ -28,12 +30,12 @@ export function TasksPage() {
     <div className="h-full overflow-y-auto scroll-thin">
       <div className="max-w-[1000px] mx-auto px-6 py-5">
         <div className="flex items-center mb-1">
-          <h1 className="text-lg font-semibold">Tasks</h1>
-          <button className="btn btn-primary ml-auto" onClick={() => setEditing({ schedule: PRESETS[0][1], effort: "low", mode: "ask", enabled: true, model: "claude.standard" })}><Plus size={14} /> New task</button>
+          <h1 className="text-lg font-semibold">Schedule</h1>
+          <button className="btn btn-primary ml-auto" onClick={() => setEditing({ schedule: PRESETS[0][1], effort: "low", mode: "ask", enabled: true, model: "claude.standard" })}><Plus size={14} /> New schedule</button>
         </div>
         <p className="text-[13px] text-muted mb-4">Each run starts a new session with the task's model, effort, folder and mode. Schedules only fire while Workspace is running; a run missed while it was closed is skipped.</p>
 
-        {data?.tasks.length === 0 && <Empty>No scheduled tasks yet.</Empty>}
+        {data?.tasks.length === 0 && <Empty>No scheduled prompts yet.</Empty>}
         <div className="space-y-2">
           {data?.tasks.map((t) => (
             <div key={t.id} className={`rounded-md border border-line surface px-3 py-2.5 ${t.enabled ? "" : "opacity-70"}`}>
@@ -99,7 +101,7 @@ function TaskEditor({ t, onClose, onSaved }: { t: Partial<Task>; onClose: () => 
   };
   const L = "block mb-3";
   return (
-    <Modal title={t.id ? "Edit task" : "New task"} onClose={onClose}>
+    <Modal title={t.id ? "Edit schedule" : "New schedule"} onClose={onClose}>
       <label className={L}><span className="label">Name</span><input className="input" value={f.name ?? ""} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Morning inbox digest" /></label>
       <label className={L}><span className="label">Prompt</span><textarea className="input h-28" value={f.prompt ?? ""} onChange={(e) => setF({ ...f, prompt: e.target.value })} /></label>
       <div className={L}>
@@ -143,7 +145,7 @@ function TaskEditor({ t, onClose, onSaved }: { t: Partial<Task>; onClose: () => 
           <button className="btn" onClick={async () => { const p = await pickFolder(f.folder ?? undefined); if (p !== null) setF({ ...f, folder: p || null }); }}>Choose…</button></div>
       </div>
       <p className="text-[12px] text-faint mb-3">In "Ask before edits" mode a scheduled run waits for you at each edit or command. Effort above high isn't available for scheduled runs.</p>
-      <ModalFooter><button className="btn" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={!f.name || !f.prompt || !f.schedule} onClick={save}>{t.id ? "Save" : "Create task"}</button></ModalFooter>
+      <ModalFooter><button className="btn" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={!f.name || !f.prompt || !f.schedule} onClick={save}>{t.id ? "Save" : "Create schedule"}</button></ModalFooter>
     </Modal>
   );
 }

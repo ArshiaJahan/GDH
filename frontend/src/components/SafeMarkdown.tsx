@@ -8,6 +8,7 @@ import { createContext, memo, useContext, useEffect, useMemo, useState } from "r
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api } from "../lib/api";
+import { remarkTaskCodes, TaskChip } from "./TaskChip";
 
 /** Images that may load without asking: data:/blob: URLs, the app's own origin and this Mac's backend
  *  on 127.0.0.1 (which needs the session token). Decided on the URL the browser would actually load
@@ -79,7 +80,11 @@ function RemoteImage({ src, alt }: { src: string; alt?: string }) {
 }
 
 const components: Components = {
-  a: ({ node: _node, ...p }) => <a {...p} target="_blank" rel="noreferrer" />,
+  a: ({ node: _node, ...p }) => {
+    // Task codes (see remarkTaskCodes) are chips that open the task.
+    if (typeof p.href === "string" && p.href.startsWith("#task:")) return <TaskChip code={p.href.slice(6)} label={String(p.children ?? "")} />;
+    return <a {...p} target="_blank" rel="noreferrer" />;
+  },
   img: ({ node: _node, src, alt, ...p }) => {
     const s = typeof src === "string" ? src : undefined;
     return isLocalImage(s) ? <img src={s} alt={alt ?? ""} {...p} /> : <RemoteImage src={s!} alt={alt} />;
@@ -92,7 +97,7 @@ export const SafeMarkdown = memo(function SafeMarkdown({ text }: { text: string 
   const value = useMemo(() => ({ allowed, allow: () => setAllowed(true) }), [allowed]);
   return (
     <RemoteImages.Provider value={value}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{text}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkTaskCodes]} components={components}>{text}</ReactMarkdown>
     </RemoteImages.Provider>
   );
 });
