@@ -114,6 +114,7 @@ game-feel-pass = ["unity"]
 build-ship = ["unity"]
 vcs-hygiene = ["unity"]
 unity-mcp-orchestrator = ["unity"]
+trailer-maker = ["unity"]
 
 [hooks]
 # Checks the app runs at fixed points of a turn (before/after tools, before the agent finishes,

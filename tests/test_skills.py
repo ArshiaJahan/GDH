@@ -41,7 +41,7 @@ BUILTINS = {
 # The Unity game-creation pack (skills/unity-router lists them) plus the MCP for Unity skill it depends on.
 UNITY_PACK = {"unity-router", "compile-fix-loop", "play-verify", "headless-ops", "scene-prefab-safety",
               "gdd-to-backlog", "project-memory", "architecture-patterns", "asset-pipeline", "perf-pass",
-              "game-feel-pass", "build-ship", "vcs-hygiene", "unity-mcp-orchestrator"}
+              "game-feel-pass", "build-ship", "vcs-hygiene", "unity-mcp-orchestrator", "trailer-maker"}
 
 # Review and learning skills do not require the Unity MCP server.
 REVIEW_PACK = {"design-critique", "postmortem"}

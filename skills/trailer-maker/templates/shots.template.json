@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "fps": 60,
+  "resolution": {"w": 1920, "h": 1080},
+  "source": "game_view",
+  "codec": "mp4",
+  "output_dir": "Trailer/steam-gameplay-20261112/capture",
+  "audio": {"capture": true, "mute_mixer_params": ["MusicVol"]},
+  "shots": [
+    {
+      "id": "s01",
+      "beat": "thumbstopper",
+      "scene": "Assets/Scenes/Game.unity",
+      "setup": "Game.TrailerSetups.LateGameArena",
+      "setup_arg": "seed=42;wave=12",
+      "input": "hold right 1; tap Space; wait 0.4; tap J",
+      "warmup_s": 1.5,
+      "duration_s": 6.0,
+      "time_scale": 1.0,
+      "takes": 3,
+      "hide": {"objects": ["DebugOverlay", "FPSCounter"], "cursor": true},
+      "camera": {"cinemachine": "", "ortho_size": 0},
+      "notes": "dash through the bullet curtain = the hook"
+    },
+    {
+      "id": "s02",
+      "beat": "thumbstopper",
+      "scene": "Assets/Scenes/Game.unity",
+      "setup": "Game.TrailerSetups.BossIntro",
+      "setup_arg": "boss=Warden;hp=0.3",
+      "input": "",
+      "warmup_s": 1.0,
+      "duration_s": 4.0,
+      "time_scale": 1.0,
+      "takes": 2,
+      "hide": {"objects": ["DebugOverlay"], "cursor": true},
+      "camera": {"cinemachine": "", "ortho_size": 0},
+      "notes": "boss slam lands on a downbeat"
+    }
+  ]
+}

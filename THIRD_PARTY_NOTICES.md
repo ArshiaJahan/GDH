@@ -2,6 +2,12 @@
 
 GameDevWorkstation adapts formats/ideas from [SethGammon/Citadel](https://github.com/SethGammon/Citadel), licensed under the MIT License: campaign file sections, exit-evidence table, discovery records, scope claims, lifecycle hook ideas, and postmortem format.
 
+## FFmpeg (not bundled)
+
+The `trailer-maker` skill's scripts run [FFmpeg](https://ffmpeg.org) (`ffmpeg`, `ffprobe`) as an external program
+found on your PATH (for example Homebrew's `ffmpeg`, a GPL-3.0-or-later build). GameDevWorkstation does not include, link
+against or redistribute FFmpeg; you install it yourself (`brew install ffmpeg`) under its own license.
+
 ## Citadel — MIT License
 
 Copyright (c) 2026 Seth Gammon

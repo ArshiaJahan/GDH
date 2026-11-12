@@ -1,0 +1,76 @@
+# Workflow template (features/chains.py). Loaded from every installed skill's chains/ folder.
+# The trailer-maker skill's procedure, one phase per step; Trailer/<slug>/ lives at the Unity project root.
+# command_passes keys on the script name, so every trailer_edl.py subcommand shares its evidence; newer-than-phase
+# file conditions keep each phase honest. The Exports gate needs the qc subcommand specifically, so it observes
+# trailer_qc.py (a thin `trailer_edl.py qc` entry point) instead of trailer_edl.
+id = "trailer"
+title = "Trailer"
+summary = "Brief → beat sheet → shot list → capture → rough cut → music/VO → trailer review → platform exports"
+kinds = ["chain", "campaign"]
+applies_to = "unity"
+
+[[phase]]
+name = "Brief"
+type = "plan"
+skills = ["trailer-maker", "game-designer"]
+instructions = "Fill Trailer/<slug>/brief.md from templates/brief.template.md with the user: type, core message, pillars, fantasy, platforms, length, CTA, don'ts, audio middleware, pass score (default 7)."
+done_when = [{ type = "file_exists", path = "Trailer/*/brief.md", newer_than = "phase_start" },
+             { type = "manual", question = "Is the trailer brief (type, core message, length, platforms, CTA) right?" }]
+
+[[phase]]
+name = "Beat sheet"
+type = "plan"
+skills = ["trailer-maker"]
+instructions = "Write Trailer/<slug>/beats.json from the type's template (hook by 10 s, end slate last); run trailer_edl.py check --beats."
+done_when = [{ type = "file_exists", path = "Trailer/*/beats.json", newer_than = "phase_start" },
+             { type = "command_passes", observe = "trailer_edl" }]   # trailer_edl.py check --beats
+
+[[phase]]
+name = "Shot list"
+type = "plan"
+skills = ["trailer-maker"]
+instructions = "Write Trailer/<slug>/shots.json (2-4 candidate shots per beat, setups the game provides); run trailer_edl.py check --beats --shots."
+done_when = [{ type = "file_exists", path = "Trailer/*/shots.json", newer_than = "phase_start" },
+             { type = "command_passes", observe = "trailer_edl" }]   # check --shots
+
+[[phase]]
+name = "Capture"
+type = "build"
+skills = ["trailer-maker", "compile-fix-loop", "unity-mcp-orchestrator"]
+instructions = "Install Recorder + Harness.Trailer, add game-side trailer setups, run TrailerCapture.Start, poll Status, review takes with contact sheets; check --capture."
+done_when = [{ type = "gate", level = "L1" },
+             { type = "file_exists", path = "Trailer/*/capture/report.json", newer_than = "phase_start" },
+             { type = "command_passes", observe = "trailer_edl" }]   # check --capture
+
+[[phase]]
+name = "Rough cut"
+type = "build"
+skills = ["trailer-maker"]
+instructions = "Render cards with TrailerCards, write edl.json, check it, render --proxy to iterate, then render."
+done_when = [{ type = "file_exists", path = "Trailer/*/build/master.mov", newer_than = "phase_start" },
+             { type = "command_passes", observe = "trailer_edl" }]   # render --proxy, then render
+
+[[phase]]
+name = "Music, VO and SFX"
+type = "build"
+skills = ["trailer-maker"]
+instructions = "Estimate credits; generate music with a composition plan matching beats.json sections, VO via tts, SFX; beat_grid.py; re-snap cuts; captions; render again."
+done_when = [{ type = "command_passes", observe = "beat_grid" },
+             { type = "file_exists", path = "Trailer/*/build/master.wav", newer_than = "phase_start" }]
+
+[[phase]]
+name = "Trailer review"
+type = "verify"
+skills = ["trailer-maker"]
+instructions = "Contact sheets + qc, three reviewer subagents (references/reviewers.md), trailer_review.py --pass-score from the brief; 2 rounds max, then the user decides."
+done_when = [{ type = "command_passes", observe = "trailer_review" }]
+
+[[phase]]
+name = "Exports"
+type = "verify"
+skills = ["trailer-maker"]
+instructions = "export --all, poster, then the final QC with trailer_qc.py on exports/ (RESULT: OK), REPORT.md with sources, credits and AI-generated content."
+done_when = [{ type = "command_passes", observe = "trailer_qc" },      # trailer_qc.py T/exports: the qc RESULT only
+             { type = "file_exists", path = "Trailer/*/exports/*.mp4", newer_than = "phase_start" },
+             { type = "file_exists", path = "Trailer/*/review/qc.json", newer_than = "phase_start" },
+             { type = "manual", question = "Watched the final cut with sound and muted - approve for upload?" }]

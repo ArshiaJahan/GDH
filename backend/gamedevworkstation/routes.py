@@ -25,6 +25,8 @@ def _feature_modules() -> list:
         # that doesn't exist yet is skipped below.
         "hooks", "ladder", "campaigns", "fleet",
         "unity_tool",  # the agent's `unity` tool and /api/unity (Unity backend: MCP or the Unity CLI)
+        # Media files a command announced (TRAILER_OUTPUT: / ARTIFACT: lines) indexed as items.
+        "media_out",
     )]
     mods = []
     for n in names:

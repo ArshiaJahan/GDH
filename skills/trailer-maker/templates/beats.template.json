@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "type": "gameplay",
+  "target_s": 60,
+  "bpm": null,
+  "core_message": "One sentence: what the player does and why it is exciting.",
+  "cta": "Wishlist on Steam",
+  "beats": [
+    {"id": "thumbstopper", "start": 0, "end": 5, "hook": true,
+     "intent": "late-game chaos that already shows the hook, gameplay in motion from frame 1",
+     "shots": ["s01", "s02"], "card": null, "vo": null, "music": "cold open, already at full energy"},
+    {"id": "title-flash", "start": 5, "end": 7,
+     "intent": "logo on a music hit, then straight back to gameplay",
+     "shots": [], "card": "GAME TITLE", "vo": null, "music": "hit + short breath"},
+    {"id": "genre-hook", "start": 7, "end": 20, "hook": true,
+     "intent": "genre in 1-2 shots, then the core verbs and the hook again, clearly framed",
+     "shots": ["s03", "s04", "s05"], "card": null, "vo": null, "music": "groove settles, steady pulse"},
+    {"id": "escalation", "start": 20, "end": 45,
+     "intent": "layers and complications in waves; rule of threes; each wave bigger than the last",
+     "shots": ["s06", "s07", "s08", "s09"], "card": "Every run rewrites the map", "vo": null,
+     "music": "build in two waves"},
+    {"id": "climax", "start": 45, "end": 55,
+     "intent": "breadth montage: bosses, biomes, builds; fastest cutting, cuts on downbeats",
+     "shots": ["s10", "s11", "s12"], "card": null, "vo": null, "music": "peak, densest section"},
+    {"id": "end-slate", "start": 55, "end": 60, "end_slate": true,
+     "intent": "logo + platforms + CTA (+ date if known)",
+     "shots": [], "card": "Wishlist now", "vo": null, "music": "button ending on the last downbeat"}
+  ]
+}

@@ -1,0 +1,278 @@
+{
+ "id": "t1",
+ "fps": 30,
+ "total_frames": 157,
+ "total_s": 5.233333333333333,
+ "timeline": [
+  {
+   "id": "c01",
+   "start": 0,
+   "end": 60,
+   "frames": 60,
+   "transition": "cut",
+   "transition_frames": 0
+  },
+  {
+   "id": "c02",
+   "start": 45,
+   "end": 120,
+   "frames": 75,
+   "transition": "fade",
+   "transition_frames": 15
+  },
+  {
+   "id": "c03",
+   "start": 112,
+   "end": 157,
+   "frames": 45,
+   "transition": "fadeblack",
+   "transition_frames": 8
+  }
+ ],
+ "steps": [
+  {
+   "name": "clip c01",
+   "argv": [
+    "ffmpeg",
+    "-hide_banner",
+    "-y",
+    "-i",
+    "capture/s01.mp4",
+    "-filter_complex",
+    "[0:v]trim=start=0.5:end=2.5,setpts=PTS-STARTPTS,fps=30,scale=320:180:force_original_aspect_ratio=decrease:flags=lanczos,pad=320:180:(ow-iw)/2:(oh-ih)/2:color=black,tpad=stop_mode=clone:stop_duration=0.066667,setsar=1,trim=end_frame=60,setpts=PTS-STARTPTS,format=yuv422p10le[v];[0:a]atrim=start=0.5:end=2.5,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo,apad,atrim=end_sample=96000[a]",
+    "-map",
+    "[v]",
+    "-map",
+    "[a]",
+    "-c:v",
+    "prores_ks",
+    "-profile:v",
+    "3",
+    "-pix_fmt",
+    "yuv422p10le",
+    "-c:a",
+    "pcm_s16le",
+    "-ar",
+    "48000",
+    "-ac",
+    "2",
+    "build/clips/c01.mov"
+   ],
+   "outputs": [
+    "build/clips/c01.mov"
+   ],
+   "key": "028ed45c750d2595"
+  },
+  {
+   "name": "clip c02",
+   "argv": [
+    "ffmpeg",
+    "-hide_banner",
+    "-y",
+    "-i",
+    "capture/s02.mp4",
+    "-filter_complex",
+    "[0:v]trim=start=1:end=2,setpts=(PTS-STARTPTS)/0.5,fps=30,scale=320:180:force_original_aspect_ratio=decrease:flags=lanczos,pad=320:180:(ow-iw)/2:(oh-ih)/2:color=black,tpad=stop_mode=clone:stop_duration=0.566667,setsar=1,trim=end_frame=75,setpts=PTS-STARTPTS,format=yuv422p10le[v];[0:a]atrim=start=1:end=2,asetpts=PTS-STARTPTS,atempo=0.5,aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo,apad,atrim=end_sample=120000[a]",
+    "-map",
+    "[v]",
+    "-map",
+    "[a]",
+    "-c:v",
+    "prores_ks",
+    "-profile:v",
+    "3",
+    "-pix_fmt",
+    "yuv422p10le",
+    "-c:a",
+    "pcm_s16le",
+    "-ar",
+    "48000",
+    "-ac",
+    "2",
+    "build/clips/c02.mov"
+   ],
+   "outputs": [
+    "build/clips/c02.mov"
+   ],
+   "key": "55b41a20920e8d98"
+  },
+  {
+   "name": "clip c03",
+   "argv": [
+    "ffmpeg",
+    "-hide_banner",
+    "-y",
+    "-f",
+    "lavfi",
+    "-i",
+    "color=c=0x000000:s=320x180:r=30",
+    "-loop",
+    "1",
+    "-framerate",
+    "30",
+    "-i",
+    "cards/end.png",
+    "-filter_complex",
+    "[1:v]scale=320:180:force_original_aspect_ratio=decrease:flags=lanczos,format=rgba[c];[0:v][c]overlay=(W-w)/2:(H-h)/2,setsar=1,trim=end_frame=45,setpts=PTS-STARTPTS,format=yuv422p10le[v];anullsrc=r=48000:cl=stereo,atrim=end_sample=72000[a]",
+    "-map",
+    "[v]",
+    "-map",
+    "[a]",
+    "-c:v",
+    "prores_ks",
+    "-profile:v",
+    "3",
+    "-pix_fmt",
+    "yuv422p10le",
+    "-c:a",
+    "pcm_s16le",
+    "-ar",
+    "48000",
+    "-ac",
+    "2",
+    "build/clips/c03.mov"
+   ],
+   "outputs": [
+    "build/clips/c03.mov"
+   ],
+   "key": "4977d00f3c1ce4e6"
+  },
+  {
+   "name": "join",
+   "argv": [
+    "ffmpeg",
+    "-hide_banner",
+    "-y",
+    "-i",
+    "build/clips/c01.mov",
+    "-i",
+    "build/clips/c02.mov",
+    "-i",
+    "build/clips/c03.mov",
+    "-loop",
+    "1",
+    "-framerate",
+    "30",
+    "-t",
+    "5.233333",
+    "-i",
+    "cards/bug.png",
+    "-filter_complex",
+    "[0:v]settb=1/30,setpts=N/(30*TB)[v0];[1:v]settb=1/30,setpts=N/(30*TB)[v1];[2:v]settb=1/30,setpts=N/(30*TB)[v2];[v0][v1]xfade=transition=fade:duration=0.5:offset=1.5[j1];[0:a][1:a]acrossfade=ns=24000:c1=tri:c2=tri[ja1];[j1][v2]xfade=transition=fadeblack:duration=0.266667:offset=3.733333[j2];[ja1][2:a]acrossfade=ns=12800:c1=tri:c2=tri[ja2];[3:v]format=rgba,fade=t=in:st=0:d=0.2:alpha=1,fade=t=out:st=1.8:d=0.2:alpha=1[o0];[j2][o0]overlay=x=W-w-8:y=8:eof_action=pass:enable='between(t,0,2)'[ov0];[ov0]trim=end_frame=157,format=yuv422p10le[vout];[ja2]atrim=end_sample=251200[aout]",
+    "-map",
+    "[vout]",
+    "-map",
+    "[aout]",
+    "-c:v",
+    "prores_ks",
+    "-profile:v",
+    "3",
+    "-pix_fmt",
+    "yuv422p10le",
+    "-c:a",
+    "pcm_s16le",
+    "-ar",
+    "48000",
+    "-ac",
+    "2",
+    "build/picture.mov"
+   ],
+   "outputs": [
+    "build/picture.mov"
+   ]
+  },
+  {
+   "name": "mix",
+   "argv": [
+    "ffmpeg",
+    "-hide_banner",
+    "-y",
+    "-i",
+    "build/picture.mov",
+    "-i",
+    "audio/music.wav",
+    "-i",
+    "audio/vo.wav",
+    "-filter_complex",
+    "anullsrc=r=48000:cl=stereo,atrim=end_sample=251200[bed];[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=-6dB,apad=whole_len=251200,atrim=end_sample=251200[game];[1:a]atrim=start=0:duration=5.233333,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,afade=t=out:st=4.233333:d=1,volume=0dB,apad=whole_len=251200,atrim=end_sample=251200[music];[2:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0dB,adelay=delays=1000:all=1,apad=whole_len=251200,atrim=end_sample=251200[vo0];[vo0]anull[vo];[vo]asplit=2[vomix][vosc];[music][vosc]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=300[musicd];[bed][game][vomix][musicd]amix=inputs=4:normalize=0:duration=first,alimiter=limit=0.891:level=0:latency=1,atrim=end_sample=251200[mix]",
+    "-map",
+    "[mix]",
+    "-c:a",
+    "pcm_f32le",
+    "-ar",
+    "48000",
+    "-ac",
+    "2",
+    "build/premix.wav"
+   ],
+   "outputs": [
+    "build/premix.wav"
+   ]
+  },
+  {
+   "name": "loudness measure",
+   "argv": [
+    "ffmpeg",
+    "-hide_banner",
+    "-nostats",
+    "-i",
+    "build/premix.wav",
+    "-af",
+    "loudnorm=I=-14:TP=-1:LRA=11:print_format=json",
+    "-f",
+    "null",
+    "-"
+   ],
+   "outputs": []
+  },
+  {
+   "name": "loudness apply",
+   "argv": [
+    "ffmpeg",
+    "-hide_banner",
+    "-y",
+    "-i",
+    "build/premix.wav",
+    "-af",
+    "loudnorm=I=-14:TP=-1:LRA=11:measured_I={input_i}:measured_TP={input_tp}:measured_LRA={input_lra}:measured_thresh={input_thresh}:offset={target_offset}:linear=true:print_format=summary,aresample=48000,atrim=end_sample=251200",
+    "-c:a",
+    "pcm_s24le",
+    "-ar",
+    "48000",
+    "-ac",
+    "2",
+    "build/master.wav"
+   ],
+   "outputs": [
+    "build/master.wav"
+   ]
+  },
+  {
+   "name": "master mux",
+   "argv": [
+    "ffmpeg",
+    "-hide_banner",
+    "-y",
+    "-i",
+    "build/picture.mov",
+    "-i",
+    "build/master.wav",
+    "-map",
+    "0:v",
+    "-map",
+    "1:a",
+    "-c:v",
+    "copy",
+    "-c:a",
+    "pcm_s24le",
+    "build/master.mov"
+   ],
+   "outputs": [
+    "build/master.mov"
+   ]
+  }
+ ],
+ "notes": [
+  "source(s) s01, s02 could not be probed (no ffprobe/ffmpeg result): their game audio is assumed to exist; a source without audio will fail the clip step"
+ ]
+}

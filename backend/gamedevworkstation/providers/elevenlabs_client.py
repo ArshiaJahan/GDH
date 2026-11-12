@@ -54,6 +54,26 @@ def _err(e: Exception) -> ElevenLabsError:
     return ElevenLabsError(f"ElevenLabs error {status}: {detail or e}"[:500], status)
 
 
+def music_seed(seed: Any) -> int | None:
+    """A music seed as an int (None stays None); anything that isn't a whole number >= 0 raises ElevenLabsError."""
+    if seed is None or seed == "":
+        return None
+    if isinstance(seed, bool):
+        raise ElevenLabsError(f"seed must be a whole number >= 0, not {seed!r}.", 422)
+    try:
+        if isinstance(seed, float):
+            if not seed.is_integer():
+                raise ValueError
+            v = int(seed)
+        else:
+            v = int(str(seed).strip()) if isinstance(seed, str) else int(seed)
+    except (TypeError, ValueError, OverflowError):
+        raise ElevenLabsError(f"seed must be a whole number >= 0, not {seed!r}.", 422) from None
+    if v < 0:
+        raise ElevenLabsError(f"seed must be a whole number >= 0, not {seed!r}.", 422)
+    return v
+
+
 class ElevenLabsClient:
     def __init__(self, profile: str = "default", sdk: Any = None):
         self.profile = profile
@@ -159,9 +179,19 @@ class ElevenLabsClient:
         return await self._audio(self.sdk.text_to_sound_effects.with_raw_response.convert, **kw)
 
     async def music(self, prompt: str, length_ms: int, instrumental: bool = False,
-                    output_format: str = "mp3_44100_128") -> tuple[bytes, dict]:
-        kw = {"prompt": prompt, "music_length_ms": max(3000, min(600_000, int(length_ms))), "model_id": MUSIC_MODEL,
-              "force_instrumental": instrumental, "output_format": output_format}
+                    output_format: str = "mp3_44100_128", composition_plan: dict | None = None,
+                    seed: int | None = None) -> tuple[bytes, dict]:
+        """A prompt and a length, or a composition plan ({"chunks": [{text, duration_ms, positive_styles,
+        negative_styles}]}) whose section durations music_v2/v2_5 always keep (trailer beat sheets)."""
+        kw: dict[str, Any]
+        if composition_plan:
+            kw = {"composition_plan": composition_plan, "model_id": MUSIC_MODEL, "output_format": output_format}
+            s = music_seed(seed)  # ElevenLabsError (not ValueError) on a bad seed
+            if s is not None:
+                kw["seed"] = s
+        else:
+            kw = {"prompt": prompt, "music_length_ms": max(3000, min(600_000, int(length_ms))), "model_id": MUSIC_MODEL,
+                  "force_instrumental": instrumental, "output_format": output_format}
         return await self._audio(self.sdk.music.with_raw_response.compose, **kw)
 
     async def voice_changer(self, audio_path: Path, voice_id: str, output_format: str = "mp3_44100_128",

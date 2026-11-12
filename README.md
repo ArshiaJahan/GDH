@@ -40,17 +40,18 @@ Everything runs locally; the backend listens on `127.0.0.1` only.
 | | |
 |---|---|
 | **Orchestrator + subagents** | Claude plans the job and delegates units to Claude and OpenAI subagents (API or Codex CLI), choosing model tier and effort per unit, with parallel git worktrees for code. |
-| **Unity skill pack** | 16 Unity 6 skills behind a router: compile/fix loops, Play Mode verification, headless builds, safe scene/prefab edits, perf and game-feel passes, shipping. |
+| **Unity skill pack** | 17 Unity 6 skills behind a router: compile/fix loops, Play Mode verification, headless builds, safe scene/prefab edits, perf and game-feel passes, trailers, shipping. |
 | **Unity: MCP or CLI** | Drive Unity through MCP for Unity or the official Unity CLI (live Editor via `com.unity.pipeline`, or batch when it's closed), switchable per project and session, with a status chip and one `unity` tool for the agent. |
 | **Hooks and gates** | A hooks engine runs checks at fixed points of a turn: compile before finishing, tests in verify phases, blocked edits to generated files. |
 | **Quality ladder L1-L4** | Stories reach `done` only with fresh, app-observed evidence: compile, tests, play evidence and screenshots, design critique. |
 | **Taste and scars** | `TASTE.md`, `POSTMORTEMS.md` and an anti-pattern ratchet keep design judgement and past failures in the loop. |
-| **Campaigns and workflows** | Multi-session goals with a plan you approve, phases whose checks the app evaluates itself, a campaign file in the project (decisions, discoveries, handoffs), checkpoints, autopilot with budget and stall breakers; or a one-session workflow with `/workflow`. 8 Unity templates ship. |
+| **Campaigns and workflows** | Multi-session goals with a plan you approve, phases whose checks the app evaluates itself, a campaign file in the project (decisions, discoveries, handoffs), checkpoints, autopilot with budget and stall breakers; or a one-session workflow with `/workflow`. 9 Unity templates ship, including a trailer workflow. |
 | **Fleet** | Parallel waves of subagents in their own worktrees, each with a claimed scope, scope-checked merges, a conflict circuit breaker and discoveries relayed to the next wave. |
 | **Progressive skill disclosure** | A compact skill index in the system prompt; full skill text is loaded only when used and survives compaction. |
 | **Task board** | A Kanban board (Tasks tab) you and the agent share: tasks with codes like `Task00001`, subtasks and checklists, comments, history and linked sessions, live updates. In chat: `/task new`, `/task <code>`, `/task move`, `/task done`, `/task list`, `/task link`; the agent uses `task_*` tools. Scheduled prompts live on the Schedule page. |
 | **Cost control** | Daily and per-session spend limits, job budgets, approval for high effort, and a My usage page per model. |
-| **ElevenLabs** | Speech, transcription, sound effects and music, in chat and on their own page. |
+| **Trailer maker** | Brief → beat sheet → scripted Play Mode capture (Unity Recorder) → ffmpeg edit from a JSON edit list → ElevenLabs music cut to the beat sheet → three reviewers → Steam, YouTube and vertical exports. |
+| **ElevenLabs** | Speech, transcription, sound effects and music (including composition plans with exact section lengths), in chat and on their own page. |
 | **Native shell, local updates** | Tauri v2 app with a frozen FastAPI backend, keys in the macOS Keychain and in-app updates from a local folder. |
 
 ## Built for Unity
@@ -78,6 +79,7 @@ and whether to work through the Editor (MCP) or batchmode.
 | [`unity-mcp-orchestrator`](skills/unity-mcp-orchestrator) | MCP for Unity tool reference and workflows |
 | [`design-critique`](skills/design-critique) | L4 review by three independent reviewers against `TASTE.md` |
 | [`postmortem`](skills/postmortem) | Writes `POSTMORTEMS.md` entries and proposes how to enforce the lesson |
+| [`trailer-maker`](skills/trailer-maker/SKILL.md) | Brief → capture (Unity Recorder) → ffmpeg edit → ElevenLabs music/VO → platform exports |
 
 General skills ship too: `delegation` (on by default), `game-designer`, `graphify`, `grill-me`,
 `claude-handoff` and two Claude delegation strategies.
@@ -147,6 +149,23 @@ missing event unsubscribes and more, with a weighted score. A baseline in
 - **`design-critique`**: Spec Auditor, Player Advocate and Art Director review fresh screenshots; the minimum score counts, two rounds at most, then you decide.
 - **`POSTMORTEMS.md`**: each rule has an `Applies to:` glob, and the rule is shown to the agent the first time it touches a matching file in a session.
 
+### Trailers
+
+[`trailer-maker`](skills/trailer-maker/SKILL.md) makes a trailer from the real game, never from generated
+footage. You settle a brief (type, one-sentence core message, length, platforms, CTA); the agent writes a beat sheet
+with the hook inside 10 seconds and a shot list, and `Harness.Trailer` records each shot in Play Mode with the Unity
+Recorder (several takes, scripted setups and input). A JSON edit list is rendered by stdlib Python scripts driving
+`ffmpeg`: cuts and dissolves, cards and overlays, music cut to the beat sheet with an ElevenLabs composition plan, VO
+with ducking, −14 LUFS loudness, captions. Contact sheets go to three reviewer subagents (Muted Scroller, Trailer
+Editor, Platform & Accessibility Auditor); the minimum score must reach the pass score (7 by default), with two rounds
+at most before you decide. Exports: a Steam master at 1080p with a poster frame, YouTube, and a 9:16 cut for Shorts
+and TikTok (X on request), each checked by `qc`. Rendered videos appear as items and play inline. The skill also
+ships a `trailer` workflow template (brief → beat sheet → shot list → capture → rough cut → music → review →
+exports) for chains and campaigns.
+
+Needs `ffmpeg` on your PATH (`brew install ffmpeg`; not bundled) and the `com.unity.recorder` package; capture
+needs the Editor open, because the Recorder doesn't run in batchmode.
+
 ## Campaigns and workflows
 
 A **workflow** (chain) runs a fixed sequence of phases in one session: type
@@ -168,6 +187,7 @@ your own Pass/Fail); a failure costs a retry, and the last one parks the run for
 | `release` Release | Freeze → full tests → build → headless smoke → spec-audit critique → changelog and tag |
 | `replace-system` Replace a system | Build beside → parity verify → switch → remove the old system |
 | `milestone` Milestone (campaign only) | One phase per story of the current milestone, then the milestone exit |
+| `trailer` Trailer (from `trailer-maker`) | Brief → beat sheet → shot list → capture → rough cut → music, VO and SFX → trailer review → exports |
 
 The **Campaigns** page lists every run with its status, phase, spend and checks, and has Pause,
 Resume, Park, Abandon, Rollover and the checkpoint refs (the app never resets your tree; it shows

@@ -39,6 +39,7 @@ transcription, sound and music. Everything runs locally; the backend listens on 
 | Node 20+ | builds the UI | `brew install node` |
 | uv | Python 3.11+ backend | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
 | Codex CLI (optional) | `codex.cli` subagents and the Codex CLI harness | `npm i -g @openai/codex` |
+| ffmpeg (optional) | the `trailer-maker` skill's edit, exports and checks (run as an external program, never bundled) | `brew install ffmpeg` |
 
 `make app` checks all of these first and prints exactly what is missing.
 
@@ -259,6 +260,13 @@ agent) or to **Send to chat** (the session's composer) instead.
 
 Sections your plan can't use are hidden. Voice design and cloning link to ElevenLabs' own
 consent and verification flow.
+
+The agent's `music` tool takes either a prompt with a length or a **composition plan**: sections
+(`{"chunks": [{"text": "[Build] rising synths", "duration_ms": 25000, "positive_styles": [...],
+"negative_styles": [...]}]}`, 3–120 s each, 10 minutes in total) whose lengths `music_v2_5` keeps exactly, plus an
+optional `seed`. The trailer maker uses it to cut music to a beat sheet. The confirm card estimates music at about
+1,500 credits per minute of summed section length. Rough budget for a 60 s trailer: about 1 minute of music (plus
+an alternate or two), a few VO lines, and around 10 sound effects at about 40 credits per second.
 
 **Tasks.** The Kanban task board you and the agent share; see [Task board](#task-board).
 
@@ -732,6 +740,7 @@ others turn on when you invoke them.
 | `unity-router` (featured) | Unity game pack entry point: picks which Unity skills to load for a task and uses the route the harness reports (MCP, Unity CLI live or batch); see [`skills/unity-router`](../skills/unity-router/SKILL.md) |
 | `compile-fix-loop`, `play-verify`, `headless-ops`, `scene-prefab-safety`, `gdd-to-backlog`, `project-memory`, `architecture-patterns`, `asset-pipeline`, `perf-pass`, `game-feel-pass`, `build-ship`, `vcs-hygiene` | The rest of the Unity 6 game-creation pack: compile/fix, Play Mode checks, headless builds and tests, safe scene/prefab edits, GDD to backlog, project memory, architecture templates, asset pipeline, performance, game feel, shipping and git hygiene (with scripts, templates and references) |
 | `unity-mcp-orchestrator` | MCP for Unity tool reference and workflows, used by the Unity pack |
+| `trailer-maker` | Game trailers from real gameplay: brief, beat sheet, shot list captured in Play Mode with the Unity Recorder, an ffmpeg edit from a JSON edit list, ElevenLabs music/VO/SFX cut to the beat sheet, three reviewers, and Steam/YouTube/vertical exports; see [`skills/trailer-maker`](../skills/trailer-maker/SKILL.md) |
 
 **Unity pack setup.** The Unity skills drive the editor through the MCP for Unity server, and
 GameDevWorkstation sets that up for you: the built-in `unity` server (`uvx --offline --from
@@ -835,6 +844,26 @@ made during a long compile isn't covered by it. `unity test … --output X` or `
 (`clone_when_open`), installing the headless-ops HarnessCli editor scripts on demand
 (`harness_scripts`; `import`, forced recompiles and development builds use `unity.sh`, which needs
 them in the project), menu items in batch mode, and a warm `unity shell` process for live calls.
+
+**Trailers (`trailer-maker`).** What it needs beyond the Unity pack:
+
+- `ffmpeg` and `ffprobe` (`brew install ffmpeg`). The skill finds them on PATH, then in `/opt/homebrew/bin`
+  (or `TRAILER_FFMPEG`); `trailer_edl.py doctor` lists what is missing. Text cards and captions are rendered as images
+  in Unity (with your game's font), so the slim Homebrew formula is enough; `ffmpeg-full` adds `drawtext`/libass if
+  you want them. ffmpeg is GPL software that GameDevWorkstation runs as a separate program and does not ship.
+- the `com.unity.recorder` package (5.x) and the skill's `Harness.Trailer` editor scripts in your project (the skill
+  installs both). Capture needs the Editor open (MCP) or the GUI editor started from the command line: the Recorder
+  doesn't run in batchmode. With the URP 2D Renderer it records the Game view.
+- Project Settings → Audio → Default Speaker Mode: Stereo. FMOD or Wwise audio isn't captured by the Recorder; record
+  it separately or rebuild it in the edit.
+
+Work lives at your project root in `Trailer/<slug>/` (outside `Assets/`): the plans (brief, beat sheet, shot list,
+edit list) are meant for git; captures, renders and exports are not (the skill gives the `.gitignore` lines). Every
+script ends with `RESULT: OK|FAIL`; files a command announces with `TRAILER_OUTPUT: <path>` (or `ARTIFACT: <path>`
+from any script) inside the session folder are indexed as items when they are images, video or audio, so the cut
+plays inline in Artifacts. The skill ships a `trailer` workflow template (brief → beat sheet → shot list → capture →
+rough cut → music, VO and SFX → trailer review → exports) for the chains engine. The review uses three reviewer
+subagents; the minimum score must reach the brief's pass score (7 by default), two rounds at most, then you decide.
 
 **Invoking a skill.** Any of these does the same thing:
 
@@ -1110,3 +1139,9 @@ The data and log folders are owner-only (0700) and the database, config, `runtim
 - **Microphone** — macOS asks the first time you press Record. To change it later, go to System
   Settings → Privacy & Security → Microphone.
 - **Codex CLI harness shows "not installed"** — run `npm i -g @openai/codex`, then restart the app.
+- **Trailer: "ffmpeg not found"** (exit code 3) — `brew install ffmpeg`, or set `TRAILER_FFMPEG` to the ffmpeg
+  binary. `python3 skills/trailer-maker/scripts/trailer_edl.py doctor` shows what it found.
+- **Trailer: the Recorder never starts** — the Editor was in batchmode (use the GUI editor), the project has compile
+  errors, the Game view is hidden, or `com.unity.recorder` isn't installed. With the URP 2D Renderer only the Game
+  view can be recorded (the template does that). No audio in takes: set Default Speaker Mode to Stereo; FMOD/Wwise
+  audio isn't captured.

@@ -67,6 +67,7 @@ Signals are words or situations in the task. Load in order, at most 3. "Skip" li
 | 14 | MCP call fails, tool missing, wrong instance, parameter shape, tool groups | unity-mcp-orchestrator | everything else until the call works |
 | 15 | critique, taste, aesthetic review, TASTE.md, L4 review | design-critique | implementation skills until the review identifies changes |
 | 16 | failure analysis, postmortem, exhausted gate, parked campaign, "that broke" | postmortem | implementation skills until the cause and prevention rule are recorded |
+| 17 | trailer, teaser, announce/launch/festival video, Steam trailer, gameplay capture, b-roll, social clip, vertical cut, press-kit GIF | trailer-maker (+ unity-mcp-orchestrator on demand) | game-feel-pass, play-verify (unless a shot needs a scripted-input fix) |
 
 ## Workflows and gates
 Chains are workflow templates run by the harness in one session; they are a harness feature, not additional skills. Campaigns span multiple sessions and keep their durable brief, design target and continuation state in `.gamedevworkstation/campaigns/<slug>.md` at the project root. Use the matching template:
@@ -81,6 +82,7 @@ Chains are workflow templates run by the harness in one session; they are a harn
 | `release` | Freeze completed milestone → Full tests → Build → Headless smoke → Spec-audit critique against milestone exit → Changelog/tag |
 | `replace-system` | Build beside → Parity verify with screenshots and metrics → Switch → Remove old in a separate phase (ask before deletion) |
 | `milestone` (campaign only) | One phase per current-milestone story in BACKLOG order → Milestone exit |
+| `trailer` | Brief → Beat sheet → Shot list → Capture → Rough cut → Music/VO → Trailer review → Exports |
 
 The quality ladder requires fresh, observed evidence for the story after its latest relevant change:
 - **L1 compile:** 0 compile errors.

@@ -1,0 +1,33 @@
+{
+  "language_code": "en",
+  "text": "Every run rewrites the map. Fight through the bullet curtain and break the warden's hold on the tower before dawn. (explosion) Wishlist now.",
+  "words": [
+    {"text": "Every", "start": 0.10, "end": 0.32, "type": "word", "speaker_id": "speaker_0"},
+    {"text": " ", "start": 0.32, "end": 0.34, "type": "spacing", "speaker_id": "speaker_0"},
+    {"text": "run", "start": 0.34, "end": 0.52, "type": "word", "speaker_id": "speaker_0"},
+    {"text": " ", "start": 0.52, "end": 0.54, "type": "spacing", "speaker_id": "speaker_0"},
+    {"text": "rewrites", "start": 0.54, "end": 0.95, "type": "word", "speaker_id": "speaker_0"},
+    {"text": " ", "start": 0.95, "end": 0.97, "type": "spacing", "speaker_id": "speaker_0"},
+    {"text": "the", "start": 0.97, "end": 1.05, "type": "word", "speaker_id": "speaker_0"},
+    {"text": " ", "start": 1.05, "end": 1.07, "type": "spacing", "speaker_id": "speaker_0"},
+    {"text": "map.", "start": 1.07, "end": 1.40, "type": "word", "speaker_id": "speaker_0"},
+    {"text": "Fight", "start": 1.80, "end": 2.05, "type": "word", "speaker_id": "speaker_0"},
+    {"text": "through", "start": 2.07, "end": 2.30, "type": "word", "speaker_id": "speaker_0"},
+    {"text": "the", "start": 2.32, "end": 2.40, "type": "word", "speaker_id": "speaker_0"},
+    {"text": "bullet", "start": 2.42, "end": 2.70, "type": "word", "speaker_id": "speaker_0"},
+    {"text": "curtain", "start": 2.72, "end": 3.10, "type": "word", "speaker_id": "speaker_0"},
+    {"text": "and", "start": 3.12, "end": 3.22, "type": "word", "speaker_id": "speaker_0"},
+    {"text": "break", "start": 3.24, "end": 3.50, "type": "word", "speaker_id": "speaker_0"},
+    {"text": "the", "start": 3.52, "end": 3.60, "type": "word", "speaker_id": "speaker_0"},
+    {"text": "warden's", "start": 3.62, "end": 4.05, "type": "word", "speaker_id": "speaker_0"},
+    {"text": "hold", "start": 4.07, "end": 4.30, "type": "word", "speaker_id": "speaker_0"},
+    {"text": "on", "start": 4.32, "end": 4.40, "type": "word", "speaker_id": "speaker_0"},
+    {"text": "the", "start": 4.42, "end": 4.50, "type": "word", "speaker_id": "speaker_0"},
+    {"text": "tower", "start": 4.52, "end": 4.85, "type": "word", "speaker_id": "speaker_0"},
+    {"text": "before", "start": 4.87, "end": 5.20, "type": "word", "speaker_id": "speaker_0"},
+    {"text": "dawn.", "start": 5.22, "end": 5.70, "type": "word", "speaker_id": "speaker_0"},
+    {"text": "(explosion)", "start": 6.00, "end": 6.40, "type": "audio_event", "speaker_id": "speaker_0"},
+    {"text": "Wishlist", "start": 7.00, "end": 7.40, "type": "word", "speaker_id": "speaker_0"},
+    {"text": "now.", "start": 7.42, "end": 7.70, "type": "word", "speaker_id": "speaker_0"}
+  ]
+}

@@ -21,13 +21,67 @@ from ..config import media_dir
 from ..core.types import Usage, new_id
 from ..usage import BudgetExceeded
 from ..providers.elevenlabs_client import (SFX_CREDITS_PER_SECOND, STS_CREDITS_PER_MINUTE, STT_CREDITS_PER_MINUTE,
-                                           ElevenLabsClient, ElevenLabsError, char_cost, ext_for)
+                                           ElevenLabsClient, ElevenLabsError, char_cost, ext_for, music_seed)
 
 if TYPE_CHECKING:
     from ..app import AppState
 
 log = logging.getLogger(__name__)
 QUOTA_REFRESH_DELAY_S = 3.0  # coalesces a burst of generations into one subscription read
+MUSIC_CREDITS_PER_MINUTE = 1500  # rough estimate for the confirm card; music bills per minute
+PLAN_MAX_LINES = 30        # ElevenLabs limits on a composition plan chunk's text
+PLAN_MAX_LINE_CHARS = 200
+
+
+def composition_plan_checked(plan: Any) -> dict:
+    """A music composition plan ({"chunks": [{text, duration_ms 3000-120000, positive_styles,
+    negative_styles?}]}, music_v2/v2_5 keep each section's length exactly), normalized; raises
+    ElevenLabsError with every problem found. Chunk text: at most 30 lines of at most 200 characters
+    (ElevenLabs' limits)."""
+    errs: list[str] = []
+    if isinstance(plan, str):  # some models send the object as JSON text
+        try:
+            plan = json.loads(plan)
+        except ValueError:
+            raise ElevenLabsError("composition_plan is not valid JSON.") from None
+    chunks = plan.get("chunks") if isinstance(plan, dict) else None
+    if not isinstance(chunks, list) or not chunks:
+        raise ElevenLabsError("composition_plan needs a non-empty chunks list.")
+    out = []
+    for i, ch in enumerate(chunks):
+        if not isinstance(ch, dict):
+            errs.append(f"chunk {i + 1} must be an object")
+            continue
+        text = str(ch.get("text") or "").strip()
+        dur = ch.get("duration_ms")
+        pos = ch.get("positive_styles") or []
+        neg = ch.get("negative_styles") or []
+        if not text:
+            errs.append(f"chunk {i + 1} needs text (e.g. \"[Build] rising synths\")")
+        else:
+            lines = text.splitlines()
+            if len(lines) > PLAN_MAX_LINES:
+                errs.append(f"chunk {i + 1} text has {len(lines)} lines (ElevenLabs allows at most {PLAN_MAX_LINES})")
+            long_ = [k + 1 for k, ln in enumerate(lines) if len(ln) > PLAN_MAX_LINE_CHARS]
+            if long_:
+                errs.append(f"chunk {i + 1} text line {long_[0]} is {len(lines[long_[0] - 1])} characters "
+                            f"(ElevenLabs allows at most {PLAN_MAX_LINE_CHARS} per line)")
+        if isinstance(dur, bool) or not isinstance(dur, (int, float)) or not 3000 <= dur <= 120_000:
+            errs.append(f"chunk {i + 1} duration_ms must be 3000-120000")
+        if not isinstance(pos, list) or not all(isinstance(s, str) for s in pos):
+            errs.append(f"chunk {i + 1} positive_styles must be a list of strings")
+        if not isinstance(neg, list) or not all(isinstance(s, str) for s in neg):
+            errs.append(f"chunk {i + 1} negative_styles must be a list of strings")
+        if not errs:
+            c = {"text": text, "duration_ms": int(dur), "positive_styles": list(pos)}
+            if neg:
+                c["negative_styles"] = list(neg)
+            out.append(c)
+    if not errs and sum(c["duration_ms"] for c in out) > 600_000:
+        errs.append("the chunks add up to more than 10 minutes")
+    if errs:
+        raise ElevenLabsError("Invalid composition_plan: " + "; ".join(errs))
+    return {"chunks": out}
 
 
 def stt_credits(headers: dict, audio_seconds: float) -> tuple[float, bool]:
@@ -256,20 +310,44 @@ class ElevenLabsService:
         return await self._run_job(session_id, f"Sound effect: {text[:40]}", go())
 
     async def music(self, prompt: str, *, session_id: str | None, source: str, duration_s: float = 30,
-                    instrumental: bool = False, message_id: str | None = None, profile: str | None = None) -> dict:
+                    instrumental: bool = False, message_id: str | None = None, profile: str | None = None,
+                    composition_plan: dict | None = None, seed: int | None = None) -> dict:
+        plan = composition_plan_checked(composition_plan) if composition_plan else None
+        seed = music_seed(seed)  # a clean ElevenLabsError for a seed that isn't a whole number
+        if plan and instrumental:
+            # A composition plan has no force_instrumental switch: keep vocals out of every section instead.
+            for ch in plan["chunks"]:
+                neg = ch.setdefault("negative_styles", [])
+                if not any(s.strip().lower() == "vocals" for s in neg):
+                    neg.append("vocals")
+        if plan:
+            duration_s = sum(ch["duration_ms"] for ch in plan["chunks"]) / 1000
+            text = "\n".join(ch["text"] for ch in plan["chunks"])
+            prompt = prompt or plan["chunks"][0]["text"]
+        elif not prompt:
+            raise ElevenLabsError("Music needs a prompt or a composition_plan.")
+        else:
+            text = prompt
         c = self.client_for_session(session_id, profile)
         if not self.features(c.profile).get("features", {}).get("music", True):
             raise ElevenLabsError("Music needs a paid ElevenLabs plan.")
-        est = duration_s / 60 * 1500  # rough: music bills per minute; the response header gives the real cost
-        await self._confirm(session_id, source, "music", est, prompt, len(prompt))
+        est = duration_s / 60 * MUSIC_CREDITS_PER_MINUTE  # rough; the response header gives the real cost
+        await self._confirm(session_id, source, "music", est, text, len(text))
 
         async def go():
-            data, headers = await c.music(prompt, int(duration_s * 1000), instrumental)
+            data, headers = await c.music(prompt, int(duration_s * 1000), instrumental, composition_plan=plan,
+                                          seed=seed if plan else None)
+            meta: dict[str, Any] = {"duration_s": duration_s, "instrumental": instrumental}
+            if plan:
+                # instrumental with a plan = "vocals" in every chunk's negative_styles (the plan below is what was sent)
+                if instrumental:
+                    meta["instrumental_via"] = "negative_styles"
+                meta.update(composition_plan=plan, seed=seed,
+                            sections=[{"text": ch["text"], "duration_ms": ch["duration_ms"]} for ch in plan["chunks"]])
             return await self._save(data=data, ext=".mp3", feature="music", model="music_v2_5", session_id=session_id,
-                                    source=source, title=f"Music: {prompt[:48]}", text=prompt,
-                                    credits=char_cost(headers, est), characters=len(prompt), voice=None,
-                                    meta={"duration_s": duration_s, "instrumental": instrumental},
-                                    message_id=message_id, profile=c.profile)
+                                    source=source, title=f"Music: {prompt[:48]}", text=text,
+                                    credits=char_cost(headers, est), characters=len(text), voice=None,
+                                    meta=meta, message_id=message_id, profile=c.profile)
 
         return await self._run_job(session_id, f"Music: {prompt[:40]}", go())
 
@@ -416,14 +494,22 @@ def _register_tools(S: "AppState", svc: ElevenLabsService) -> None:
             return ToolOutput(str(e), is_error=True)
         return summary(r)
 
-    @reg.add("music", "ElevenLabs music from a prompt (paid plans). duration_s 3–600.",
+    @reg.add("music", "ElevenLabs music (paid plans): a prompt with duration_s 3–600, or a composition_plan "
+             "whose sections keep their exact lengths (e.g. a trailer's beat sheet). Composition plan: "
+             "{\"chunks\": [{\"text\": \"[Build] ...\", \"duration_ms\": 3000-120000, \"positive_styles\": [...], "
+             "\"negative_styles\": [...]}]}, chunk text at most 30 lines of 200 characters; seed (a whole number) "
+             "works only with a plan; instrumental with a plan adds \"vocals\" to every chunk's negative_styles.",
              obj({"prompt": {"type": "string"}, "duration_s": {"type": "number"},
-                  "instrumental": {"type": "boolean"}}, ["prompt"]))
+                  "instrumental": {"type": "boolean"},
+                  "composition_plan": {"type": "object", "description": "{chunks: [{text, duration_ms, "
+                                                                        "positive_styles, negative_styles}]}"},
+                  "seed": {"type": "integer"}}))
     async def music(ctx: ToolContext, a: dict) -> ToolOutput:
         try:
-            r = await svc.music(a["prompt"], session_id=ctx.session_id, source="agent",
+            r = await svc.music(str(a.get("prompt") or ""), session_id=ctx.session_id, source="agent",
                                 duration_s=float(a.get("duration_s") or 30), instrumental=bool(a.get("instrumental")),
-                                message_id=ctx.message_id)
+                                message_id=ctx.message_id, composition_plan=a.get("composition_plan"),
+                                seed=a.get("seed"))
         except (ElevenLabsError, BudgetExceeded) as e:
             return ToolOutput(str(e), is_error=True)
         return summary(r)
@@ -532,10 +618,13 @@ def register(app_: FastAPI, api: APIRouter, S: "AppState") -> None:
     async def ui_music(body: dict = Body(...)) -> list[dict]:
         n = max(1, min(int(body.get("variations") or 1), 3))
         try:
+            seed = music_seed(body.get("seed"))
+            # each variation gets its own seed (seed, seed+1, ...) so they differ yet stay reproducible
             return list(await asyncio.gather(*(svc.music(
-                body["prompt"], session_id=body.get("session_id"), source="user",
+                str(body.get("prompt") or ""), session_id=body.get("session_id"), source="user",
                 duration_s=float(body.get("duration_s") or 30), instrumental=bool(body.get("instrumental")),
-                profile=body.get("profile")) for _ in range(n))))
+                profile=body.get("profile"), composition_plan=body.get("composition_plan"),
+                seed=None if seed is None else seed + i) for i in range(n))))
         except (ElevenLabsError, BudgetExceeded) as e:
             raise wrap(e) from e
 

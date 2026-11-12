@@ -41,7 +41,7 @@ export function ArtifactsPage() {
   };
   useEffect(() => { load(); }, [tab, provider, scope.join(",")]);
   useEffect(() => { if (args.item) setViewing(args.item); }, [args.item]);
-  useEffect(() => actions.onEvent((e) => { if (e.type === "item.created" || e.type === "item.deleted") load(); }), [tab, provider, scope.join(",")]);
+  useEffect(() => actions.onEvent((e) => { if (e.type === "item.created" || e.type === "item.updated" || e.type === "item.deleted") load(); }), [tab, provider, scope.join(",")]);
 
   const scopeTitle = scope.map((id) => sessions.find((s) => s.id === id)?.title ?? id).join(", ");
 

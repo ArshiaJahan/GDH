@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "id": "steam-gameplay-20261112",
+  "type": "gameplay",
+  "fps": 60,
+  "canvas": {"w": 1920, "h": 1080},
+  "scale_filter": "lanczos",
+  "sources": {
+    "s01": "capture/s01/take-02.mp4",
+    "s02": "capture/s02/take-01.mp4"
+  },
+  "video": [
+    {"id": "c01", "src": "s01", "in": 0.80, "out": 3.20, "beat": "thumbstopper"},
+    {"id": "c02", "src": "s02", "in": 0.50, "out": 2.50, "speed": 0.5, "freeze_end": 0.25, "beat": "thumbstopper",
+     "transition_in": {"type": "cut"}, "vcrop": {"x": 0.62}},
+    {"id": "c03", "card": "cards/title.png", "dur": 1.5, "bg": "#000000", "beat": "title-flash",
+     "transition_in": {"type": "fadeblack", "dur": 0.25}}
+  ],
+  "overlays": [
+    {"image": "cards/wishlist.png", "start": 56.0, "end": 60.0, "pos": "bottom-center", "margin": 96, "fade": 0.2},
+    {"image": "cards/rating-bug.png", "start": 0, "end": 4, "pos": "top-right", "margin": 48, "vertical": false}
+  ],
+  "audio": {
+    "game": {"enabled": true, "gain_db": -6},
+    "music": {"path": "audio/music.mp3", "in": 0.0, "at": 0.0, "gain_db": 0, "fade_in": 0, "fade_out": 1.5},
+    "vo": [{"path": "audio/vo-01.mp3", "at": 12.0, "gain_db": 0}],
+    "sfx": [{"path": "audio/hit-boom.mp3", "at": 55.98, "gain_db": -3}],
+    "duck": {"enabled": true, "threshold": 0.03, "ratio": 8, "attack_ms": 20, "release_ms": 300},
+    "loudness": {"i": -14, "tp": -1.0, "lra": 11}
+  },
+  "beats_file": "beats.json",
+  "beat_grid": "audio/beats_grid.json",
+  "snap_tolerance_frames": 1,
+  "captions": {"srt": "captions/en.srt", "burn_in_for": ["shorts"], "png_dir": "captions/png"},
+  "poster_at": 7.5,
+  "vertical": {"max_s": 60},
+  "exports": ["steam", "youtube", "shorts"]
+}

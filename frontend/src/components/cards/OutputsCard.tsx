@@ -9,7 +9,7 @@ export function OutputsCard({ s }: { s: Session }) {
   const [viewing, setViewing] = useState<string | null>(null);
   const load = () => get<Item[]>(`/items?sessions=${s.id}&grouped=false`).then((r) => setItems(r.filter((i) => i.kind !== "link" && i.source !== "user")));
   useEffect(() => { load(); }, [s.id]);
-  useEffect(() => actions.onEvent((e) => { if ((e.type === "item.created" && e.session_id === s.id) || e.type === "item.deleted") load(); }), [s.id]);
+  useEffect(() => actions.onEvent((e) => { if (((e.type === "item.created" || e.type === "item.updated") && e.session_id === s.id) || e.type === "item.deleted") load(); }), [s.id]);
   return (
     <Card id="outputs" title={`Outputs${items.length ? ` (${items.length})` : ""}`}
       right={<button className="text-[12px] text-action hover:underline" onClick={() => actions.go("artifacts", { sessions: [s.id] })}>Open in Artifacts page</button>}>

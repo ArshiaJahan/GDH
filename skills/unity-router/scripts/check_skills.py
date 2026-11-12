@@ -18,7 +18,7 @@ import sys
 HARNESS = [
     "unity-router", "compile-fix-loop", "play-verify", "headless-ops", "scene-prefab-safety", "gdd-to-backlog",
     "project-memory", "architecture-patterns", "asset-pipeline", "perf-pass", "game-feel-pass", "build-ship",
-    "vcs-hygiene", "design-critique", "postmortem",
+    "vcs-hygiene", "design-critique", "postmortem", "trailer-maker",
 ]
 EXISTING = ["unity-mcp-orchestrator", "game-designer"]
 
@@ -72,12 +72,12 @@ def index(search_roots):
 def main():
     ap = argparse.ArgumentParser(description="Check that skills exist by frontmatter name in the known skill roots.",
                                  epilog="Examples:\n  check_skills.py compile-fix-loop play-verify\n"
-                                        "  check_skills.py --all            # all 15 harness skills + the 2 existing ones\n"
+                                        "  check_skills.py --all            # all 16 harness skills + the 2 existing ones\n"
                                         "  check_skills.py --list           # list every skill found\n"
                                         "  check_skills.py --root ~/skills headless-ops",
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("skills", nargs="*", help="skill names to check")
-    ap.add_argument("--all", action="store_true", help="check the 15 harness skills plus unity-mcp-orchestrator and game-designer")
+    ap.add_argument("--all", action="store_true", help="check the 16 harness skills plus unity-mcp-orchestrator and game-designer")
     ap.add_argument("--list", action="store_true", help="list every skill found and where")
     ap.add_argument("--root", action="append", default=[], metavar="DIR", help="extra skill root to search first (repeatable)")
     a = ap.parse_args()

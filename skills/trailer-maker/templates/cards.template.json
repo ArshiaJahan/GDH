@@ -1,0 +1,16 @@
+{
+  "font": "Assets/Fonts/Game SDF.asset",
+  "w": 1920,
+  "h": 1080,
+  "out_dir": "Trailer/steam-gameplay-20261112/cards",
+  "cards": [
+    {"id": "title", "text": "", "size": 96, "color": "#ffffff", "bg": "#000000", "align": "center", "valign": "middle",
+     "image": "Assets/Art/Logo.png", "image_h": 0.45, "margin": 96},
+    {"id": "fantasy-1", "text": "Every run rewrites the map", "size": 110, "color": "#ffffff", "bg": "#000000",
+     "align": "center", "valign": "middle", "image": "", "image_h": 0, "margin": 160},
+    {"id": "end-slate", "text": "Wishlist on Steam", "size": 84, "color": "#ffffff", "bg": "#000000",
+     "align": "center", "valign": "bottom", "image": "Assets/Art/Logo.png", "image_h": 0.4, "margin": 140},
+    {"id": "wishlist", "text": "Wishlist on Steam", "size": 64, "color": "#ffffff", "bg": "#00000000",
+     "align": "center", "valign": "bottom", "image": "", "image_h": 0, "margin": 48}
+  ]
+}
