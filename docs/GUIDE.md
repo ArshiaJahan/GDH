@@ -155,7 +155,7 @@ keep an explicit **Save**.
   `harness_git_exclude` (default `true`) and `clone_when_open` (`ask` | `never` | `always`).
   Settings → Unity edits it.
 - `[claude_code]` [Claude Code sessions](#claude-code-sessions): `cli_path` (empty: find `claude`),
-  `load_user_mcp` (default `false`), `setting_sources` (default `""`, safe mode), `pre_tool_hook`
+  `load_user_mcp` (default `false`), `setting_sources` (default `""`: none), `pre_tool_hook`
   (default `true`), `max_processes` (default 4) and `interrupt_wait_s` (default 5). Settings →
   Claude Code edits it.
 - `[data_policy]` which providers may receive files you mark sensitive.
@@ -689,7 +689,9 @@ stay in sync:
 
 ## Claude Code sessions
 
-**Experimental: not yet verified against a live logged-in CLI.**
+Checked against claude 2.1.308 logged in with a claude.ai (Max) subscription; the redacted captures
+are in `tests/fixtures/claude_stream/` and the test CLI replays them. A later Claude Code release can
+change these details: see Troubleshooting.
 
 **What it is.** A session on the **Claude Code (subscription)** harness runs your own `claude` CLI
 (Claude Code, installed by you and never modified or bundled) inside GameDevWorkstation. You chat
@@ -736,46 +738,59 @@ a `0600` file in the session's data folder) that only works for that session and
 the process ends (the token is revoked); the MCP config file is then removed. Purging a GDW session removes only its
 `data_dir/claude_code/<session-id>/` folder. Your own Claude Code MCP servers and a folder's
 `.mcp.json` are excluded by `--strict-mcp-config` unless you turn on Settings → Claude Code →
-**Your MCP servers** (`[claude_code].load_user_mcp`); safe mode also disables customization loading.
+**Your MCP servers** (`[claude_code].load_user_mcp`); with Settings files **None** your own servers
+aren't loaded either. Claude Code loads these tools on demand (its ToolSearch tool), so the first use
+of a `mcp__gdw__*` tool in a conversation takes one extra step.
 
 **Approvals and modes.** Every tool call passes GameDevWorkstation's checks first (a `PreToolUse`
 hook, on by default: folder scope, sensitive files, git metadata, the before-write snapshot for the Changes card),
 then the usual cards: edits in Ask, commands, and anything else Claude Code would ask about (through
-`--permission-prompt-tool mcp__gdw__approve`). Questions Claude Code asks you get a card with its
-options. Ask runs Claude Code in `manual`, Accept edits in `acceptEdits` and Plan only in `plan`; in
-Plan known file edits and Bash commands are refused, and approving Claude Code's plan card switches the session to
-Ask. Unrecognized non-GDW tools still get an approval card in Plan mode; the harness cannot classify
+`--permission-prompt-tool mcp__gdw__approve`). Questions Claude Code asks you (AskUserQuestion) get a
+card with its options, and your pick goes back as its answer. Ask runs Claude Code in `manual`, Accept
+edits in `acceptEdits` and Plan only in `plan`; in Plan known file edits and Bash commands are
+refused, except the plan file Claude Code writes in its own `~/.claude/plans/` folder (one `.md` file
+directly in that folder) before it asks to leave Plan mode. That request (ExitPlanMode) shows
+GameDevWorkstation's plan card with the plan text; approving it switches the session to Ask, and
+**Keep planning** sends your feedback back. Unrecognized non-GDW tools still get an approval card in Plan mode; the harness cannot classify
 their effects. GameDevWorkstation never starts Claude Code in `bypassPermissions`, `dontAsk` or `auto`.
 Hook registration failure, timeout or cancellation ends the process with an error; there is no silent
 fallback. An explicit `pre_tool_hook=false` disables that hook.
 
-**Settings isolation.** **Settings files** defaults to **None (safe mode: your ~/.claude hooks,
-plugins and settings files are ignored)**. This passes `--safe-mode`, disabling custom `CLAUDE.md`,
-skills, installed plugins, hooks, MCP servers, custom commands and agents, and output styles.
-Admin-managed policies still apply; auth, model selection, built-in tools and plugins, and permissions
-work normally. Selecting a subset of `user,project,local` instead passes `--setting-sources=<list>`
-and omits safe mode. Startup fails closed if the CLI reports hooks or plugins (even with explicit
-setting sources), or if an MCP server
-other than `gdw` appears while **Your MCP servers** is off; missing fields are accepted. GDW explicitly
+**Settings isolation.** **Settings files** defaults to **None (your ~/.claude hooks, plugins and
+settings files are ignored)**. This passes an empty `--setting-sources=`: no user, project or local
+settings, so no custom `CLAUDE.md`, skills, agents, installed plugins or their hooks. Admin-managed
+policies still apply; auth, model selection, built-in tools and permissions work normally.
+`--safe-mode` isn't used: in Claude Code 2.1.308 it also drops the `--mcp-config` servers, so
+GameDevWorkstation's tools and approval cards would be missing (and it still lists your installed
+plugins). Selecting a subset of `user,project,local` instead passes `--setting-sources=<list>`.
+Startup fails closed if the CLI reports hooks or plugins other than its own built-in ones (even with
+explicit setting sources), if it doesn't confirm the PreToolUse hook (`hooks_applied`), or if an MCP
+server other than `gdw` appears while **Your MCP servers** is off; missing fields are accepted. If
+the session's model isn't in the list of models Claude Code offers your login, the chat says so. GDW explicitly
 adds the session folder's `CLAUDE.md`, enabled GDW skills and context pack to the appended system
 prompt, capped at 64 KB with a truncation note. CLI stderr and errors redact bearer tokens and API keys.
 
-**Usage.** Each turn records the change in Claude Code's reported tokens and cost. The cost is
-Claude Code's own estimate: for subscription logins, My usage shows it as **Claude subscription
+**Usage.** Each turn records the tokens Claude Code reports for that turn and the increase of its
+running cost estimate (which counts the whole conversation, across `--resume`). The cost is Claude
+Code's own list-price estimate: for subscription logins, My usage shows it as **Claude subscription
 (estimated)**, outside daily and session spend limits. API key logins record API spend and use those
-limits. Totals retain their conversation id and process pid: after a restart a smaller total counts
-in full, while continuing conversation totals contribute only their increase. Your plan's real limits
-(its usage windows) aren't visible to GameDevWorkstation; when Claude Code reports a rate limit the
-chat shows it retrying.
+limits. A turn you stop mid-reply reports no tokens. Claude Code reports your plan's usage windows
+after each request; when one is used up or close to it, the chat shows when it resets, and when
+Claude Code retries a rate limit the chat shows it retrying. These sessions skip the automatic
+title (which would call the API): they keep the title taken from your first message.
 
-**Limits.** Stop sends Claude Code an interrupt (then SIGINT, then ends the process). Subagents,
+**Limits.** Stop sends Claude Code an interrupt, which ends the turn and keeps the process; if that
+doesn't work, SIGINT (which ends the turn and the process), then the process is killed. Subagents,
 delegation, fleet waves, campaigns and workflows need the built-in loop. GameDevWorkstation's
 compaction and context meter don't apply (Claude Code compacts by itself). Changes to the system
 prompt (mode notes, skills, `CLAUDE.md`) reach a resumed conversation only when it starts anew,
 because Claude Code keeps the first one. Messages of Claude Code's own subagents go to the turn's log
-in Background tasks, not the chat. Some wire details (the permission prompt's exact JSON, `claude
-auth status` when logged in) couldn't be checked on a logged-in machine yet and are read
-defensively; see Troubleshooting if a session misbehaves after a Claude Code update.
+in Background tasks, not the chat. Not checked on a live login: an API key login (`billing='api'`
+path; only the subscription login was tried), the Opus, Sonnet and Fable model ids in a real turn
+(they are in the model list Claude Code reports for a Max login; Haiku 5.5 was used), and `can_use_tool`
+control requests (Claude Code sends them only with `--permission-prompt-tool stdio`, which GDW doesn't
+use). Those paths are read defensively; see Troubleshooting if a session misbehaves after a Claude
+Code update.
 
 **Anthropic's policy.** Anthropic's legal and compliance page for Claude Code allows an end user to
 sign in to the unmodified Claude Code binary with their own subscription, while products built for
@@ -1345,8 +1360,8 @@ The data and log folders are owner-only (0700) and the database, config, `runtim
   `claude auth status`. Log in with `claude auth login` in a terminal, then press **Retry** on the
   card. If a session stops working after a Claude Code update, the turn's log in Background tasks
   and the error card show the CLI's redacted message. Hook initialization failure ends the process
-  with an error, without silently falling back. The feature is experimental: not yet verified against
-  a live logged-in CLI.
+  with an error, without silently falling back. It was checked against Claude Code 2.1.308; after an
+  update, compare the CLI's output with the captures in `tests/fixtures/claude_stream/`.
 - **Trailer: "ffmpeg not found"** (exit code 3) — `brew install ffmpeg`, or set `TRAILER_FFMPEG` to the ffmpeg
   binary. `python3 skills/trailer-maker/scripts/trailer_edl.py doctor` shows what it found.
 - **Trailer: the Recorder never starts** — the Editor was in batchmode (use the GUI editor), the project has compile

@@ -30,6 +30,7 @@ from gamedevworkstation.features.claude_cli import LOGIN_HINT, child_env
 from gamedevworkstation.server import create_app
 
 FAKE = Path(__file__).parent / "fixtures" / "fake_claude.py"
+STREAM = Path(__file__).parent / "fixtures" / "claude_stream"  # redacted real captures
 H = {"Authorization": "Bearer t"}
 LEAKY = {"ANTHROPIC_API_KEY": "sk-ant-must-not-leak", "ANTHROPIC_AUTH_TOKEN": "tok-must-not-leak",
          "ANTHROPIC_BASE_URL": "https://proxy.invalid", "ANTHROPIC_API_KEY_WORK": "sk-ant-profile",
@@ -139,7 +140,8 @@ def live(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "home-dir"))  # nothing may reach the real ~/.claude
     home = tmp_path / "home-dir"
     home.mkdir()
-    (home / "fake_claude.json").write_text(json.dumps({"log": str(log), "state": str(tmp_path / "state")}))
+    (home / "fake_claude.json").write_text(json.dumps({"log": str(log), "state": str(tmp_path / "state"),
+                                                       "fixtures": str(STREAM)}))
     for k, v in LEAKY.items():
         monkeypatch.setenv(k, v)
     lv = Live(tmp_path, exe, log).start()
@@ -191,7 +193,7 @@ def test_turn_flags_env_and_event_mapping(live, tmp_path):
     assert _opt(argv, "--model") == "claude-sonnet-5-5"
     assert _opt(argv, "--permission-mode") == "manual"
     assert _opt(argv, "--permission-prompt-tool") == "mcp__gdw__approve"
-    assert _opt(argv, "--setting-sources") is None and "--safe-mode" in argv
+    assert _opt(argv, "--setting-sources") == "" and "--safe-mode" not in argv  # safe mode drops --mcp-config
     assert _opt(argv, "--append-system-prompt").startswith("You are running inside GameDevWorkstation")
     assert _opt(argv, "--add-dir") == str(live.S.worktrees_root(sid))
     assert "--bare" not in argv and not any("dangerously" in a for a in argv)
@@ -368,10 +370,19 @@ def test_gdw_tool_over_mcp(live, tmp_path):
     assert not out["isError"] and "Game" in out["content"][0]["text"]
     msgs = live.msgs(sid)
     uses = [b for m in msgs for b in m["content"] if b["type"] == "tool_use"]
-    assert uses and uses[0]["name"] == "mcp__gdw__task_boards"
-    results = [m for m in msgs if m["meta"].get("tool_results")]
-    assert results and results[0]["content"][0]["tool_use_id"] == "toolu_1"
+    assert uses[0]["name"] == "ToolSearch" and uses[1]["name"] == "mcp__gdw__task_boards"
+    results = {b["tool_use_id"]: b for m in msgs if m["meta"].get("tool_results") for b in m["content"]}
+    assert "Game" in json.dumps(results["toolu_1"]) and "[loaded mcp__gdw__task_boards]" in json.dumps(results["toolu_ts"])
     assert msgs[-1]["content"][0]["text"] == "Boards listed."
+    # GDW's hook: no say on ToolSearch (the CLI's rules), allow on its own MCP tool.
+    hooks = {e["tool"]: e["response"]["response"] for e in live.events("hook")}
+    assert hooks["ToolSearch"] == {} and hooks["mcp__gdw__task_boards"]["hookSpecificOutput"]["permissionDecision"] == "allow"
+    # The MCP handshake the real CLI does at start (mcp_handshake.jsonl) works against GDW's server.
+    seen = {x.get("method"): x for x in live.events("mcp_handshake")[-1]["seen"]}
+    assert seen["server/discover"]["reply"]["error"]["code"] == -32601  # the CLI then falls back to initialize
+    assert seen["initialize"]["reply"]["result"]["protocolVersion"] == "2025-11-25"
+    assert seen["notifications/initialized"]["status"] == 202 and seen["GET"]["status"] == 405
+    assert any(t["name"] == "approve" for t in seen["tools/list"]["reply"]["result"]["tools"])
 
 
 def test_mcp_endpoint_security(live, tmp_path):
@@ -460,19 +471,77 @@ def _answer(live, sid, decision):
 
 
 def test_permission_prompt_shows_a_card_and_relays_the_decision(live, tmp_path):
+    """Bash in Ask mode: GDW's PreToolUse hook shows the command card and answers with its decision."""
     sid = live.session(_project(tmp_path))
     live.send(sid, "prompt")
     card = _answer(live, sid, "approve")
-    assert card["kind"] == "command" and card["payload"]["command"] == "echo hi"
+    assert card["kind"] == "command" and card["payload"]["command"] == "touch hi.txt"
     live.wait_idle(sid)
-    assert live.events("decision")[-1]["decision"] == {"behavior": "allow", "updatedInput": {"command": "echo hi"}}
-    assert live.msgs(sid)[-1]["content"][0]["text"] == "Permission: allow"
+    out = live.events("hook")[-1]["response"]["response"]["hookSpecificOutput"]
+    assert out == {"hookEventName": "PreToolUse", "permissionDecision": "allow"}
+    assert live.msgs(sid)[-1]["content"][0]["text"] == "Permission: allow (hook)"
     live.send(sid, "prompt again")
     _answer(live, sid, "deny")
     live.wait_idle(sid)
+    out = live.events("hook")[-1]["response"]["response"]["hookSpecificOutput"]
+    assert out["permissionDecision"] == "deny" and out["permissionDecisionReason"] == "The user declined."
+    assert live.msgs(sid)[-1]["content"][0]["text"] == "Permission: deny (hook)"
+    assert not live.events("decision")  # the hook decided: the prompt tool wasn't needed
+
+
+def test_permission_prompt_tool_without_the_hook(live, tmp_path):
+    """With the hook off, a prompt reaches mcp__gdw__approve ({tool_name, input, tool_use_id}) [live shape]."""
+    live.S.config.claude_code["pre_tool_hook"] = False
+    sid = live.session(_project(tmp_path))
+    live.send(sid, "prompt")
+    card = _answer(live, sid, "approve")
+    assert card["kind"] == "command" and card["payload"]["command"] == "touch hi.txt"
+    live.wait_idle(sid)
+    inp = {"command": "touch hi.txt", "description": "Create hi.txt"}
+    assert live.events("decision")[-1]["decision"] == {"behavior": "allow", "updatedInput": inp}
+    assert live.events("ran")[-1]["input"] == inp
+    assert live.msgs(sid)[-1]["content"][0]["text"] == "Permission: allow (prompt_tool)"
+    live.send(sid, "prompt again")
+    _answer(live, sid, "deny")
+    live.wait_idle(sid)
+    assert live.events("decision")[-1]["decision"] == {"behavior": "deny", "message": "The user declined."}
+    assert not [e for e in live.events("control_request") if e["subtype"] == "initialize" and e["request"].get("hooks")]
+
+
+def test_plan_mode_plan_file_then_the_plan_card(live, tmp_path):
+    """Plan mode [live, plan_e2e.jsonl]: the CLI writes ~/.claude/plans/<name>.md, then ExitPlanMode
+    {plan, planFilePath} reaches the prompt tool; GDW shows its plan card and leaves Plan mode on approval."""
+    sid = live.session(_project(tmp_path), mode="plan")
+    live.send(sid, "exitplan")
+    card = _answer(live, sid, "approve")
+    assert card["kind"] == "claude_code_plan" and card["payload"]["markdown"] == "Create hello.txt containing hi.\n"
+    live.wait_idle(sid)
+    hooks = {e["tool"]: e["response"]["response"] for e in live.events("hook")}
+    assert hooks["Write"] == {} and hooks["ExitPlanMode"] == {}  # the plan file: no say in Plan mode
+    assert live.events("plan_file")[-1] == {"event": "plan_file", "allowed": True, "how": "rules"}
+    assert live.events("decision")[-1]["decision"]["behavior"] == "allow"
+    assert live.get(sid)["mode"] == "ask"
+    assert live.msgs(sid)[-1]["content"][0]["text"] == "Plan: allow (prompt_tool)"
+    # Keep planning: the deny goes back to Claude Code with the feedback.
+    live.c.patch(f"/api/sessions/{sid}", json={"mode": "plan"})
+    live.send(sid, "exitplan again")
+    (card,) = live.wait_for(lambda: live.pending(sid))
+    live.c.post(f"/api/approvals/{card['id']}", json={"decision": "deny", "note": "shorter"})
+    live.wait_idle(sid)
     d = live.events("decision")[-1]["decision"]
-    assert d["behavior"] == "deny" and d["message"] == "The user declined."
-    assert live.msgs(sid)[-1]["content"][0]["text"] == "Permission: deny"
+    assert d["behavior"] == "deny" and "shorter" in d["message"] and live.get(sid)["mode"] == "plan"
+
+
+def test_ask_user_question_card_and_answer(live, tmp_path):
+    sid = live.session(_project(tmp_path), mode="plan")
+    live.send(sid, "askq")
+    (card,) = live.wait_for(lambda: live.pending(sid))
+    assert card["kind"] == "claude_code_question" and [b["label"] for b in card["payload"]["buttons"]][:2] == ["Red", "Blue"]
+    live.c.post(f"/api/approvals/{card['id']}", json={"decision": "approve", "choice": "o1"})
+    live.wait_idle(sid)
+    d = live.events("decision")[-1]["decision"]
+    assert d["behavior"] == "allow" and d["updatedInput"]["answers"] == {"Which color?": "Blue"}
+    assert live.events("answers")[-1]["answers"] == {"Which color?": "Blue"}
 
 
 def test_approve_tool_accepts_other_input_shapes(tmp_path):
@@ -491,9 +560,18 @@ def test_approve_tool_accepts_other_input_shapes(tmp_path):
         e = await cc.pre_tool_use(sid, {"tool_name": "mcp__gdw__approve", "tool_input": {}})
         f = await cc.pre_tool_use(sid, {"tool_name": "ExitPlanMode", "tool_input": {"plan": "p"}})
         g = await cc.pre_tool_use(sid, {"tool_name": "Read", "tool_input": {"file_path": "/etc/passwd"}})
-        return a, b, c, d, e, f, g
+        plan = str(ccm.plans_dir() / "my-plan.md")
+        h = await cc.pre_tool_use(sid, {"tool_name": "Write", "tool_input": {"file_path": plan, "content": "the plan"}})
+        i = await cc.decide(sid, "Write", {"file_path": plan, "content": "the plan"})
+        j = await cc.pre_tool_use(sid, {"tool_name": "Write", "tool_input": {
+            "file_path": str(ccm.plans_dir() / ".." / "settings.md"), "content": "x"}})
+        k = await cc.pre_tool_use(sid, {"tool_name": "Write", "tool_input": {
+            "file_path": str(ccm.plans_dir() / "sub" / "x.md"), "content": "x"}})
+        S.store.update(sid, mode="ask")
+        m = await cc.pre_tool_use(sid, {"tool_name": "Write", "tool_input": {"file_path": plan}})  # outside Plan mode
+        return a, b, c, d, e, f, g, h, i, j, k, m
 
-    a, b, c, d, e, f, g = asyncio.run(go())
+    a, b, c, d, e, f, g, h, i, j, k, m = asyncio.run(go())
     assert a == {"behavior": "deny", "message": "Plan only mode: no commands."}
     assert b == {"behavior": "deny", "message": "Plan only mode: no edits."}
     assert c["behavior"] == "deny" and "Malformed" in c["message"]
@@ -501,6 +579,13 @@ def test_approve_tool_accepts_other_input_shapes(tmp_path):
     assert e["hookSpecificOutput"]["permissionDecision"] == "deny"  # the model can't call the prompt tool
     assert f == {}  # left to the CLI's plan flow and then the prompt tool (GDW's plan card)
     assert g["hookSpecificOutput"]["permissionDecision"] == "deny"  # outside the session folder
+    assert h == {}  # Plan mode's plan file: the CLI's own plan rules
+    assert i == {"behavior": "allow", "updatedInput": {"file_path": str(ccm.plans_dir() / "my-plan.md"), "content": "the plan"}}
+    assert cc._plans[sid] == "the plan"
+    for refused in (j, k):  # not directly inside the plans folder
+        assert refused["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert m["hookSpecificOutput"] == {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                       "permissionDecisionReason": f"{ccm.plans_dir() / 'my-plan.md'} is outside the session folder."}
 
 
 def test_plan_mode_is_respected(live, tmp_path):
@@ -514,10 +599,12 @@ def test_plan_mode_is_respected(live, tmp_path):
     assert out["permissionDecision"] == "deny" and out["permissionDecisionReason"] == "Plan only mode: no edits."
     assert _opt(live.starts()[-1]["argv"], "--permission-mode") == "plan"
     assert not live.pending(sid) and not (folder / "plan.txt").exists()
-    # A permission prompt for a command in Plan: refused without a card.
+    # A command in Plan: refused by the hook without a card.
     live.send(sid, "prompt")
     live.wait_idle(sid)
-    assert live.events("decision")[-1]["decision"] == {"behavior": "deny", "message": "Plan only mode: no commands."}
+    out = live.events("hook")[-1]["response"]["response"]["hookSpecificOutput"]
+    assert out["permissionDecision"] == "deny" and out["permissionDecisionReason"] == "Plan only mode: no commands."
+    assert not live.pending(sid)
     # Switching to Accept edits restarts the process (resumed) in acceptEdits; the hook then allows the Write.
     live.c.patch(f"/api/sessions/{sid}", json={"mode": "accept_edits"})
     live.send(sid, "hook")
@@ -536,7 +623,7 @@ def test_not_logged_in_shows_the_login_card(live, tmp_path, monkeypatch):
     cfg_file.write_text(json.dumps({**cfg, "auth": {"loggedIn": False, "authMethod": "none", "apiProvider": "firstParty"}}))
     live.S.extensions["claude_code"].probe.forget()
     st = live.c.get("/api/claude-code/status", params={"refresh": 1}).json()
-    assert st["installed"] and not st["logged_in"] and st["version"] == "9.9.9 (Claude Code)"
+    assert st["installed"] and not st["logged_in"] and st["version"] == "2.1.308 (Claude Code)"
     assert st["auth"]["authMethod"] == "none"
     sid = live.session(_project(tmp_path))
     live.send(sid, "hello")
@@ -588,7 +675,7 @@ async def rig(tmp_path, monkeypatch):
     state.mkdir()
     log = tmp_path / "fake.log"
     config_file = home / "fake_claude.json"
-    config = {"log": str(log), "state": str(state)}
+    config = {"log": str(log), "state": str(state), "fixtures": str(STREAM)}
 
     def configure(**changes):
         config.update(changes)
@@ -640,8 +727,8 @@ def test_settings_isolation_flags(tmp_path, sources):
     argv = ccm.build_argv("fake", session_id="12345678-1234-1234-1234-123456789abc", resume=None,
                           model="m", effort=None, mode="ask", mcp_config=tmp_path / "m.json", add_dirs=[],
                           system_prompt=None, setting_sources=sources, strict_mcp=True)
-    assert ("--safe-mode" in argv) == (not sources)
-    assert _opt(argv, "--setting-sources") == (sources.replace(" ", "") if sources else None)
+    assert "--safe-mode" not in argv  # 2.1.308: it also drops the --mcp-config servers (init.jsonl)
+    assert _opt(argv, "--setting-sources") == sources.replace(" ", "")
     assert "--strict-mcp-config" in argv and "--restricted" not in argv
     with pytest.raises(ValueError, match="setting sources"):
         ccm.build_argv("fake", session_id="12345678-1234-1234-1234-123456789abc", resume=None,
@@ -903,6 +990,9 @@ async def test_only_matching_resume_error_starts_fresh(rig):
     assert old != new
     assert len([e for e in rig.entries() if "argv" in e]) == 3
     assert rig.app.store.messages(rig.sid)[-1].text() == "Hello from fake claude (turn 1)."
+    # The failed resume's own result (num_turns 0) records nothing.
+    assert [r["cost_usd"] for r in rig.app.db.all("SELECT cost_usd FROM usage_records WHERE session_id=?", [rig.sid])] == [
+        pytest.approx(0.01), pytest.approx(0.01)]
 
 
 async def test_system_prompt_has_utf8_byte_cap_and_truncation_note(rig):
@@ -1051,20 +1141,18 @@ async def test_usage_per_turn_tokens_with_increasing_cumulative_cost(rig):
         assert row["cost_usd"] == pytest.approx(0.01)
 
 
-@pytest.mark.parametrize("process_totals", [False, True])
-async def test_usage_totals_track_conversation_and_pid_across_restart(rig, process_totals):
-    rig.configure(process_totals=process_totals)
+async def test_usage_totals_track_the_conversation_across_resume(rig):
+    """[live, prompt_tool.jsonl] total_cost_usd keeps counting across --resume; result.usage is per turn."""
     await rig.send()
     await rig.send()
     old = rig.cc.procs[rig.sid]
     saved = rig.app.store.get(rig.sid)["settings"]
-    assert saved["claude_code_totals"]["session_id"] == old.cc_session
-    assert saved["claude_code_totals"]["pid"] == old.proc.pid
+    assert saved["claude_code_totals"] == {"cost": pytest.approx(0.02), "session_id": old.cc_session}
     await rig.cc.close_session(rig.sid)
     await rig.send()
     new = rig.cc.procs[rig.sid]
-    assert new.proc.pid != old.proc.pid
-    assert rig.app.store.get(rig.sid)["settings"]["claude_code_totals"]["pid"] == new.proc.pid
+    assert new.proc.pid != old.proc.pid and new.resumed
+    assert rig.app.store.get(rig.sid)["settings"]["claude_code_totals"]["cost"] == pytest.approx(0.03)
     rows = rig.app.db.all("SELECT * FROM usage_records WHERE session_id=? ORDER BY id", [rig.sid])
     assert len(rows) == 3
     for row in rows:
@@ -1075,6 +1163,91 @@ async def test_usage_totals_track_conversation_and_pid_across_restart(rig, proce
     rig.cc.record_usage(rig.sid, {"session_id": fresh, "total_cost_usd": 0.1,
                                  "usage": {"input_tokens": 10000, "output_tokens": 8000}}, None)
     assert rig.app.db.all("SELECT cost_usd FROM usage_records WHERE session_id=? ORDER BY id", [rig.sid])[-1]["cost_usd"] == pytest.approx(0.1)
+    # A total that went down (a rebuilt conversation) counts in full rather than negative.
+    rig.cc.record_usage(rig.sid, {"session_id": fresh, "total_cost_usd": 0.04, "usage": {}}, None)
+    assert rig.app.db.all("SELECT cost_usd FROM usage_records WHERE session_id=? ORDER BY id", [rig.sid])[-1]["cost_usd"] == pytest.approx(0.04)
+
+
+def _stream(name: str) -> list[dict]:
+    return [json.loads(x) for x in (STREAM / name).read_text().splitlines() if x.strip()]
+
+
+def test_fixtures_are_redacted():
+    blob = "\n".join((STREAM / f).read_text() for f in os.listdir(STREAM))
+    import re
+
+    assert not re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z]{2,}", blob)  # no email address
+    assert not re.search(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{8,}", blob)
+    assert not re.search(r'"(orgId|orgName|email|organization)": "(?!REDACTED)', blob)
+    assert not re.search(r"Bearer (?!REDACTED)[A-Za-z0-9_-]{16,}", blob)
+
+
+async def test_real_stream_replays_into_gdw_messages(rig):
+    """Golden replay: the real tools.jsonl and plan_e2e.jsonl stdout lines through the event mapper."""
+    await rig.send()
+    p = rig.cc.procs[rig.sid]
+    for name in ("tools.jsonl", "plan_e2e.jsonl"):
+        old = {m.id for m in rig.app.store.messages(rig.sid)}
+        p.turn = ccm.Turn(sid=rig.sid, model="claude-haiku-5-5", effort="low", jid=None, gate=None)
+        evs = [r["ev"] for r in _stream(name) if r["dir"] == "out" and r["ev"].get("type") != "control_request"]
+        for ev in evs:
+            p._on_event(ev)
+        assert p.turn is None and not p.fatal_error  # the result ended the turn; init accepted (built-in plugins)
+        msgs = [m for m in rig.app.store.messages(rig.sid) if m.id not in old]
+        assistant = [m for m in msgs if m.role == "assistant"]
+        # One GDW message per API message (several assistant events share an id), empty thinking dropped.
+        ids = {e["message"]["id"] for e in evs if e.get("type") == "assistant"}
+        assert len(assistant) == len(ids)
+        uses = [b for e in evs if e.get("type") == "assistant" for b in e["message"]["content"] if b["type"] == "tool_use"]
+        stored_uses = [b for m in assistant for b in m.content if b.type == "tool_use"]
+        assert [b.id for b in stored_uses] == [b["id"] for b in uses]
+        results = [b for m in msgs if m.meta.get("tool_results") for b in m.content]
+        assert {r.tool_use_id for r in results} == {b["id"] for b in uses}
+        assert assistant[-1].text() == next(e for e in evs if e.get("type") == "result")["result"]
+        assert not any(b.type == "thinking" and not b.thinking for m in assistant for b in m.content)
+
+
+async def test_safe_mode_init_fails_closed(rig):
+    """[live, init.jsonl] --safe-mode drops the gdw server and still lists the user's plugins: never accepted."""
+    safe = [r["ev"] for r in _stream("init.jsonl") if r["dir"] == "out"][1]
+    assert safe["mcp_servers"] == [] and any(pl["path"] != "builtin" for pl in safe["plugins"])
+    await rig.send()
+    p = rig.cc.procs[rig.sid]
+    p._on_system(safe, None)
+    assert p.fatal_error and "settings isolation failed" in p.fatal_error
+    assert ccm.user_plugins([{"name": "x", "path": "builtin", "source": "x@builtin"}]) == []
+
+
+async def test_rate_limit_event_shows_only_when_not_allowed(rig):
+    await rig.send()
+    p = rig.cc.procs[rig.sid]
+    real = next(r["ev"] for r in _stream("hello.jsonl") if r["dir"] == "out" and r["ev"]["type"] == "rate_limit_event")
+    before = rig.app.db.one("SELECT COUNT(*) AS n FROM events WHERE session_id=? AND type='agent.status'", [rig.sid])["n"]
+    p._on_event(real)  # "allowed": nothing to show
+    assert rig.app.db.one("SELECT COUNT(*) AS n FROM events WHERE session_id=? AND type='agent.status'", [rig.sid])["n"] == before
+    p._on_event({**real, "rate_limit_info": {**real["rate_limit_info"], "status": "rejected"}})
+    row = rig.app.db.one("SELECT data FROM events WHERE session_id=? AND type='agent.status' ORDER BY rowid DESC LIMIT 1", [rig.sid])
+    data = json.loads(row["data"])
+    assert data["kind"] == "rate_limit" and data["text"].startswith("Claude plan limit reached (five hour)")
+
+
+async def test_hooks_not_applied_fails_closed(rig):
+    rig.configure(hooks_applied=False)
+    await rig.send()
+    assert rig.sid not in rig.cc.procs
+    assert "hook registration failed" in rig.app.store.messages(rig.sid)[-1].text()
+    assert not [e for e in rig.entries() if e.get("event") == "user"]
+
+
+async def test_model_missing_from_the_login_shows_a_notice(rig):
+    rig.app.store.update(rig.sid, model="claude-nonexistent-1")
+    await rig.send()
+    notes = [m for m in rig.app.store.messages(rig.sid) if m.meta.get("notice") == "claude_code_model"]
+    assert len(notes) == 1 and "claude-nonexistent-1" in notes[0].text()
+    rig.app.store.update(rig.sid, model="claude-haiku-5-5")  # in the real initialize models list
+    await rig.cc.close_session(rig.sid)
+    await rig.send()
+    assert len([m for m in rig.app.store.messages(rig.sid) if m.meta.get("notice") == "claude_code_model"]) == 1
 
 
 @pytest.mark.parametrize("text,is_login", [("website authentication failed", False), ("authentication_failed", False),
@@ -1095,14 +1268,15 @@ async def test_unknown_non_gdw_tool_in_plan_mode_shows_approval_card(rig):
     assert (await task)["behavior"] == "deny"
 
 
-def test_claude_code_docs_describe_experimental_isolation_and_billing():
+def test_claude_code_docs_describe_verification_isolation_and_billing():
     root = Path(__file__).resolve().parents[1]
     for path in (root / "README.md", root / "docs" / "GUIDE.md"):
         text = " ".join(path.read_text().lower().split())
-        for phrase in ("experimental: not yet verified against a live logged-in cli", "env allowlist",
-                       "--safe-mode", "hooks, plugins and settings files are ignored", "token",
-                       "revoked", "hook registration failure", "approval card", "billing='api'", "spend limits"):
+        for phrase in ("checked against claude 2.1.308", "env allowlist", "--setting-sources=",
+                       "hooks, plugins and settings files are ignored", "token", "revoked",
+                       "hook registration failure", "approval card", "billing='api'", "spend limits"):
             assert phrase in text, (path, phrase)
+        assert "not yet verified against a live" not in text and "experimental: " not in text
 
 
 async def test_tool_results_are_redacted_before_storage_and_events(rig):

@@ -102,6 +102,8 @@ class Titler:
         s = self.app.store.get(sid)
         if not s or not self.enabled() or s["deleted"]:
             return False
+        if s.get("harness") == "claude_code":
+            return False  # runs on the user's subscription: no API-billed title call (keeps the first-message title)
         src = s["settings"].get("title_source")
         if not (s["title"] == "New session" or src == "message"):
             return False  # named by the user, a scheduled task, a copy, or already auto-titled

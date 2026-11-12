@@ -3,29 +3,47 @@
 One long-lived process per GameDevWorkstation session:
 
     claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages
-           --session-id=<uuid> | --resume=<uuid>  --model <id> [--effort <level>] --permission-mode <mode>
-           --permission-prompt-tool mcp__gdw__approve --mcp-config <0600 file> [--strict-mcp-config]
-           --safe-mode | --setting-sources=<explicit list> --add-dir <worktrees> --append-system-prompt=<GDW context>
+           --session-id=<uuid> | --resume=<uuid>  --model=<id> --permission-mode=<mode> [--effort=<level>]
+           --permission-prompt-tool=mcp__gdw__approve --mcp-config <0600 file> [--strict-mcp-config]
+           --add-dir <worktrees> --setting-sources=<list, empty by default> --append-system-prompt=<GDW context>
+
+Checked against claude 2.1.308 logged in with a claude.ai subscription ("[live]" below); the fake CLI
+(tests/fixtures/fake_claude.py) replays those captures (tests/fixtures/claude_stream/*.jsonl).
 
 - Auth: the CLI's own login. The child env allows only shell, locale, proxy and desktop variables
-  plus MCP_TOOL_TIMEOUT (claude_cli.child_env); --bare (API key only) is never
-  passed; nothing is read from ~/.claude or the Keychain. `claude auth status` not logged in → the
-  turn ends with a card: "Run `claude auth login` in a terminal, then retry".
-- Turns: one `{"type":"user",...}` line on stdin per GDW turn; the stdout reader maps stream-json
-  events into GDW messages, deltas, tool cards and usage, exactly like the agent_sdk harness, until
-  the turn's `result`. Process ends (crash, app restart): the next turn starts it again with
-  --resume (--mcp-config / --add-dir are passed again; they aren't restored on resume [docs]).
-- GDW tools: features/gdw_mcp.py, an HTTP MCP server on this backend (127.0.0.1 + per-process token).
-- Approvals: a PreToolUse hook registered through the stream-json control protocol (`initialize`,
-  as the Agent SDK does) runs harnesses.make_gate for every tool call, so acceptEdits can't skip
-  GDW's folder scope, snapshots or Plan mode; whatever the hook leaves to the CLI (ExitPlanMode,
-  AskUserQuestion, ...) reaches mcp__gdw__approve, the --permission-prompt-tool, which shows GDW's
-  cards. A `can_use_tool` control request (the SDK's stdio route) gets the same answer.
-- Modes: ask → manual, accept_edits → acceptEdits, plan → plan. bypassPermissions, dontAsk and auto
-  are never passed (build_argv refuses them).
-- Stop: an `interrupt` control request, then SIGINT, then services._kill_tree.
-- Usage: each turn records its delta, provider anthropic; subscription login estimates stay outside
-  USD limits, while API key logins use billing "api" and the normal spend-limit checks.
+  plus MCP_TOOL_TIMEOUT (claude_cli.child_env); --bare (API key only) is never passed; nothing is
+  read from ~/.claude or the Keychain. `claude auth status` → {"loggedIn": true, "authMethod":
+  "claude.ai", "subscriptionType": ...} [live]; not logged in → the turn ends with a card: "Run
+  `claude auth login` in a terminal, then retry".
+- Settings isolation: `--setting-sources=` (empty) loads no user/project/local settings, CLAUDE.md,
+  skills, agents or plugins [live]. Never --safe-mode: it also drops the --mcp-config servers, so
+  mcp__gdw__approve is missing and the CLI exits at the first permission prompt [live].
+- Turns: one `{"type":"user","message":{"role":"user","content":...},"parent_tool_use_id":null,
+  "session_id":"default"}` line on stdin per GDW turn; the stdout reader maps stream-json events into
+  GDW messages, deltas, tool cards and usage until the turn's `result`. `system/init` comes after each
+  user line, not at start. One API message can arrive as several `assistant` events (one per content
+  block, same message id as its `message_start`) [live]: they are joined into one GDW message.
+  Process ends (crash, app restart): the next turn starts it again with --resume (--mcp-config /
+  --add-dir are passed again; they aren't restored on resume [docs]).
+- GDW tools: features/gdw_mcp.py, an HTTP MCP server on this backend (127.0.0.1 + per-process
+  bearer token, honoured by the CLI [live]). The CLI loads MCP tools lazily (ToolSearch, then the call).
+- Approvals: a PreToolUse hook registered through the stream-json control protocol (`initialize`
+  with hooks; its response says `hooks_applied`) runs harnesses.make_gate for every tool call, so
+  acceptEdits can't skip GDW's folder scope, snapshots or Plan mode. What the hook leaves to the CLI
+  (`{}`: AskUserQuestion, ExitPlanMode, ToolSearch, the plan file in Plan mode, ...) goes through the
+  CLI's own rules and then mcp__gdw__approve, the --permission-prompt-tool: input {tool_name, input,
+  tool_use_id}, answer {"behavior":"allow","updatedInput":{...}} or {"behavior":"deny","message":...}
+  [live]. A `can_use_tool` control request (only sent with `--permission-prompt-tool stdio`, which
+  GDW doesn't pass) gets the same answer.
+- Modes: ask → manual (reported back as "default"), accept_edits → acceptEdits, plan → plan.
+  bypassPermissions, dontAsk and auto are never passed (build_argv refuses them).
+- Stop: an `interrupt` control request (answered with {"still_queued": []}, the turn ends with
+  terminal_reason "aborted_streaming", the process stays) [live]; then SIGINT, which ends the turn
+  and the process [live]; then services._kill_tree.
+- Usage: `result.usage` is the turn's own tokens; `total_cost_usd` (and modelUsage) are running
+  totals for the conversation, carried across --resume [live]. Each turn records its tokens and the
+  cost increase, provider anthropic; subscription estimates stay outside USD limits, while API key
+  logins use billing "api" and the normal spend-limit checks.
 """
 from __future__ import annotations
 
@@ -61,7 +79,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 HARNESS = "claude_code"
-CLI_MODE = {"ask": "manual", "accept_edits": "acceptEdits", "plan": "plan"}  # `claude --help` lists manual, not default
+CLI_MODE = {"ask": "manual", "accept_edits": "acceptEdits", "plan": "plan"}  # `--help` lists manual; init reports "default"
 FORBIDDEN_MODES = frozenset({"bypassPermissions", "dontAsk", "auto"})
 FORBIDDEN_FLAGS = ("--bare", "--dangerously-skip-permissions", "--allow-dangerously-skip-permissions")
 SETTING_SOURCES = ("user", "project", "local")
@@ -86,6 +104,40 @@ def valid_setting_sources(v: Any) -> bool:
         return False
     parts = [p.strip() for p in v.split(",") if p.strip()]
     return all(p in SETTING_SOURCES for p in parts) and len(set(parts)) == len(parts)
+
+
+def user_plugins(plugins: Any) -> list:
+    """`system/init` plugins other than the CLI's own: 2.1.308 always lists its built-in ones
+    ({"path": "builtin", "source": "<name>@builtin"}) [live]."""
+    out = []
+    for p in plugins or []:
+        if isinstance(p, dict) and (p.get("path") == "builtin" or str(p.get("source") or "").endswith("@builtin")):
+            continue
+        out.append(p)
+    return out
+
+
+def plans_dir() -> Path:
+    """Where the CLI writes Plan mode's plan file before ExitPlanMode reads it (~/.claude/plans [live];
+    GDW never sets CLAUDE_CONFIG_DIR)."""
+    return Path.home() / ".claude" / "plans"
+
+
+def is_plan_file(name: str, inp: dict) -> bool:
+    """A Write/Edit of a Markdown file directly inside plans_dir() (resolved, so no `..` or symlink escapes)."""
+    if name not in ("Write", "Edit", "MultiEdit"):
+        return False
+    fp = inp.get("file_path")
+    if not isinstance(fp, str) or not fp:
+        return False
+    p = Path(fp).expanduser()
+    if not p.is_absolute():
+        return False
+    try:
+        full, root = p.resolve(), plans_dir().resolve()
+    except (OSError, RuntimeError):
+        return False
+    return full.parent == root and full.suffix == ".md"
 
 
 def _cap_prompt(text: str) -> str:
@@ -125,8 +177,11 @@ def build_argv(cli: str, *, session_id: str | None, resume: str | None, model: s
         argv.append("--strict-mcp-config")
     for d in add_dirs:
         argv += ["--add-dir", str(d)]
+    # An empty list loads no user/project/local settings, CLAUDE.md, skills, agents or plugins. Never
+    # --safe-mode: in 2.1.308 it also drops the --mcp-config servers, so mcp__gdw__approve is missing
+    # and the CLI exits at the first permission prompt.
     sources = ','.join(p.strip() for p in setting_sources.split(',') if p.strip())
-    argv.append(f"--setting-sources={sources}" if sources else "--safe-mode")
+    argv.append(f"--setting-sources={sources}")
     if system_prompt:
         argv.append(f"--append-system-prompt={_cap_prompt(system_prompt)}")
     bad = [a for a in argv if a.split("=", 1)[0] in FORBIDDEN_FLAGS or
@@ -146,6 +201,8 @@ def _block_text(content: Any) -> str:
                 parts.append(str(b.get("text") or ""))
             elif isinstance(b, dict) and b.get("type") == "image":
                 parts.append("[image]")
+            elif isinstance(b, dict) and b.get("type") == "tool_reference":  # ToolSearch loading a tool [live]
+                parts.append(f"[loaded {b.get('tool_name') or 'a tool'}]")
             elif isinstance(b, str):
                 parts.append(b)
         return "\n".join(parts)
@@ -186,6 +243,7 @@ class Proc:
         self._pending: dict[str, asyncio.Future] = {}
         self._inflight: dict[str, asyncio.Task] = {}
         self._msg_ids: dict[str, str] = {}  # CLI message id → the GDW id its streamed text used
+        self._open: tuple[str, Message] | None = None  # the GDW message the current CLI message's blocks join
         self._stream_id: str | None = None
         self._req = 0
         self.reader = asyncio.create_task(self._read())
@@ -314,6 +372,9 @@ class Proc:
         if t == "result":
             self._on_result(ev, turn)
             return
+        if t == "rate_limit_event":
+            self._on_rate_limit(ev.get("rate_limit_info") or {}, turn)
+            return
         if turn and turn.jid and t:
             app.jobs.log(turn.jid, f"[{t}]\n")
 
@@ -323,7 +384,7 @@ class Proc:
             # Reject reported hooks/plugins even with explicit setting sources; missing fields are OK.
             foreign_mcp = [m for m in ev.get("mcp_servers") or []
                            if (m.get("name") if isinstance(m, dict) else m) != SERVER]
-            if ev.get("hooks") or ev.get("plugins") or (foreign_mcp and not self.mgr.cfg.get("load_user_mcp")):
+            if ev.get("hooks") or user_plugins(ev.get("plugins")) or (foreign_mcp and not self.mgr.cfg.get("load_user_mcp")):
                 self.fatal_error = "Claude Code settings isolation failed: unexpected hooks, plugins or MCP servers."
                 self.mgr._error(sid, self.fatal_error)
                 self.mgr.mcp.revoke(sid, self.token)
@@ -356,8 +417,24 @@ class Proc:
                     "max_attempts": ev.get("max_retries")}, sid)
             if turn and turn.jid:
                 app.jobs.log(turn.jid, f"retry {ev.get('attempt')}/{ev.get('max_retries')}: {err}\n")
-        elif turn and turn.jid and st:
+        elif turn and turn.jid and st and st not in ("status", "thinking_tokens"):  # those two come many times a turn
             app.jobs.log(turn.jid, f"[system {st}]\n")
+
+    def _on_rate_limit(self, info: dict, turn: Turn | None) -> None:
+        """`rate_limit_event` after each API call: {"status": "allowed", "rateLimitType": "five_hour",
+        "resetsAt": <epoch s>, "unifiedWindows": {...}} [live]. Anything but "allowed" is shown."""
+        status = str(info.get("status") or "")
+        if not status or status == "allowed":
+            return
+        resets = info.get("resetsAt") if isinstance(info.get("resetsAt"), (int, float)) else None
+        window = str(info.get("rateLimitType") or "").replace("_", " ")
+        text = ("Claude plan limit reached" if status == "rejected" else "Close to the Claude plan limit") + \
+            (f" ({window})" if window else "") + (time.strftime(", resets at %H:%M", time.localtime(resets)) if resets else "")
+        self.app.bus.publish("agent.status", {"kind": "rate_limit", "text": text, "until": resets,
+                                              "retry_in_s": round(max(0.0, resets - time.time()), 1) if resets else None},
+                             self.sid)
+        if turn and turn.jid:
+            self.app.jobs.log(turn.jid, f"rate limit: {status} {window}\n")
 
     def _on_stream(self, e: dict, turn: Turn | None) -> None:
         bus, sid, et = self.app.bus, self.sid, e.get("type")
@@ -389,8 +466,8 @@ class Proc:
             turn.pending_results = []
 
     def _on_assistant(self, m: dict, turn: Turn | None) -> None:
+        """One `assistant` event per content block [live]; blocks of one API message (same id) join one GDW message."""
         app, sid = self.app, self.sid
-        self._flush_results(turn)
         blocks: list[Any] = []
         for b in m.get("content") or []:
             if not isinstance(b, dict):
@@ -398,35 +475,43 @@ class Proc:
             bt = b.get("type")
             if bt == "text" and b.get("text"):
                 blocks.append(TextBlock(text=b["text"]))
-            elif bt == "thinking":
-                blocks.append(ThinkingBlock(thinking=b.get("thinking", ""), signature=b.get("signature"),
-                                            provider="anthropic"))
+            elif bt == "thinking" and b.get("thinking"):  # summarized-away thinking arrives empty (signature only)
+                blocks.append(ThinkingBlock(thinking=b["thinking"], signature=b.get("signature"), provider="anthropic"))
             elif bt == "tool_use":
                 inp = b.get("input") if isinstance(b.get("input"), dict) else {}
                 blocks.append(ToolUseBlock(id=b.get("id") or new_id("toolu_"), name=b.get("name", ""), input=inp))
         if not blocks:
             return
         cli_id = str(m.get("id") or "")
-        gid = self._msg_ids.pop(cli_id, None) or new_id("msg_")
         model = m.get("model") or (turn.model if turn else None)
-        msg = Message(id=gid, role="assistant", content=blocks,
-                      meta={"model": model, "effort": turn.effort if turn else None, "harness": HARNESS,
-                            "billing": self.billing})
-        app.store.add_message(sid, msg)
+        if cli_id and self._open and self._open[0] == cli_id:
+            msg = self._open[1]
+            msg.content = [*msg.content, *blocks]
+            app.store.replace_content(sid, msg.id, msg)
+        else:
+            self._flush_results(turn)
+            gid = self._msg_ids.pop(cli_id, None) or new_id("msg_")
+            msg = Message(id=gid, role="assistant", content=blocks,
+                          meta={"model": model, "effort": turn.effort if turn else None, "harness": HARNESS,
+                                "billing": self.billing})
+            app.store.add_message(sid, msg)
+            self._open = (cli_id, msg) if cli_id else None
         if turn:
             turn.saw_output = True
-        try:
-            app.items.index_message(sid, msg, provider="anthropic", model=model, source="agent")
-        except Exception:  # noqa: BLE001 — indexing is a convenience
-            log.debug("index_message failed", exc_info=True)
+        if any(isinstance(b, TextBlock) for b in blocks):
+            try:
+                app.items.index_message(sid, msg, provider="anthropic", model=model, source="agent")
+            except Exception:  # noqa: BLE001 — indexing is a convenience
+                log.debug("index_message failed", exc_info=True)
         for b in blocks:
             if isinstance(b, ToolUseBlock):
                 app.bus.publish("tool.started", {"tool_use_id": b.id, "name": b.name, "input": b.input,
-                                                 "message_id": gid}, sid)
+                                                 "message_id": msg.id}, sid)
                 if turn and turn.jid:
                     app.jobs.log(turn.jid, f"{b.name}: {json.dumps(b.input)[:200]}\n")
 
     def _on_user(self, m: dict, turn: Turn | None) -> None:
+        self._open = None
         content = m.get("content")
         if not isinstance(content, list):
             return
@@ -446,6 +531,11 @@ class Proc:
     def _on_result(self, ev: dict, turn: Turn | None) -> None:
         origin = ev.get("origin")
         injected = isinstance(origin, dict) and origin.get("kind") not in (None, "human")
+        self._open = None
+        if ev.get("num_turns") == 0 and RESUME_FAILED.search("; ".join(map(str, ev.get("errors") or []))):
+            # `--resume` of a conversation that's gone: this result comes just before the CLI exits 1 with
+            # "No conversation found with session ID: <id>" on stderr [live]; run_turn starts afresh on the exit.
+            return
         self._flush_results(turn)
         self.mgr.record_usage(self.sid, ev, turn)
         if turn is None or injected:
@@ -465,6 +555,7 @@ class Proc:
     def _finish_turn(self, exited: bool = False) -> None:
         turn, self.turn = self.turn, None
         self._stream_id = None
+        self._open = None
         self.app.bus.publish("agent.status", {"kind": None}, self.sid)
         if turn and not turn.done.done():
             self._flush_results(turn)
@@ -504,7 +595,7 @@ class Proc:
         if await self._settled(turn, wait_s):
             return
         try:
-            self.proc.send_signal(signal.SIGINT)  # ends the turn, keeps the process [docs]
+            self.proc.send_signal(signal.SIGINT)  # ends the turn with a result, then the process exits [live]
         except ProcessLookupError:
             return
         if await self._settled(turn, wait_s):
@@ -552,6 +643,7 @@ class ClaudeCode:
         self.procs: dict[str, Proc] = {}
         self._stopping: dict[str, asyncio.Task] = {}
         self._spawn_lock: dict[str, asyncio.Lock] = {}
+        self._plans: dict[str, str] = {}  # session → the last plan text Claude Code wrote in Plan mode
 
     @property
     def cfg(self) -> dict:
@@ -797,10 +889,13 @@ class ClaudeCode:
             p = Proc(self, sid, proc, sig, cc_session, mcp_file, resumed=bool(resume), token=token, billing=billing)
             self.procs[sid] = p
             if c.get("pre_tool_hook", True):
-                await p.request({"subtype": "initialize", "hooks": {"PreToolUse": [{
+                info = await p.request({"subtype": "initialize", "hooks": {"PreToolUse": [{
                     "matcher": None, "hookCallbackIds": [HOOK_ID], "timeout": HOOK_TIMEOUT_S, "onFailure": "block"}]}},
                     timeout=INIT_TIMEOUT_S)
+                if isinstance(info, dict) and info.get("hooks_applied") is False:  # 2.1.308 answers true [live]
+                    raise RuntimeError("Claude Code didn't apply GameDevWorkstation's PreToolUse hook")
                 p.hook_ok = True
+                self._check_model(sid, model, info)
             if not resume:
                 app.store.update(sid, settings={"claude_code_session": cc_session, "claude_code_since": time.time(),
                                                 "claude_code_totals": None})
@@ -839,6 +934,17 @@ class ClaudeCode:
                 raise
             raise ClaudeStartError(text, stderr) from None
 
+    def _check_model(self, sid: str, model: str, info: Any) -> None:
+        """The initialize response lists the models this login offers ({"value": "haiku", "resolvedModel":
+        "claude-haiku-5-5", ...}) [live]: say so when the session's model isn't one of them."""
+        models = info.get("models") if isinstance(info, dict) else None
+        if not isinstance(models, list) or not models:
+            return
+        known = {str(m.get(k)) for m in models if isinstance(m, dict) for k in ("value", "resolvedModel") if m.get(k)}
+        if model not in known:
+            self.notice(sid, "claude_code_model", f"Claude Code doesn't list {model} for this login; "
+                                                  "the turn may fail with a model error.")
+
     # -------------------------------------------------------- approvals
 
     def _gate(self, sid: str):
@@ -850,12 +956,27 @@ class ClaudeCode:
             return None
         return make_gate(self.app, lambda: self.app.store.get(sid) or s, _cwd(s), [])
 
+    def _note_plan(self, sid: str, name: str, inp: dict) -> None:
+        """Keep the plan text the CLI writes (GDW never reads ~/.claude), for the plan card."""
+        if name == "Write" and isinstance(inp.get("content"), str):
+            self._plans[sid] = inp["content"][:20000]
+        elif name == "Edit" and isinstance(inp.get("new_string"), str) and sid in self._plans:
+            old = str(inp.get("old_string") or "")
+            if old and old in self._plans[sid]:
+                self._plans[sid] = self._plans[sid].replace(old, inp["new_string"], 1)[:20000]
+
+    def _plan_mode(self, sid: str) -> bool:
+        return ((self.app.store.get(sid) or {}).get("mode")) == "plan"
+
     async def pre_tool_use(self, sid: str, data: dict) -> dict:
         """The PreToolUse hook callback: GDW's gate for every tool call, like agent_sdk's pre_tool_use."""
         name = str(data.get("tool_name") or data.get("toolName") or "")
         inp = data.get("tool_input") if isinstance(data.get("tool_input"), dict) else (data.get("input") or {})
         if name in DEFERRED_SDK_TOOLS:
             return {}  # no say: the CLI's mode rules, then the permission prompt tool (GDW's card)
+        if self._plan_mode(sid) and is_plan_file(name, inp):
+            self._note_plan(sid, name, inp)
+            return {}  # Plan mode's plan file (ExitPlanMode reads it): the CLI's plan-mode rules, then decide()
         if name == PROMPT_TOOL:
             why: str | None = "mcp__gdw__approve is Claude Code's permission handler, not a tool to call."
         elif name.startswith(GDW_PREFIX):
@@ -869,8 +990,8 @@ class ClaudeCode:
         return {"hookSpecificOutput": out}
 
     async def approve(self, sid: str, args: dict) -> dict:
-        """mcp__gdw__approve: the --permission-prompt-tool. Input {tool_name, input, tool_use_id} per the
-        docs ([UNVERIFIED] exact keys: camelCase and tool_input spellings are accepted too)."""
+        """mcp__gdw__approve: the --permission-prompt-tool. Input {tool_name, input, tool_use_id} [live];
+        camelCase and tool_input spellings are accepted too, in case a later CLI changes them."""
         a = args.get("request") if isinstance(args.get("request"), dict) else args
         name = str(a.get("tool_name") or a.get("toolName") or a.get("name") or "")
         inp = next((a[k] for k in ("input", "tool_input", "toolInput", "arguments") if isinstance(a.get(k), dict)), {})
@@ -885,7 +1006,8 @@ class ClaudeCode:
             return await self._ask_question(sid, inp)
         if name == "ExitPlanMode":
             res = await app.approvals.ask(sid, "claude_code_plan", {
-                "subject": "Claude Code's plan", "markdown": str(inp.get("plan") or "")[:20000],
+                "subject": "Claude Code's plan",
+                "markdown": str(inp.get("plan") or self._plans.get(sid) or "(The plan is in Claude Code's plan file.)")[:20000],
                 "buttons": [{"id": "approve", "label": "Approve plan (switch to Ask mode)", "decision": "approve",
                              "style": "primary"},
                             {"id": "keep", "label": "Keep planning", "decision": "deny", "style": "ghost"}],
@@ -899,6 +1021,9 @@ class ClaudeCode:
                     (f" Feedback: {res.get('note')}" if res.get("note") else "")}
         if name == PROMPT_TOOL:
             return {"behavior": "deny", "message": "Not a tool to call."}
+        if self._plan_mode(sid) and is_plan_file(name, inp):
+            self._note_plan(sid, name, inp)
+            return allow  # the plan text itself, in the CLI's own plans folder; the plan card comes next
         if name.startswith(GDW_PREFIX):
             return allow  # GDW's own tool: its own checks run when it's called
         gate = self._gate(sid)
@@ -926,19 +1051,20 @@ class ClaudeCode:
     # ------------------------------------------------------------ usage
 
     def record_usage(self, sid: str, ev: dict, turn: Turn | None) -> None:
-        """Record the increase in CLI totals, retaining the conversation id and process pid.
-        A new conversation or totals that reset on process restart count in full.
-        Tokens may be per turn or cumulative: choose the reading whose price is closer to
-        the cumulative cost delta.
-        Live logged-in CLI behavior remains unverified; the fake covers both restart shapes."""
+        """One usage row per `result`. Observed [live]: `usage` holds this turn's own tokens (zero for a
+        turn that was interrupted mid-stream), while `total_cost_usd` and `modelUsage` are running totals
+        for the conversation that carry across --resume. So the tokens are recorded as they are and the
+        cost is the increase over the stored total of the same conversation (a total that went down,
+        e.g. a conversation the CLI rebuilt, counts in full)."""
         app = self.app
         s = app.store.get(sid)
         if not s:
             return
         u = ev.get("usage") or {}
-        now = {"cost": float(ev.get("total_cost_usd") or 0.0), "in": int(u.get("input_tokens") or 0),
-               "out": int(u.get("output_tokens") or 0), "cr": int(u.get("cache_read_input_tokens") or 0),
-               "cw": int(u.get("cache_creation_input_tokens") or 0)}
+        usage = Usage(input_tokens=int(u.get("input_tokens") or 0), output_tokens=int(u.get("output_tokens") or 0),
+                      cache_read_tokens=int(u.get("cache_read_input_tokens") or 0),
+                      cache_write_tokens=int(u.get("cache_creation_input_tokens") or 0))
+        cost = float(ev.get("total_cost_usd") or 0.0)
         last = s["settings"].get("claude_code_totals") or {}
         if not isinstance(last, dict):
             last = {}
@@ -948,31 +1074,17 @@ class ClaudeCode:
             cs = p.cc_session if p else s["settings"].get("claude_code_session")
         if not valid_claude_code_session(cs):
             cs = None
-        pid = p.proc.pid if p else None
         if last.get("session_id", s["settings"].get("claude_code_session")) != cs:
             last = {}
-        # Resume may preserve conversation totals or reset them per process. On a new pid,
-        # a smaller total identifies a per-process restart: record that first total in full.
-        # Otherwise subtract the stored conversation baseline to avoid counting it twice.
-        if last.get("pid") != pid and now["cost"] < float(last.get("cost") or 0):
-            last = {}
-        delta = {k: (v - float(last.get(k) or 0) if v >= float(last.get(k) or 0) else v) for k, v in now.items()}
+        before = float(last.get("cost") or 0.0)
         model = turn.model if turn else self._model(s)
-
-        def usage_of(d: dict) -> Usage:
-            return Usage(input_tokens=int(d["in"]), output_tokens=int(d["out"]), cache_read_tokens=int(d["cr"]),
-                         cache_write_tokens=int(d["cw"]))
-
-        cand = [usage_of(delta), usage_of(now)]
-        try:
-            mcfg = app.config.model(model)
-            if delta["cost"] > 0:
-                cand.sort(key=lambda x: abs(compute_cost(mcfg, x) - delta["cost"]))
-        except Exception:  # noqa: BLE001 — unknown model: the delta reading
-            mcfg = None
-        usage = cand[0]
-        usage.cost_usd = delta["cost"] if ev.get("total_cost_usd") is not None else (
-            compute_cost(mcfg, usage) if mcfg else 0.0)
+        if ev.get("total_cost_usd") is not None:
+            usage.cost_usd = cost - before if cost >= before else cost
+        else:
+            try:
+                usage.cost_usd = compute_cost(app.config.model(model), usage)
+            except Exception:  # noqa: BLE001 — unknown model: no estimate
+                usage.cost_usd = 0.0
         billing = p.billing if p else ("api" if (self.probe.cached() or {}).get("bills_api") else "subscription")
         app.usage.record(provider="anthropic", model=model, usage=usage, session_id=sid,
                          profile="subscription" if billing == "subscription" else "default", role="main", run_id=f"main:{sid}",
@@ -980,8 +1092,8 @@ class ClaudeCode:
                          latency_ms=int(ev.get("duration_ms") or ((time.monotonic() - turn.t0) * 1000 if turn else 0)),
                          ok=not ev.get("is_error"), billing=billing,
                          error_kind="auth" if turn and turn.login_error else None)
-        app.store.update(sid, settings={"claude_code_totals": {**now, "session_id": cs, "pid": pid},
-                                        **({"claude_code_session": cs} if cs else {})})
+        totals = {"cost": cost if ev.get("total_cost_usd") is not None else before, "session_id": cs}
+        app.store.update(sid, settings={"claude_code_totals": totals, **({"claude_code_session": cs} if cs else {})})
 
     # -------------------------------------------------------- lifecycle
 
@@ -1005,6 +1117,7 @@ class ClaudeCode:
         await asyncio.gather(*(self.close_session(sid) for sid in list(self.procs)), return_exceptions=True)
 
     async def purge_session(self, sid: str) -> None:
+        self._plans.pop(sid, None)
         await self.close_session(sid)
         remove_claude_code_folder(sid)
 

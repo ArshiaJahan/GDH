@@ -327,3 +327,17 @@ def test_wrong_typed_settings_are_ignored_with_a_banner(client, monkeypatch):
     config_mod.save_config_patch({"sessions": {"trash_days": 10, "auto_title": False}})
     assert config_mod.load_error() is None
     assert tomllib.loads(p.read_text())["orchestrator"]["max_tokens"] == 16000
+
+
+@pytest.mark.auto_title
+async def test_claude_code_sessions_skip_the_api_title_call(app):
+    from gamedevworkstation.features.sessions_mgmt import Titler
+
+    s = app.store.create()
+    app.store.add_message(s["id"], Message.user("plan a trip"))
+    app.store.add_message(s["id"], Message.assistant("Here is a plan."))
+    titler = Titler(app)
+    assert titler.wants_title(s["id"])
+    app.store.update(s["id"], harness="claude_code")
+    assert app.store.get(s["id"])["harness"] == "claude_code"
+    assert not titler.wants_title(s["id"])  # subscription session: never bills the API for a title

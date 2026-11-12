@@ -1,0 +1,2 @@
+{"dir": "note", "about": "`claude auth status` (logged in). claude 2.1.308, claude.ai Max login, --model=claude-haiku-5-5, GDW's build_argv and child_env; redacted"}
+{"dir": "out", "ev": {"loggedIn": true, "authMethod": "claude.ai", "apiProvider": "firstParty", "analyticsDisabled": false, "projectsDirectory": "/Users/user/.claude/projects", "configDirectory": "/Users/user/.claude", "email": "REDACTED", "orgId": "REDACTED", "orgName": "REDACTED", "subscriptionType": "max"}}

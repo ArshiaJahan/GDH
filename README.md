@@ -49,7 +49,7 @@ Everything runs locally; the backend listens on `127.0.0.1` only.
 | **Fleet** | Parallel waves of subagents in their own worktrees, each with a claimed scope, scope-checked merges, a conflict circuit breaker and discoveries relayed to the next wave. |
 | **Progressive skill disclosure** | A compact skill index in the system prompt; full skill text is loaded only when used and survives compaction. |
 | **Task board** | A Kanban board (Tasks tab) you and the agent share: tasks with codes like `Task00001`, subtasks and checklists, comments, history and linked sessions, live updates. In chat: `/task new`, `/task <code>`, `/task move`, `/task done`, `/task list`, `/task link`; the agent uses `task_*` tools. Scheduled prompts live on the Schedule page. |
-| **Claude Code sessions** | Experimental: not yet verified against a live logged-in CLI. Run your own `claude` CLI and login, with GDW tools, approvals, Plan mode and `--resume`. Subscription estimates stay outside spend limits; API key logins record `billing='api'` and check spend limits before each turn. See [Claude Code sessions](docs/GUIDE.md#claude-code-sessions). |
+| **Claude Code sessions** | Run your own `claude` CLI and login (checked against claude 2.1.308 on a claude.ai subscription), with GDW tools, approvals, Plan mode and `--resume`. Subscription estimates stay outside spend limits; API key logins record `billing='api'` and check spend limits before each turn. See [Claude Code sessions](docs/GUIDE.md#claude-code-sessions). |
 | **Cost control** | Daily and per-session spend limits, job budgets, approval for high effort, and a My usage page per model. |
 | **Trailer maker** | Brief → beat sheet → scripted Play Mode capture (Unity Recorder) → ffmpeg edit from a JSON edit list → ElevenLabs music cut to the beat sheet → three reviewers → Steam, YouTube and vertical exports. |
 | **ElevenLabs** | Speech, transcription, sound effects and music (including composition plans with exact section lengths), in chat and on their own page. |
@@ -57,12 +57,14 @@ Everything runs locally; the backend listens on `127.0.0.1` only.
 
 ### Claude Code sessions
 
-Experimental: not yet verified against a live logged-in CLI. Settings files default to
-**None (safe mode: your ~/.claude hooks, plugins and settings files are ignored)**, using
-`--safe-mode`. This disables custom CLAUDE.md, skills, installed plugins, hooks, MCP servers,
-commands, agents and output styles; admin policies still apply, and auth, model selection,
-built-in tools and plugins, and permissions work normally. Choosing `user,project,local` sources
-uses `--setting-sources=<list>` instead. Strict MCP config remains on unless you enable your MCP
+Checked against claude 2.1.308 logged in with a claude.ai subscription: login detection, the
+stream-json protocol, the PreToolUse hook, the permission prompt tool, GDW's MCP tools, Plan mode's
+plan card, questions, Stop and `--resume` (redacted captures in `tests/fixtures/claude_stream/`).
+Settings files default to **None (your ~/.claude hooks, plugins and settings files are ignored)**,
+using an empty `--setting-sources=`: no user, project or local settings, CLAUDE.md, skills, agents or
+plugins are loaded; admin policies still apply. (`--safe-mode` isn't used: it also drops
+GameDevWorkstation's own MCP server.) Choosing `user,project,local` sources uses
+`--setting-sources=<list>` instead. Strict MCP config remains on unless you enable your MCP
 servers. GDW adds its own CLAUDE.md/skills context explicitly, with a 64 KB prompt cap.
 
 The CLI env allowlist keeps only shell/locale variables (`PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`,

@@ -32,6 +32,8 @@ CACHE_S = 60.0
 SEARCH_DIRS = ("~/.local/bin", "~/.claude/local", "/opt/homebrew/bin")
 LOGIN_HINT = "Run `claude auth login` in a terminal, then retry."
 _SECRETISH = re.compile(r"token|secret|key|password|credential", re.I)
+# Account details `claude auth status` reports when logged in [live]; GDW has no use for them.
+PERSONAL = frozenset({"email", "orgId", "orgName", "organization", "accountUuid", "organizationUuid"})
 _ERROR_SECRET = re.compile(r"Bearer\s+\S+|sk-[A-Za-z0-9_-]{10,}", re.I)
 
 
@@ -72,9 +74,10 @@ def find_cli(config: Any) -> str | None:
 
 
 def _scrub(d: Any) -> Any:
-    """`claude auth status` output for the UI, minus anything that looks like a credential."""
+    """`claude auth status` output for the UI, minus anything that looks like a credential or names the account."""
     if isinstance(d, dict):
-        return {k: _scrub(v) for k, v in d.items() if not _SECRETISH.search(str(k)) or k in ("authMethod",)}
+        return {k: _scrub(v) for k, v in d.items()
+                if (not _SECRETISH.search(str(k)) or k in ("authMethod",)) and k not in PERSONAL}
     if isinstance(d, list):
         return [_scrub(x) for x in d]
     return redact(d) if isinstance(d, str) else d
@@ -96,8 +99,10 @@ async def _run(argv: list[str], timeout: float = 15.0) -> tuple[int, str, str]:
 
 
 def logged_in(auth: dict | None) -> bool:
-    """`claude auth status` JSON → logged in. Observed locally: {"loggedIn": false, "authMethod": "none", ...};
-    the logged-in shape is [UNVERIFIED], so a few spellings are accepted."""
+    """`claude auth status` JSON → logged in. Observed (2.1.308): {"loggedIn": false, "authMethod": "none", ...}
+    and, logged in with a subscription, {"loggedIn": true, "authMethod": "claude.ai", "apiProvider":
+    "firstParty", "subscriptionType": "max", "email": ..., "orgId": ..., "orgName": ...}. A few other
+    spellings are still accepted in case a later CLI renames the field."""
     if not isinstance(auth, dict):
         return False
     for k in ("loggedIn", "logged_in", "authenticated"):
@@ -109,7 +114,8 @@ def logged_in(auth: dict | None) -> bool:
 
 def bills_api(auth: dict | None) -> bool:
     """True when the CLI says it would use an API key (not the subscription) even with GDW's clean env,
-    e.g. an apiKeyHelper in managed settings. The authMethod values are [UNVERIFIED] beyond "none"."""
+    e.g. an apiKeyHelper in managed settings. Observed values: "none" and "claude.ai" (subscription,
+    so False); the API key spellings below weren't observed (no API key login was tried)."""
     m = str((auth or {}).get("authMethod") or "").lower().replace("-", "_").replace(" ", "_")
     return m in ("api_key", "apikey", "api_key_helper", "apikeyhelper", "console", "anthropic_api_key")
 

@@ -8,7 +8,10 @@ rebinding) and no foreign Origin (no browser page can call it).
 
 Transport: the request/response subset of MCP Streamable HTTP. Every POSTed JSON-RPC request gets
 an `application/json` reply; notifications get 202; GET (the optional server-to-client SSE stream)
-and DELETE get 405. The MCP SDK's StreamableHTTPSessionManager needs its own task-group lifespan and
+and DELETE get 405. claude 2.1.308 works with exactly this [live]: it sends the bearer header from
+--mcp-config, probes `server/discover` (answered "Method not found", it then falls back), sends
+`initialize` (protocol 2025-11-25), `notifications/initialized`, one GET (405 is fine) and
+`tools/list`; `tools/call` params carry `_meta` ({"claudecode/toolUseId", "progressToken"}). The MCP SDK's StreamableHTTPSessionManager needs its own task-group lifespan and
 doesn't hand the request's bearer identity to tool handlers in stateless mode, so this small route
 is used instead; tests drive it with the MCP SDK's own client.
 

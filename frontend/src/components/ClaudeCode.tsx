@@ -12,7 +12,7 @@ export const HARNESSES: [string, string][] = [
   ["claude_code", "Claude Code (subscription)"],
 ];
 export const HARNESS_HINT: Record<string, string> = {
-  claude_code: "Experimental: runs your own claude CLI with your own Claude login. API key logins count toward spend limits.",
+  claude_code: "Runs your own claude CLI with your own Claude login. API key logins count toward spend limits.",
 };
 
 export type ClaudeStatus = {
@@ -124,7 +124,7 @@ export function ClaudeCodeSettings({ st, save, Row, TextSetting }: {
       <h2 className="text-base font-semibold mb-1">Claude Code</h2>
       <p className="text-[12.5px] text-muted mb-3">
         "Claude Code (subscription)" sessions run your own <code className="font-mono">claude</code> CLI with your own Claude login.
-        Experimental: not yet verified against a live logged-in CLI. Subscription usage is shown as an estimate;
+        Checked against claude 2.1.308 on a claude.ai subscription login. Subscription usage is shown as an estimate;
         API key logins count toward API spend limits. GameDevWorkstation passes no API key and never reads your tokens.
       </p>
       <Row label="claude CLI" noMark>
@@ -149,10 +149,10 @@ export function ClaudeCodeSettings({ st, save, Row, TextSetting }: {
         <input type="checkbox" checked={!!c.load_user_mcp} aria-label="Load my Claude Code MCP servers"
           onChange={(e) => save({ claude_code: { load_user_mcp: e.target.checked } }, "Your MCP servers")} />
       </Row>
-      <Row label="Settings files" hint="None uses safe mode: custom CLAUDE.md, skills, plugins, hooks, MCP servers, commands, agents and output styles are disabled; admin policies still apply">
+      <Row label="Settings files" hint="None loads no user, project or local settings: no custom CLAUDE.md, skills, agents, plugins or their hooks; admin policies still apply">
         <select className="input max-w-full" value={sources} aria-label="Claude Code setting sources"
           onChange={(e) => save({ claude_code: { setting_sources: e.target.value } }, "Settings files")}>
-          <option value="">None (safe mode: your ~/.claude hooks, plugins and settings files are ignored)</option>
+          <option value="">None (your ~/.claude hooks, plugins and settings files are ignored)</option>
           <option value="user">User (~/.claude)</option>
           <option value="user,project">User and project</option>
           <option value="user,project,local">User, project and local</option>
