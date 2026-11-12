@@ -1,4 +1,4 @@
-// harness-version: 2
+// harness-version: 3
 // Harness.Headless: batchmode entry points for headless-ops/scripts/unity.sh (Unity 6000.3).
 // (Keep the version line first: GameDevWorkstation reads it to offer upgrades. Edited copies are never overwritten.)
 //   -executeMethod Harness.Headless.HarnessCli.Compile      [-forceRecompile]
@@ -7,6 +7,9 @@
 //                                                           -out <path> (or -buildOutput <path>) [-dev] [-cleanBuild]
 //                                                           [-scenes "a;b"] [-buildReport file.json]
 //   -executeMethod Harness.Headless.HarnessCli.MenuItem     -menu "Path/To/Item"   (then AssetDatabase.SaveAssets)
+//   -executeMethod Harness.Headless.HarnessCli.Screenshot   -out <png> [-scene Assets/...unity] [-camera <name>]
+//                                                           [-camPos x,y,z] [-camRot x,y,z] [-camFov f] [-width 1920 -height 1080]
+//                                                           (needs a graphics device: never pass -nographics; never saves the scene)
 // Every entry point ends with a deferred EditorApplication.Exit(code): 0 ok, 1 failed, 2 bad arguments/setup.
 // Run them WITHOUT -quit (see Exit). Called from an interactive editor (MCP execute_code) they log but never exit.
 // Progress lines are logged as "[HARNESS] ..." so unity.sh can grep them from the -logFile.
@@ -18,6 +21,7 @@ using UnityEditor;
 using UnityEditor.Build.Profile;
 using UnityEditor.Build.Reporting;
 using UnityEditor.Compilation;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 
 namespace Harness.Headless
@@ -237,6 +241,239 @@ namespace Harness.Headless
             AssetDatabase.SaveAssets();
             Say("MENU OK " + item + " logged_errors=" + logged.Count);
             Exit(0);
+        }
+
+        // ------------------------------------------------------------------ Screenshot
+
+        const string ShotCameraName = "HarnessScreenshotCamera";
+
+        /// <summary>
+        /// Renders one PNG of a scene with the Editor closed (the gallery's batch route; unity.sh screenshot).
+        /// -out &lt;png&gt; (required), -scene Assets/...unity (default: the first enabled build scene), -camera &lt;name&gt; (an
+        /// existing camera, by name or hierarchy path), -camPos x,y,z and -camRot x,y,z (euler degrees, world space),
+        /// -camFov f, -width/-height (default 1920x1080), -timeOfDay (free text, ignored). The scene is opened with
+        /// EditorSceneManager.OpenScene(Single) and NEVER saved. Without -camera, or with -camPos/-camRot, a temporary
+        /// camera (HideAndDontSave, copied from the named camera or Camera.main when there is one) is created and destroyed
+        /// again. Rendering needs a graphics device: run WITHOUT -nographics. Batch mode only (opening a scene in an
+        /// interactive editor would drop its unsaved changes). Exit 0 ok, 1 failed, 2 bad arguments.
+        /// ⚠ version-sensitive: uses RenderPipeline.SubmitRenderRequest(StandardRequest) under a scriptable render pipeline
+        /// (Unity 2023.1+), Camera.Render() otherwise. Not run against a real Unity here (checked statically).
+        /// </summary>
+        public static void Screenshot()
+        {
+            if (!Application.isBatchMode)
+            {
+                Say("SHOT FAIL Screenshot() runs only in batch mode (it opens a scene without saving the current one)");
+                return;
+            }
+            string outArg = HarnessArgs.Get("out");
+            if (string.IsNullOrEmpty(outArg) || !outArg.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+            {
+                Say("SHOT FAIL missing -out <path>.png");
+                Exit(2);
+                return;
+            }
+            int width = Mathf.Clamp(HarnessArgs.GetInt("width", 1920), 16, 8192);
+            int height = Mathf.Clamp(HarnessArgs.GetInt("height", 1080), 16, 8192);
+            string timeOfDay = HarnessArgs.Get("timeOfDay");
+            if (!string.IsNullOrEmpty(timeOfDay)) Say("SHOT note -timeOfDay is ignored: " + timeOfDay);
+
+            string scenePath = HarnessArgs.Get("scene");
+            if (string.IsNullOrEmpty(scenePath))
+                scenePath = EditorBuildSettings.scenes.Where(s => s.enabled && !string.IsNullOrEmpty(s.path)).Select(s => s.path).FirstOrDefault();
+            if (string.IsNullOrEmpty(scenePath))
+            {
+                Say("SHOT FAIL no scene: pass -scene Assets/...unity or enable a scene in the build scene list");
+                Exit(2);
+                return;
+            }
+            scenePath = scenePath.Replace('\\', '/');
+            if (!scenePath.StartsWith("Assets/") || !scenePath.EndsWith(".unity", StringComparison.OrdinalIgnoreCase) || !File.Exists(scenePath))
+            {
+                Say("SHOT FAIL scene not found (an Assets/...unity path): " + scenePath);
+                Exit(2);
+                return;
+            }
+
+            Vector3 pos, rot;
+            bool hasPos = TryParseVector(HarnessArgs.Get("camPos"), out pos);
+            bool hasRot = TryParseVector(HarnessArgs.Get("camRot"), out rot);
+            if ((HarnessArgs.Get("camPos") != null && !hasPos) || (HarnessArgs.Get("camRot") != null && !hasRot))
+            {
+                Say("SHOT FAIL -camPos / -camRot must be x,y,z (numbers)");
+                Exit(2);
+                return;
+            }
+            float fov = 0f;
+            string fovArg = HarnessArgs.Get("camFov");
+            if (fovArg != null && !(float.TryParse(fovArg, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out fov) && fov > 0.1f && fov < 179f))
+            {
+                Say("SHOT FAIL -camFov must be a number between 0.1 and 179");
+                Exit(2);
+                return;
+            }
+
+            GameObject temp = null;
+            Camera cam = null;
+            RenderTexture rt = null;
+            RenderTexture prevTarget = null;
+            RenderTexture prevActive = RenderTexture.active;
+            Texture2D tex = null;
+            int code = 1;
+            try
+            {
+                var scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+                string camName = HarnessArgs.Get("camera");
+                Camera named = null;
+                if (!string.IsNullOrEmpty(camName))
+                {
+                    named = FindCamera(scene, camName);
+                    if (named == null)
+                    {
+                        Say("SHOT FAIL camera not found in " + scenePath + ": " + camName);
+                        return;
+                    }
+                }
+                string what;
+                if (named != null && !hasPos && !hasRot)
+                {
+                    cam = named;  // render the scene's own camera as it is (the scene is never saved)
+                    what = "camera=" + named.name;
+                }
+                else
+                {
+                    Camera source = named != null ? named : (Camera.main != null ? Camera.main : FindCamera(scene, null));
+                    temp = EditorUtility.CreateGameObjectWithHideFlags(ShotCameraName, HideFlags.HideAndDontSave, typeof(Camera));
+                    cam = temp.GetComponent<Camera>();
+                    if (source != null)
+                    {
+                        cam.CopyFrom(source);
+                        temp.transform.SetPositionAndRotation(source.transform.position, source.transform.rotation);
+                        CopyPipelineCameraData(source, temp);
+                    }
+                    if (hasPos) temp.transform.position = pos;
+                    if (hasRot) temp.transform.rotation = Quaternion.Euler(rot);
+                    what = "temp camera" + (source != null ? " (from " + source.name + ")" : "");
+                }
+                if (fov > 0f) cam.fieldOfView = fov;
+
+                rt = new RenderTexture(width, height, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+                rt.antiAliasing = 1;
+                rt.Create();
+                prevTarget = cam.targetTexture;
+                RenderCamera(cam, rt);
+                RenderTexture.active = rt;
+                tex = new Texture2D(width, height, TextureFormat.RGB24, false);
+                tex.ReadPixels(new Rect(0, 0, width, height), 0, 0);
+                tex.Apply();
+                byte[] png = tex.EncodeToPNG();
+                string full = Path.GetFullPath(outArg);
+                Directory.CreateDirectory(Path.GetDirectoryName(full));
+                File.WriteAllBytes(full, png);
+                var t = cam.transform;
+                Say("SHOT OK " + full + " " + width + "x" + height + " scene=" + scenePath + " " + what
+                    + " pos=" + Vec(t.position) + " rot=" + Vec(t.eulerAngles) + " fov=" + cam.fieldOfView.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)
+                    + " bytes=" + png.Length);
+                code = 0;
+            }
+            catch (Exception e)
+            {
+                Say("SHOT FAIL exception " + FirstLine(e.Message));
+                code = 1;
+            }
+            finally
+            {
+                RenderTexture.active = prevActive;
+                if (cam != null && temp == null) cam.targetTexture = prevTarget;
+                if (tex != null) UnityEngine.Object.DestroyImmediate(tex);
+                if (rt != null) { rt.Release(); UnityEngine.Object.DestroyImmediate(rt); }
+                if (temp != null) UnityEngine.Object.DestroyImmediate(temp);
+                Exit(code);
+            }
+        }
+
+        /// <summary>Renders cam into rt: a render request under a scriptable render pipeline, Camera.Render() otherwise.</summary>
+        static void RenderCamera(Camera cam, RenderTexture rt)
+        {
+            if (UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline != null)
+            {
+                var request = new UnityEngine.Rendering.RenderPipeline.StandardRequest { destination = rt };
+                if (UnityEngine.Rendering.RenderPipeline.SupportsRenderRequest(cam, request))
+                {
+                    UnityEngine.Rendering.RenderPipeline.SubmitRenderRequest(cam, request);
+                    return;
+                }
+            }
+            cam.targetTexture = rt;
+            cam.Render();
+        }
+
+        /// <summary>URP / HDRP keep post-processing and renderer settings on a separate *AdditionalCameraData component.</summary>
+        static void CopyPipelineCameraData(Camera source, GameObject target)
+        {
+            try
+            {
+                foreach (var c in source.GetComponents<Component>())
+                {
+                    if (c == null || !c.GetType().Name.EndsWith("AdditionalCameraData", StringComparison.Ordinal)) continue;
+                    if (UnityEditorInternal.ComponentUtility.CopyComponent(c))
+                        UnityEditorInternal.ComponentUtility.PasteComponentAsNew(target);
+                }
+            }
+            catch (Exception e)
+            {
+                Say("SHOT note could not copy the render pipeline camera data: " + FirstLine(e.Message));
+            }
+        }
+
+        /// <summary>A camera of the scene by name or hierarchy path (case-insensitive); null name = the first enabled one.</summary>
+        static Camera FindCamera(UnityEngine.SceneManagement.Scene scene, string name)
+        {
+            Camera first = null;
+            foreach (var root in scene.GetRootGameObjects())
+            {
+                foreach (var c in root.GetComponentsInChildren<Camera>(true))
+                {
+                    if (name == null)
+                    {
+                        if (c.enabled && c.gameObject.activeInHierarchy) return c;
+                        if (first == null) first = c;
+                        continue;
+                    }
+                    if (string.Equals(c.name, name, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(HierarchyPath(c.transform), name.Trim('/'), StringComparison.OrdinalIgnoreCase))
+                        return c;
+                }
+            }
+            return first;
+        }
+
+        static string HierarchyPath(Transform t)
+        {
+            string p = t.name;
+            for (var x = t.parent; x != null; x = x.parent) p = x.name + "/" + p;
+            return p;
+        }
+
+        static bool TryParseVector(string s, out Vector3 v)
+        {
+            v = Vector3.zero;
+            if (string.IsNullOrEmpty(s)) return false;
+            var parts = s.Split(',');
+            if (parts.Length != 3) return false;
+            var f = new float[3];
+            for (int i = 0; i < 3; i++)
+                if (!float.TryParse(parts[i].Trim(), System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out f[i])) return false;
+            v = new Vector3(f[0], f[1], f[2]);
+            return true;
+        }
+
+        static string Vec(Vector3 v)
+        {
+            var ci = System.Globalization.CultureInfo.InvariantCulture;
+            return v.x.ToString("0.###", ci) + "," + v.y.ToString("0.###", ci) + "," + v.z.ToString("0.###", ci);
         }
 
         // ------------------------------------------------------------------ Build

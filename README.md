@@ -101,7 +101,7 @@ finds it in `~/.unity/bin`, the Hub bundle or your `PATH`. In `cli` mode MCP for
 turned on. When the Editor holds the project and no live route works, nothing runs in batch: the
 chip offers to install the Pipeline package (a one-time `Packages/manifest.json` change, behind a
 card), to use MCP once, to run on a copy of the project, or to close Unity (it exits without saving,
-behind a card). A few batch ops (asset import, menu items, forced recompile, builds through unity.sh) need
+behind a card). A few batch ops (asset import, menu items, screenshots, forced recompile, builds through unity.sh) need
 the small HarnessCli editor scripts; the app installs them on request behind a card, git-excluded so
 no tracked file changes. The gates, the
 agent's `unity` tool and the Quality card all use the same route; Unity jobs stream to the Terminal
@@ -168,6 +168,16 @@ exports) for chains and campaigns.
 
 Needs `ffmpeg` on your PATH (`brew install ffmpeg`; not bundled) and the `com.unity.recorder` package; capture
 needs the Editor open, because the Recorder doesn't run in batchmode.
+
+### Gallery
+
+The **Gallery** card (side panel, under Outputs) shows the images, videos and audio a session made. Type what a
+screenshot should show ("player at the cave entrance, night, low angle") and a short side agent frames the shot in
+Unity and captures it: through MCP for Unity or the Unity CLI with the Editor open, or a batch render
+(`unity.sh screenshot`) with the Editor closed. Captures only write into `Logs/harness/screenshots/`;
+the agent never edits project source files or saves a scene. Approval cards depend on the route, Play Mode
+exit is best effort, and switching to Plan only mode refuses further captures and play calls. Details:
+[Gallery](docs/GUIDE.md#gallery).
 
 ## Campaigns and workflows
 

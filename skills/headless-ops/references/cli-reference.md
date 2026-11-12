@@ -88,8 +88,25 @@ exit code. "✓ local" = observed on this Mac (6000.3.21f1, Apple Silicon); "✓
   `AssetDatabase.SaveAssets()` and exits through the deferred `HarnessCli.Exit`; run it without `-quit`.
 - `-buildOutput <dir>` is accepted as an alias of `-out` (HarnessCli.Build).
 
+## HarnessCli.Screenshot (harness-version 3)
+- `-executeMethod Harness.Headless.HarnessCli.Screenshot -out <png> [-scene Assets/X.unity] [-camera <name or path>]
+  [-camPos x,y,z] [-camRot x,y,z] [-camFov f] [-width 1920] [-height 1080] [-timeOfDay text]` (`unity.sh screenshot` wraps it).
+  Run it **without `-nographics`** (no graphics device = nothing to render) and without `-quit` (deferred Exit). Exit 0 ok,
+  1 failed (camera not found, exception), 2 bad arguments (no `-out`, no scene, bad vector).
+- Batch only: called in an interactive editor it logs `SHOT FAIL` and returns (OpenScene would drop unsaved changes).
+- Never saves: `EditorSceneManager.OpenScene(path, OpenSceneMode.Single)`, a temporary camera created with
+  `EditorUtility.CreateGameObjectWithHideFlags(…, HideFlags.HideAndDontSave, typeof(Camera))` and destroyed in `finally`;
+  URP/HDRP `*AdditionalCameraData` is copied from the source camera so post-processing settings carry over.
+- Under a scriptable render pipeline it renders with `RenderPipeline.SubmitRenderRequest(cam, new StandardRequest
+  { destination = rt })` when `SupportsRenderRequest` says yes, else `Camera.Render()`. [UNVERIFIED] against a real 6000.3
+  batch run: checked statically only.
+- Negative vector values are fine (`-camPos -3,2,1`): HarnessArgs only treats `-<letter>` as the next flag.
+- In GameDevWorkstation the Gallery's batch route and the `unity` tool's `op=screenshot` (Editor closed) run it through
+  unity.sh, also for the `cli` backend (`unity run` always adds `-quit`).
+
 ## Run on a copy (GameDevWorkstation `clone_when_open`)
-With the Editor open and no live route, the `unity` tool can run compile/tests (official CLI batch) on an APFS copy at
+With the Editor open and no live route, the `unity` tool can run compile/tests (official CLI batch), and the Gallery a batch
+screenshot, on an APFS copy at
 `~/Library/Caches/GameDevWorkstation/unity-clones/<hash>/`: `cp -cR` the first time, then rsync of `Assets/`, `Packages/`
 and `ProjectSettings/` only. Results are labelled "on a copy of the files on disk (unsaved Editor changes not included)".
 

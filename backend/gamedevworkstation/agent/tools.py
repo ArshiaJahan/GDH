@@ -151,6 +151,9 @@ class Tool:
     # inactive features cost no tool-spec tokens. Gets the session dict; a raising `when` counts as
     # false. specs() without a session leaves such tools out; run() refuses them when false.
     when: Callable[[dict], bool] | None = None
+    # Never offered to (or run for) the main agent: tools only a side agent is granted by name (e.g. the
+    # gallery's screenshot agent's scoped `gallery_unity`); the handler checks which run it belongs to.
+    subagent_only: bool = False
 
     def offered(self, session: dict | None) -> bool:
         """Whether `when` allows this tool for `session` (always true without a `when`)."""
@@ -191,6 +194,8 @@ class ToolRegistry:
                 continue
             if role != "main" and t.main_only:
                 continue
+            if role == "main" and t.subagent_only:
+                continue
             if not t.offered(session):
                 continue
             out.append(t.spec)
@@ -200,7 +205,8 @@ class ToolRegistry:
                   allowed: list[str] | None = None) -> ToolOutput:
         t = self.tools.get(name)
         if t is None or (allowed is not None and name not in allowed and not t.always) or \
-                (ctx.role != "main" and t.main_only) or not t.offered(ctx.session):
+                (ctx.role != "main" and t.main_only) or (ctx.role == "main" and t.subagent_only) or \
+                not t.offered(ctx.session):
             return ToolOutput(f"Tool '{name}' is not available here.", is_error=True)
         try:
             return finalize_output(ctx, name, await t.handler(ctx, args))

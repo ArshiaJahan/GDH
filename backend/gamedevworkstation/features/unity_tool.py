@@ -27,7 +27,7 @@ from ..agent.tools import ToolContext, ToolOutput, obj, wrap_untrusted
 from . import unity_cli as uc
 from . import unity_clone as uclone
 from . import unity_harness as uh
-from .unity_bridge import BACKENDS, ROUTE_LABELS, BridgeResult, get_bridge, is_unity_project
+from .unity_bridge import BACKENDS, ROUTE_LABELS, SHOT_DIR, BridgeResult, get_bridge, is_unity_project
 
 if TYPE_CHECKING:
     from fastapi import APIRouter, FastAPI
@@ -49,7 +49,9 @@ TOOL_DESCRIPTION = (
     "Unity output as data. ops: status (route, Editor, CLI), compile, test (platform editmode|playmode, "
     "filter, category, assemblies), build (profile or target, out, dev), exec (method, args; batch), import "
     "(paths; batch), eval (code: C# run in the live Editor, always shown to the user first), command / commands "
-    "(a live Pipeline command by name with params / the list of them), screenshot, play (action start|stop|"
+    "(a live Pipeline command by name with params / the list of them), screenshot (a PNG in Logs/harness/screenshots/ "
+    "on any route: MCP, live, or a batch render with the Editor closed; framing: camera, cam_pos, cam_rot, fov, "
+    "scene (batch), view_target, width, height), play (action start|stop|"
     "status), menu (a menu item path: live, or batch with the Editor closed), log (the last Unity job's log), "
     "open_editor, close_editor, install_pipeline, install_harness (the headless-ops editor scripts that "
     "import, batch menu items, forced batch recompiles and development builds need; a result with "
@@ -68,6 +70,11 @@ SCHEMA = obj({
     "paths": {"type": "array", "items": {"type": "string"}}, "menu": {"type": "string"},
     "code": {"type": "string"}, "name": {"type": "string"}, "params": {"type": "object"},
     "query": {"type": "string"},
+    "camera": {"type": "string", "description": "screenshot: an existing camera's name"},
+    "cam_pos": {"type": "array", "items": {"type": "number"}, "description": "screenshot: world position [x, y, z]"},
+    "cam_rot": {"type": "array", "items": {"type": "number"}, "description": "screenshot: euler degrees [x, y, z]"},
+    "fov": {"type": "number"}, "scene": {"type": "string", "description": "screenshot (batch): Assets/...unity"},
+    "view_target": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"},
     "action": {"type": "string", "enum": ["start", "stop", "status"]},
     "lines": {"type": "integer"},
     "timeout_s": {"type": "integer", "minimum": 10, "maximum": 3600},
@@ -198,6 +205,9 @@ async def publish_state(app: "AppState", session: dict) -> None:
 
 async def run_op(app: "AppState", session: dict, a: dict, cancel: asyncio.Event | None = None) -> ToolOutput:
     """One `unity` tool call (also used by tests without a model)."""
+    session = app.store.get(session["id"])
+    if session is None:
+        return ToolOutput("The session no longer exists.", is_error=True)
     op = str(a.get("op") or "")
     br = get_bridge(app)
     if not is_unity_project(session.get("folder")):
@@ -258,16 +268,22 @@ async def run_op(app: "AppState", session: dict, a: dict, cancel: asyncio.Event 
     elif op == "commands":
         r = await br.commands(session, a.get("query"))
     elif op == "screenshot":
-        out = root / "Logs" / "harness" / "shots" / f"shot-{time.strftime('%Y%m%d-%H%M%S')}.png"
+        out = root / SHOT_DIR / f"shot-{time.strftime('%Y%m%d-%H%M%S')}.png"
         if a.get("out"):
             q = Path(str(a["out"])).expanduser()
             out = q if q.is_absolute() else root / q
-            if not (out.resolve() == root or root in out.resolve().parents):
-                return ToolOutput("screenshot `out` must be inside the project", is_error=True)
-        r = await br.screenshot(session, out, consent=consent)
+        out = out.resolve()
+        if not out.is_relative_to(root / SHOT_DIR) or out == root / SHOT_DIR:
+            return ToolOutput(f"screenshot `out` must be inside {root / SHOT_DIR}", is_error=True)
+        r = await br.screenshot(session, out, consent=consent, width=a.get("width"), height=a.get("height"),
+                                camera=a.get("camera"), cam_pos=a.get("cam_pos"), cam_rot=a.get("cam_rot"),
+                                fov=a.get("fov"), scene=a.get("scene"), view_target=a.get("view_target"), cancel=cancel)
         artifacts["screenshot"] = r.evidence.get("screenshot")
     elif op == "play":
-        r = await br.play(session, str(a.get("action") or "start"), consent=consent)
+        try:
+            r = await br.play(session, str(a.get("action") or "start"), consent=consent)
+        except TimeoutError:
+            r = BridgeResult("error", "Play timed out waiting for Unity.")
     elif op == "log":
         return _last_log(root, int(a.get("lines") or 200))
     elif op in ("open_editor", "close_editor", "install_pipeline", "install_harness"):

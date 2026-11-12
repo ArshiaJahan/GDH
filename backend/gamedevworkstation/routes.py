@@ -27,6 +27,7 @@ def _feature_modules() -> list:
         "unity_tool",  # the agent's `unity` tool and /api/unity (Unity backend: MCP or the Unity CLI)
         # Media files a command announced (TRAILER_OUTPUT: / ARTIFACT: lines) indexed as items.
         "media_out",
+        "gallery",  # /api/gallery: the session's media strip and Unity screenshot requests
     )]
     mods = []
     for n in names:

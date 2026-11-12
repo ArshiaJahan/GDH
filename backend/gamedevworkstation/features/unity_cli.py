@@ -71,6 +71,7 @@ DEFAULTS: dict[str, Any] = {
     "batch_timeout_s": 900, "test_timeout_s": 1800, "build_timeout_s": 3600, "nographics": True,
     "extra_editor_args": [], "clone_when_open": "ask", "eval": "ask", "harness_scripts": "ask",
     "harness_git_exclude": True, "mcp_server": "unity",
+    "screenshot_tier": "claude.standard", "screenshot_max_turns": 12, "screenshot_timeout_s": 900,
 }
 BACKENDS = ("auto", "mcp", "cli")
 
@@ -408,6 +409,58 @@ def argv_command(cli: UnityCliInfo, project: Path, name: str, params: dict[str, 
         a.append("--detach")
     rest = _param_args(params or {})
     return a + (["--", *rest] if rest else [])
+
+
+def _num(v: Any) -> str:
+    """A number for a Unity arg: plain decimal with a leading digit ("-0.5", never "-.5" or "1e-05"), so
+    HarnessArgs never takes a negative value for another flag."""
+    f = float(v)
+    if f != f or f in (float("inf"), float("-inf")):
+        raise ValueError(f"not a finite number: {v!r}")
+    t = f"{f:.4f}".rstrip("0").rstrip(".")
+    return "0" if t in ("-0", "") else t
+
+
+def vec_arg(v: Any) -> str:
+    """[x, y, z] (or "x,y,z") → "x,y,z" for -camPos / -camRot."""
+    parts = [p for p in str(v).split(",")] if isinstance(v, str) else list(v or [])
+    if len(parts) != 3:
+        raise ValueError(f"expected x,y,z, got {v!r}")
+    return ",".join(_num(p) for p in parts)
+
+
+def sh_screenshot_args(out: Path, *, width: int = 1920, height: int = 1080, scene: str | None = None,
+                       camera: str | None = None, cam_pos: Any = None, cam_rot: Any = None, fov: Any = None,
+                       time_of_day: str | None = None) -> list[str]:
+    """`unity.sh screenshot …` arguments (HarnessCli.Screenshot). There is no -nographics here, and unity.sh's
+    screenshot command never adds it: rendering needs a graphics device. Values that would start with `-`
+    (a camera name, the time of day) are refused or dropped so they can't pass for flags."""
+    a = ["screenshot", "--out", str(out), "--width", str(max(16, min(int(width), 8192))),
+         "--height", str(max(16, min(int(height), 8192)))]
+    if scene:
+        sc = str(scene).replace("\\", "/")
+        if not (sc.startswith("Assets/") and sc.lower().endswith(".unity")) or ".." in sc.split("/"):
+            raise ValueError(f"scene must be an Assets/...unity path, got {scene!r}")
+        a += ["--scene", sc]
+    if camera:
+        cam = str(camera).strip()
+        if not cam or cam.startswith("-") or any(c in cam for c in "\r\n\0"):
+            raise ValueError(f"bad camera name {camera!r}")
+        a += ["--camera", cam]
+    if cam_pos is not None:
+        a += ["--cam-pos", vec_arg(cam_pos)]
+    if cam_rot is not None:
+        a += ["--cam-rot", vec_arg(cam_rot)]
+    if fov is not None:
+        f = float(fov)
+        if not 0.1 < f < 179:
+            raise ValueError("fov must be between 0.1 and 179")
+        a += ["--fov", _num(f)]
+    if time_of_day:
+        t = " ".join(str(time_of_day).split())[:80]
+        if t and not t.startswith("-"):
+            a += ["--time-of-day", t]
+    return a
 
 
 def argv_command_list(cli: UnityCliInfo, project: Path, query: str | None = None) -> list[str]:
@@ -1110,4 +1163,5 @@ __all__ = ["BACKENDS", "CLI_CANDIDATES", "CLI_ENV", "CliRun", "CliStatus", "DEFA
            "argv_self_update", "argv_status", "argv_test_batch", "cli_env", "find_command", "find_editor_binary",
            "find_unity_cli", "get_runner", "live_state", "mcp_in_manifest", "parse_envelope", "pipeline_in_manifest",
            "project_editor_version", "result_from_build", "result_from_job", "result_from_recompile",
-           "result_from_run_compile", "result_from_test_batch", "safe_mode_errors", "unity_cfg", "version_at_least"]
+           "result_from_run_compile", "result_from_test_batch", "safe_mode_errors", "sh_screenshot_args", "unity_cfg",
+           "vec_arg", "version_at_least"]

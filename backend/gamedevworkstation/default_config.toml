@@ -192,6 +192,10 @@ eval = "ask"                        # ask | off: C# eval in the live Editor alwa
 harness_scripts = "ask"
 harness_git_exclude = true          # keep the installed harness scripts out of git (.git/info/exclude, local only)
 mcp_server = "unity"                # the MCP for Unity server the cli backend keeps off
+# The Gallery's "Take screenshot": a short side agent frames the shot and captures it on the current route.
+screenshot_tier = "claude.standard" # its model tier (Sonnet); any tier or model id
+screenshot_max_turns = 12           # its turn budget
+screenshot_timeout_s = 900          # bounds the whole request, including the side agent and batch render
 
 # ------------------------------------------------------------------ model catalog
 # Prices are USD per million tokens. `no_thinking` is how this model expresses the

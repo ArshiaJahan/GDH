@@ -13,6 +13,7 @@ vi.mock("../lib/store", () => ({
 vi.mock("./cards/CampaignCard", () => ({ CampaignCard: () => null }));
 vi.mock("./cards/ChangesCard", () => ({ ChangesCard: () => null }));
 vi.mock("./cards/ConnectorsCard", () => ({ ConnectorsCard: () => null, SharedToolsCard: () => null }));
+vi.mock("./cards/GalleryCard", () => ({ GalleryCard: () => null }));
 vi.mock("./cards/OutputsCard", () => ({ OutputsCard: () => null }));
 vi.mock("./cards/QualityCard", () => ({ QualityCard: () => null }));
 vi.mock("./ui", () => ({

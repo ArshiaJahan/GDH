@@ -10,7 +10,7 @@ Drive Unity 6000.3 in batchmode safely: one command per job, always a timeout, a
 Pinned: Unity 6000.3.21f1 (macOS Apple Silicon), Test Framework 1.6.0, URP 17.3, MCP for Unity 10.3.0 (editor-open path).
 Tools are MCP for Unity 10.3 tools; your client may prefix them (e.g. `mcp__UnityMCP__run_tests`). For tool parameters see unity-mcp-orchestrator.
 
-In GameDevWorkstation, prefer the `unity` tool (`op=compile|test|build|exec|import|menu`): it picks the route from the user's Unity
+In GameDevWorkstation, prefer the `unity` tool (`op=compile|test|build|exec|import|menu|screenshot`): it picks the route from the user's Unity
 backend (official Unity CLI `unity run/test/build`, or this skill's `unity.sh`), streams the job to the Terminal drawer,
 asks for approval and records ladder evidence. `unity.sh` stays the path for CI, manual runs and HarnessCli entry points.
 When an op needs HarnessCli and the project has none, the tool answers `needs_harness`: use `op=install_harness`
@@ -27,13 +27,14 @@ the result says "on a copy of the files on disk (unsaved Editor changes not incl
 
 ## Inputs
 - Project root (folder with `ProjectSettings/ProjectVersion.txt`). `<skills>` = the folder holding this skill.
-- For `import`, `build`, `menu`, `compile --force`: the HarnessCli templates installed in the project (step 2).
+- For `import`, `build`, `menu`, `screenshot`, `compile --force`: the HarnessCli templates installed in the project (step 2;
+  `screenshot` needs `// harness-version: 3`).
 
 ## Procedure
 1. **Pick the path.** Read `mcpforunity://instances`. If an instance shows this project, use MCP (table below) and stop here.
    Otherwise continue. `unity.sh` double-checks: it refuses (exit 4) when a Unity process has `-projectPath <root>` or holds
    `Temp/UnityLockfile`; a stale lockfile with no holder is fine.
-2. **Install entry points once** (needed by `import`, `build`, `menu`, `compile --force`):
+2. **Install entry points once** (needed by `import`, `build`, `menu`, `screenshot`, `compile --force`):
    copy `<skills>/headless-ops/templates/Editor/` to `<root>/Assets/Harness/Headless/Editor/` (HarnessCli.cs, HarnessArgs.cs,
    Harness.Headless.Editor.asmdef: Editor-only, not auto-referenced, namespace `Harness.Headless`). Then run `compile`.
 3. **Run the job** from the project root (or pass `--project <root>`):
@@ -44,11 +45,13 @@ the result says "on a copy of the files on disk (unsaved Editor changes not incl
    $S/unity.sh import [Assets/path ...] [--force]        # no paths = AssetDatabase.Refresh
    $S/unity.sh build <macos|windows|webgl|android|ios|linux|Assets/…/Profile.asset> [--out DIR] [--dev] [--clean] [--scenes "a;b"]
    $S/unity.sh menu "Tools/Rebuild Atlas"                # a menu item, then AssetDatabase.SaveAssets
+   $S/unity.sh screenshot --out Logs/harness/screenshots/a.png [--scene Assets/S.unity] [--camera "Main Camera"] \
+       [--cam-pos x,y,z] [--cam-rot x,y,z] [--fov 50] [--width 1920 --height 1080]   # one PNG, scene never saved
    $S/unity.sh exec <Ns.Class.Method> [-yourArg value ...] [--no-quit]
    ```
-   Common flags (anywhere): `--project DIR`, `--timeout SEC` (defaults: compile/menu 900, test/import/exec 1800, build 3600),
+   Common flags (anywhere): `--project DIR`, `--timeout SEC` (defaults: compile/menu/screenshot 900, test/import/exec 1800, build 3600),
    `--log FILE` (default `<root>/Logs/harness/<cmd>-<ts>.log`, copied to `Logs/harness/last.log`), `--accept-apiupdate`,
-   `--graphics` (drop `-nographics`; PlayMode tests never get it), `UNITY_PATH=<binary>` to override the editor.
+   `--graphics` (drop `-nographics`; PlayMode tests and `screenshot` never get it), `UNITY_PATH=<binary>` to override the editor.
 4. **Read the result.** The last line is `RESULT: OK <summary>` or `RESULT: FAIL <reason>`. Above it the script prints the
    deduplicated `file(line,col): error CS…` lines, `[HARNESS]` progress lines, abort reasons, and for tests the summary from
    `scripts/test_summary.py` (`tests: total= passed= failed= …` plus `FAILED <name> :: <message>` / `at <file:line>`).
@@ -64,6 +67,7 @@ the result says "on a copy of the files on disk (unsaved Editor changes not incl
 | build | target: `-buildTarget <osxuniversal\|win64\|webgl\|android\|ios\|linux64> -executeMethod …HarnessCli.Build -out <dir>`; profile: `-activeBuildProfile P -buildProfile P …`; writes `build-report.json` next to the player |
 | exec | `-quit -executeMethod <M> <your args>`; no `-quit` for `Harness.Headless.HarnessCli.*` or with `--no-quit` |
 | menu | `-executeMethod …HarnessCli.MenuItem -menu "Path/To/Item"`: ExecuteMenuItem, then SaveAssets, then a deferred exit (no `-quit`); fails when the item isn't found |
+| screenshot | **no `-nographics`** (rendering needs a GPU), no `-quit`: `-executeMethod …HarnessCli.Screenshot -out <png> [-scene P] [-camera N] [-camPos x,y,z] [-camRot x,y,z] [-camFov f] [-width W -height H] [-timeOfDay text]`. Opens the scene (default: first enabled build scene) with `OpenScene(Single)` and never saves it; renders a temporary HideAndDontSave camera (settings copied from `-camera` or `Camera.main`), or the named camera as it is when no position/rotation is given, to a RenderTexture → `ReadPixels` → `EncodeToPNG`. Prints `[HARNESS] SHOT OK <png> WxH scene=… pos=… rot=… fov=…` and `ARTIFACT: <png>` |
 
 ### Exit codes
 `0` ok · `1` failure (compile errors, Unity abort/crash, build/import/exec failed, no results XML, no tests ran) ·

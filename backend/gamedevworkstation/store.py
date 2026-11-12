@@ -165,6 +165,7 @@ class SessionStore:
             with contextlib.suppress(ValueError, TypeError):
                 paths |= _paths_in(json.loads(r["content"]))
         db.execute("DELETE FROM sessions WHERE id=?", [sid])
+        db.execute("DELETE FROM kv WHERE key=?", [f"gallery:{sid}"])
         for table in ("events", "snapshots", "jobs", "approvals", "items"):
             db.execute(f"DELETE FROM {table} WHERE session_id=?", [sid])
         media_raw = media_dir()

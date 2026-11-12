@@ -85,6 +85,35 @@ export function fileUrl(path: string, download = false): string {
   return `${base}/api/file?${q}`;
 }
 
+/** One gallery entry (backend features/gallery.py). `url` is relative to the backend; use galleryMediaUrl. */
+export type GalleryEntry = {
+  id: string; kind: "image" | "video" | "audio"; path: string | null; url: string | null; title: string | null;
+  prompt?: string | null; created_at: number; source: string; status: "done" | "pending" | "failed"; reason?: string;
+  /** Screenshot requests: how it was (or is being) captured. */
+  meta?: GalleryShotMeta; actions?: string[];
+};
+
+/** A screenshot's capture facts (backend gallery.finish_run): the Unity route and the framing used. */
+export type GalleryShotMeta = {
+  route?: string; route_label?: string; clone?: boolean; stage?: "framing" | "captured" | "done";
+  notes?: string; summary?: string;
+  camera?: { camera?: string; cam_pos?: number[]; cam_rot?: number[]; fov?: number; scene?: string; view_target?: string;
+    look_at?: string | number[]; width?: number; height?: number; time_of_day?: string;
+    used_scene?: string; used_pos?: number[]; used_rot?: number[]; used_fov?: number };
+};
+
+/** Absolute, token-carrying URL of a gallery entry's file (null while it has none). */
+export function galleryMediaUrl(e: Pick<GalleryEntry, "url">): string | null {
+  if (!e.url) return null;
+  const { base, token } = getConn();
+  return `${base}${e.url}${e.url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`;
+}
+
+export const galleryApi = {
+  list: (sessionId: string) => get<GalleryEntry[]>(`/gallery?session_id=${encodeURIComponent(sessionId)}`),
+  screenshot: (sessionId: string, prompt: string) => post<GalleryEntry>("/gallery/screenshot", { session_id: sessionId, prompt }),
+};
+
 export async function upload(file: File, sessionId?: string) {
   const fd = new FormData();
   fd.append("file", file);

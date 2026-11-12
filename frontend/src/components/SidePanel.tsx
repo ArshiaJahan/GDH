@@ -5,6 +5,7 @@ import { CAMPAIGN_EVENTS, FINAL_STATUSES, campaignsApi } from "../lib/campaigns"
 import { actions, sessionProfile, useStore, type Job, type Session } from "../lib/store";
 import { CampaignCard } from "./cards/CampaignCard";
 import { ChangesCard } from "./cards/ChangesCard";
+import { GalleryCard } from "./cards/GalleryCard";
 import { ConnectorsCard, SharedToolsCard } from "./cards/ConnectorsCard";
 import { OutputsCard } from "./cards/OutputsCard";
 import { QualityCard } from "./cards/QualityCard";
@@ -42,6 +43,7 @@ export function SidePanel() {
       <ConnectorsCard s={session} />
       <SharedToolsCard s={session} />
       <OutputsCard s={session} />
+      <GalleryCard s={session} />
       <ChangesCard s={session} />
       <BackgroundCard s={session} />
     </aside>

@@ -45,7 +45,7 @@ def ours(proj: Path) -> Path:
 
 def test_template_carries_the_version_marker_and_known_hashes():
     data = (TPL / "HarnessCli.cs").read_bytes()
-    assert data.startswith(b"// harness-version: ") and uh.version_of(data) == 2
+    assert data.startswith(b"// harness-version: ") and uh.version_of(data) == 3
     assert b"public static void MenuItem()" in data and b'Get("buildOutput")' in data
     # The shipped files are never listed as "older" (a template change must add the old hash).
     for name in uh.FILES:
@@ -69,7 +69,7 @@ def test_install_copies_files_metas_and_excludes_once(proj, tmp_path):
     assert "AssemblyDefinitionImporter" in (ours(proj) / "Harness.Headless.Editor.asmdef.meta").read_text()
     assert "folderAsset: yes" in (proj / "Assets/Harness.meta").read_text()
     st = uh.harness_status(proj)
-    assert st["installed"] and st["complete"] and st["version"] == 2 and not st["outdated"] and not st["modified"]
+    assert st["installed"] and st["complete"] and st["version"] == 3 and not st["outdated"] and not st["modified"]
     excl = repo / ".git/info/exclude"
     lines = excl.read_text().splitlines()
     assert "/Game/Assets/Harness/Headless/" in lines and "/Game/Assets/Harness/Headless.meta" in lines
@@ -196,7 +196,7 @@ def test_upgrades_an_older_version_only_with_consent(proj, monkeypatch):
     r = uh.install_harness(proj, allow_upgrade=True)
     assert r["ok"] and r["status"] == "upgraded" and r["written"] == [f"{uh.HARNESS_DIR}/HarnessCli.cs"]
     assert (ours(proj) / "HarnessCli.cs").read_bytes() == (TPL / "HarnessCli.cs").read_bytes()
-    assert uh.harness_status(proj)["version"] == 2
+    assert uh.harness_status(proj)["version"] == 3
 
 
 def test_uninstall_removes_only_our_files(proj):
@@ -376,10 +376,10 @@ async def test_outdated_harness_offers_the_upgrade_with_consent(app, proj, fake_
     assert "install_harness" in (await b.editor_state(s)).actions
     t = asyncio.create_task(UT.setup_action(app, s, "install_harness"))
     (card,) = await wait_card(app, s["id"])
-    assert "from version 1 to 2" in card["payload"]["markdown"]
+    assert "from version 1 to 3" in card["payload"]["markdown"]
     app.approvals.resolve(card["id"], "approve")
     r = await t
-    assert r.status == "pass" and "upgraded" in r.summary and uh.harness_status(proj)["version"] == 2
+    assert r.status == "pass" and "upgraded" in r.summary and uh.harness_status(proj)["version"] == 3
 
 
 async def test_menu_runs_in_batch_through_unity_sh(app, proj, tmp_path, monkeypatch):

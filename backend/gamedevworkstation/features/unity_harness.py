@@ -2,7 +2,7 @@
 upgrade, uninstall (research notes §2.6, option B "on demand").
 
 Batch jobs that need more than the official Unity CLI offers (a forced recompile, asset import,
-a menu item, development builds, Harness.Headless.HarnessCli.* methods) run through headless-ops
+a menu item, a batch screenshot, development builds, Harness.Headless.HarnessCli.* methods) run through headless-ops
 `unity.sh`, which needs three editor scripts in the project. The harness never adds them on its
 own: an op that needs them returns a `needs_harness` result and the user installs them with the
 install_harness action (an approval card). Then:
@@ -39,7 +39,9 @@ FOLDERS = ("Assets/Harness", "Assets/Harness/Headless", "Assets/Harness/Headless
 # removed on uninstall. Add the old hash here whenever a template changes.
 PREVIOUS: dict[str, set[str]] = {
     # harness-version 1 (no marker line; before MenuItem and -buildOutput)
-    "HarnessCli.cs": {"46a5acc318daed2733610213a48a510426d851241740941fea858be93ec1999f"},
+    "HarnessCli.cs": {"46a5acc318daed2733610213a48a510426d851241740941fea858be93ec1999f",
+                      # harness-version 2 (MenuItem, -buildOutput; before Screenshot)
+                      "75c0042c3e2b1e30a9fc70e8c19607c60b4756e2be50cdc7db2a358937ac0379"},
 }
 EXCLUDE_HEADER = "# GameDevWorkstation: headless-ops harness editor scripts (local only)"
 _VERSION = re.compile(rb"\A(?:\xef\xbb\xbf)?//\s*harness-version:\s*(\d+)")

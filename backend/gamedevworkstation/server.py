@@ -44,6 +44,23 @@ def file_headers(p: Path) -> dict[str, str]:
     return headers
 
 
+def servable(S: AppState, path: str, *, session: dict | None = None, strict: bool = True) -> Path:
+    """Resolve a file under app data or the allowed session folders/worktrees, else 404."""
+    try:
+        p = Path(path).resolve(strict=strict)
+        sessions = [session] if session is not None else S.store.list(view="all")
+        allowed = [data_dir().resolve()]
+        for s in sessions:
+            if s.get("folder"):
+                allowed.append(Path(s["folder"]).expanduser().resolve())
+            allowed.append(S.worktrees_root(s["id"]).resolve())
+        if not p.is_file() or not any(p.is_relative_to(r) for r in allowed):
+            raise HTTPException(404)
+        return p
+    except (OSError, RuntimeError, ValueError):
+        raise HTTPException(404) from None
+
+
 # The app page in browser mode (`uv run gamedevworkstation`): like the desktop window's CSP for what matters
 # against injected Markdown/HTML. No remote images at all (they load only through POST
 # /api/remote-image, shown from blob:), media only from here, the backend and ElevenLabs' voice
@@ -377,17 +394,9 @@ def create_app(token: str, state: AppState | None = None) -> FastAPI:
             out.update({"send_path": send, "send_mime": send_mime, **({"note": note} if note else {})})
         return out
 
-    def servable(path: str) -> Path:
-        """The real path of a file /api/file may serve (under the data dir or a session folder), else 404."""
-        p = Path(path).resolve()
-        allowed = [data_dir().resolve()] + [Path(s["folder"]).resolve() for s in S.store.list(view="all") if s.get("folder")]
-        if not any(p == r or r in p.parents for r in allowed) or not p.is_file():
-            raise HTTPException(404)
-        return p
-
     @api.get("/file")
     async def get_file(path: str, download: bool = False) -> FileResponse:
-        p = servable(path)
+        p = servable(S, path, strict=False)
         return FileResponse(p, filename=p.name if download else None, headers=file_headers(p),
                             content_disposition_type="attachment" if download else "inline")
 
@@ -395,7 +404,7 @@ def create_app(token: str, state: AppState | None = None) -> FastAPI:
     async def resolve_file(path: str) -> dict:
         """For the desktop shell's open_file: which real path to open in its default app (404 if this
         isn't a file /api/file would serve), so the web view can't have arbitrary files opened."""
-        return {"path": str(servable(path))}
+        return {"path": str(servable(S, path, strict=False))}
 
     # -------------------------------------------------------------- approvals
 

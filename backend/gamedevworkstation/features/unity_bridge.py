@@ -10,10 +10,12 @@ each op resolves to a **route** now (editor_state):
 - raw_batch — headless-ops `unity.sh` (Editor closed, no official CLI, or `mcp` backend);
 - unavailable — with a reason and, for an open Editor in CLI mode, `actions` the UI offers
               (install_pipeline, use_mcp_once, use_clone, close_editor).
+Screenshots run on every route (screenshot(): MCP manage_camera, the Pipeline screenshot command or a temporary
+camera via eval, unity.sh screenshot → HarnessCli.Screenshot in batch, never -nographics).
 An open Editor without a live route can also run compile/tests on a copy of the project (unity_clone,
 [unity].clone_when_open: ask = the use_clone action, always = route cli_batch with extra.clone).
-Batch ops that need the headless-ops HarnessCli editor scripts (forced recompile, import, menu,
-unity.sh builds, Harness.Headless.HarnessCli.* methods) return a `needs_harness` skipped result
+Batch ops that need the headless-ops HarnessCli editor scripts (forced recompile, import, menu, a batch
+screenshot (version 3), unity.sh builds, Harness.Headless.HarnessCli.* methods) return a `needs_harness` skipped result
 with the install_harness action while they're missing (unity_harness; [unity].harness_scripts).
 `mcp` backend = the previous behaviour exactly (MCP when open, unity.sh when closed). `cli` never
 touches MCP for Unity. `auto` takes the best available ([unity].auto_live_order for an open Editor).
@@ -57,7 +59,7 @@ import re
 import shlex
 import shutil
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -76,6 +78,7 @@ log = logging.getLogger(__name__)
 UNITY_SERVER = "unity"  # the MCP for Unity preset's server name ([mcp.presets.unity])
 MCP_COMPILE_TOOLS = ("refresh_unity", "read_console")
 MCP_TEST_TOOLS = ("run_tests", "get_test_job")
+MCP_SHOT_TOOL = "manage_camera"  # MCP for Unity 10.x: action=screenshot (game_view, camera / view_position / view_rotation)
 DEFAULT_GATE_TIMEOUT_S = 180     # [hooks] gate_timeout_s: MCP compile wait (focus/throttle) and test polling
 DEFAULT_BATCH_TIMEOUT_S = 900    # [hooks] batchmode_timeout_s: a cold batchmode import can take minutes
 MAX_CONSOLE_PAGES = 10
@@ -98,7 +101,7 @@ OP_ROUTES: dict[str, tuple[str, ...]] = {
     "eval": ("cli_live",),
     "menu": ("cli_live", "raw_batch"),
     "command": ("cli_live",),
-    "screenshot": ("cli_live",),
+    "screenshot": ("mcp", "cli_live", "cli_batch", "raw_batch"),  # batch: unity.sh → HarnessCli.Screenshot
     "play": ("cli_live",),
 }
 # Approval classes (unity tool + gates): read never asks; verify asks unless consented (and runs in
@@ -111,7 +114,10 @@ SETUP_OPS = {"install_pipeline", "open_editor", "close_editor", "self_update", "
 READ_COMMANDS = {"editor_status", "recompile_status", "test_status", "test status", "test list", "list_tests",
                  "get_scene_hierarchy", "find_gameobjects", "list_build_targets", "wait_status"}
 ACTION_ORDER = ("install_pipeline", "use_mcp_once", "use_clone", "close_editor", "install_harness")
-CLONE_OPS = {"compile", "test"}  # ops that may run on a copy of the project while the Editor holds it
+CLONE_OPS = {"compile", "test", "screenshot"}  # ops that may run on a copy of the project while the Editor holds it
+CLONE_ACTION_OPS = {"compile", "test"}  # the chip's use_clone action (it compiles on the copy)
+SHOT_HARNESS_VERSION = 3  # HarnessCli.Screenshot
+SHOT_DIR = "Logs/harness/screenshots"  # git-ignored by Unity's default .gitignore (/[Ll]ogs/)
 HARNESS_METHOD = "Harness.Headless.HarnessCli."
 PROJECT_BACKEND_KEY = "unity.backend:"
 ALLOW_KEY = "unity.allow:"
@@ -474,6 +480,9 @@ class UnityBridge:
         """None when the op may run, else the refusal text. Plan only mode: read and verify ops only.
         Verify ops pass with gate consent or the project's "always allow"; everything else asks with a
         `unity` approval card (eval always shows its code; its allow is per session and per code)."""
+        session = self.app.store.get(session["id"])
+        if session is None:
+            return "The session no longer exists."
         cls = self.op_class(op, name)
         mode = session.get("mode", "ask")
         if cls == "read":
@@ -689,7 +698,7 @@ class UnityBridge:
             out.append("install_pipeline")
         if st.extra.get("mcp_in_manifest") and st.backend == "cli":
             out.append("use_mcp_once")
-        if self.cfg().get("clone_when_open", "ask") == "ask" and self._clone_ok(op, cli, self.cfg()):
+        if self.cfg().get("clone_when_open", "ask") == "ask" and op in CLONE_ACTION_OPS and self._clone_ok(op, cli, self.cfg()):
             out.append("use_clone")
         if cli:
             out.append("close_editor")
@@ -947,12 +956,13 @@ class UnityBridge:
         return code, body, res, ("" if code is not None else out.text)
 
     async def _raw(self, session: dict, op: str, args: list[str], consent: dict | None, *, source: str,
-                   key: str, label: str, timeout_s: int | None = None,
-                   cancel: asyncio.Event | None = None) -> tuple[int | None, str, str, str, float]:
+                   key: str, label: str, timeout_s: int | None = None, cancel: asyncio.Event | None = None,
+                   root: Path | None = None, detail: str = "") -> tuple[int | None, str, str, str, float]:
         """Run `bash unity.sh <args> --project P`. Gates: as a run_command job under the hook context
         (consent = the exact command line, as before). The unity tool: after a `unity` approval, as a
-        Unity job (Plan only mode may run compile/test). (code, output, RESULT line, refusal, started)."""
-        root = Path(session["folder"]).expanduser().resolve()
+        Unity job (Plan only mode may run compile/test). (code, output, RESULT line, refusal, started).
+        root: where Unity runs (default the session's project; a clone for a run on a copy)."""
+        root = root or Path(session["folder"]).expanduser().resolve()
         sh = self.unity_sh()
         assert sh
         argv = ["bash", str(sh), *args, "--project", str(root)]
@@ -961,7 +971,8 @@ class UnityBridge:
         if source == "gate":
             code, body, res, refused = await self._run(session, cmd, consent)
             return code, body, res, refused, t0
-        if why := await self.ensure_allowed(session, op, key, route="raw_batch", argv=argv, consent=consent):
+        if why := await self.ensure_allowed(session, op, key, route="raw_batch", argv=argv, consent=consent,
+                                            detail=detail):
             return None, "", "", why, t0
         t = timeout_s or self.batch_timeout()
         from ..services import default_shell  # the login shell, as run_command (the user's UNITY_PATH etc.)
@@ -1403,28 +1414,229 @@ class UnityBridge:
                             report=json.dumps(run.data, indent=1, default=str)[:30000])
 
     async def screenshot(self, session: dict, out: Path, *, consent: dict | None = None,
-                         width: int | None = None, height: int | None = None) -> BridgeResult:
+                         width: int | None = None, height: int | None = None, camera: str | None = None,
+                         cam_pos: Any = None, cam_rot: Any = None, fov: float | None = None, scene: str | None = None,
+                         view_target: str | None = None, time_of_day: str | None = None, allow_clone: bool = False,
+                         ctx: Any = None, cancel: asyncio.Event | None = None) -> BridgeResult:
+        """One PNG at `out` on the route the Editor allows now (OP_ROUTES["screenshot"]):
+        - mcp: MCP for Unity `manage_camera` action=screenshot (game_view; `camera`, or a temporary camera at
+          view_position / view_rotation / view_target that the tool removes again);
+        - cli_live: the Pipeline `screenshot` command (the Game view as it is), or, with framing (camera, cam_pos,
+          cam_rot, fov, view_target), an eval of a fixed snippet that renders a HideAndDontSave temporary camera
+          and destroys it again (the eval card shows the code);
+        - cli_batch / raw_batch (the Editor closed): unity.sh `screenshot` → HarnessCli.Screenshot (version 3; opens
+          `scene` without saving it; never -nographics). With the Editor open but no live route, `allow_clone` runs it
+          on a copy of the project files when [unity].clone_when_open isn't "never" (the card says so).
+        MCP uses MCP tool approvals; live framing uses an eval card showing the code; plain live and batch
+        use a Unity screenshot card (key "screenshot", "always allow" per project). `ctx` (a tool context)
+        makes the MCP call under that context's approvals instead of the hook context.
+        evidence: route, screenshot (the file or None), shot (the framing asked for and, from batch, what was used)."""
+        session = self.app.store.get(session["id"])
+        if session is None:
+            return BridgeResult("error", "The session no longer exists.")
+        if session.get("mode") == "plan":
+            return BridgeResult("error", "Plan only mode: further captures are refused.")
+        out = Path(out).resolve()
+        if out.suffix.lower() != ".png":
+            return BridgeResult("error", "screenshot `out` must be a .png path")
         st, root = await self._route(session, "screenshot")
-        if st.mode != "cli_live":
-            return self._skip(st) if st.mode == "unavailable" else BridgeResult(
-                "skipped", f"screenshots need the live route (now {st.mode})", st.mode)
+        if not out.is_relative_to(root / SHOT_DIR):
+            return BridgeResult("error", f"screenshot `out` must be inside {root / SHOT_DIR}")
+        if st.mode == "unavailable" and allow_clone and st.editor_open:
+            alt = await self.editor_state(session, "screenshot", force_route="clone")
+            if alt.extra.get("clone"):
+                st = alt
+        if st.mode == "unavailable":
+            return self._skip(st)
+        if st.mode == "mcp" and not self._has_shot_mcp():
+            return BridgeResult("skipped", "The connected Unity MCP server doesn't expose manage_camera.", "mcp")
+        if st.live.get("state") == "safe_mode" and st.mode == "cli_live":
+            return BridgeResult("skipped", "Unity is in Safe Mode: no live commands until it compiles", "cli_live")
+        try:
+            width, height = _shot_size(width, 1920), _shot_size(height, 1080)
+        except (TypeError, ValueError, OverflowError):
+            return BridgeResult("error", "Screenshot width and height must be integers.", st.mode)
+        shot = {k: v for k, v in {"camera": camera, "cam_pos": cam_pos, "cam_rot": cam_rot, "fov": fov, "scene": scene,
+                                  "view_target": view_target, "width": width, "height": height,
+                                  "time_of_day": time_of_day}.items() if v not in (None, "")}
+        out.parent.mkdir(parents=True, exist_ok=True)
+        t0 = time.time()
+        if st.mode == "mcp":
+            r = await self._shot_mcp(session, root, out, shot, consent, ctx, t0)
+        elif st.mode == "cli_live":
+            framed = any(k in shot for k in ("camera", "cam_pos", "cam_rot", "fov", "view_target"))
+            r = await (self._shot_live_framed(session, out, shot, consent) if framed else
+                       self._shot_live(session, root, out, width, height, consent))
+        else:
+            r = await self._shot_batch(session, st, root, out, shot, consent, cancel)
+        r.mode = r.mode or st.mode
+        r.evidence.setdefault("route", st.mode)
+        r.evidence["screenshot"] = str(out) if out.is_file() and out.stat().st_mtime >= t0 - 1 else None
+        r.evidence["shot"] = {**shot, **(r.evidence.get("shot") or {})}
+        r.evidence.setdefault("started_at", t0)
+        if r.status == "pass" and not r.evidence["screenshot"]:
+            r.status, r.summary = "fail", f"{r.summary}; but no image was written to {out}"
+        return r
+
+    async def screenshot_route(self, session: dict) -> tuple[EditorState, BridgeResult | None]:
+        """The route a screenshot would take now, and why it can't run (None when it can): with the Editor open and
+        no live route, a copy of the project when [unity].clone_when_open allows it (ask or always); a batch route
+        needs HarnessCli version 3 (a needs_harness result). Probes only: nothing runs, nothing asks."""
+        st = await self.editor_state(session, "screenshot", wait=True)
+        if st.mode == "mcp" and not self._has_shot_mcp():
+            return st, BridgeResult("skipped", "The connected Unity MCP server doesn't expose manage_camera.", "mcp")
+        if st.mode == "unavailable" and st.editor_open and self.cfg().get("clone_when_open", "ask") != "never":
+            alt = await self.editor_state(session, "screenshot", force_route="clone")
+            if alt.extra.get("clone"):
+                st = alt
+        if st.mode == "unavailable":
+            return st, BridgeResult("skipped", st.reason or "Unity can't take a screenshot now", "unavailable",
+                                    evidence={"route": "unavailable", "actions": list(st.actions), "state": st.to_dict()})
+        if st.mode in ("cli_batch", "raw_batch"):
+            root = Path(session["folder"]).expanduser().resolve()
+            if nh := await self._needs_harness(root, "a batch screenshot (HarnessCli.Screenshot)", st.mode,
+                                               min_version=SHOT_HARNESS_VERSION):
+                return st, nh
+            if not self.unity_sh():
+                return st, BridgeResult("skipped", "headless-ops unity.sh not found", st.mode, evidence={"route": st.mode})
+        return st, None
+
+    def _has_shot_mcp(self) -> bool:
+        mgr = self.app.mcp
+        conn = getattr(mgr, "conns", {}).get(UNITY_SERVER)
+        return bool(conn and any(t.name == MCP_SHOT_TOOL for t in (conn.tools or [])))
+
+    async def _shot_live(self, session: dict, root: Path, out: Path, width: int | None, height: int | None,
+                         consent: dict | None) -> BridgeResult:
         cli = await self._cli_info()
         listing = await self.runner.quick(uc.argv_command_list(cli, root, "screenshot"), cwd=root, timeout_s=30)
-        listing2 = None
         name = uc.find_command(listing.data, "screenshot")
         if not name:
             listing2 = await self.runner.quick(uc.argv_command_list(cli, root, "capture"), cwd=root, timeout_s=30)
             name = uc.find_command(listing2.data, "capture_game_view") or "screenshot"
-        out.parent.mkdir(parents=True, exist_ok=True)
         params: dict[str, Any] = {"output": str(out)} if name == "screenshot" else {"source": "screen", "save_path": str(out)}
-        if width and name == "screenshot":
-            params["width"] = int(width)
-        if height and name == "screenshot":
-            params["height"] = int(height)
-        r = await self.editor_command(session, name, params, consent=consent, op="screenshot", key="screenshot",
-                               label="Unity screenshot · CLI live")
-        r.evidence["screenshot"] = str(out) if out.is_file() else None
-        return r
+        if name == "screenshot":
+            params["width"] = _shot_size(width, 1920)
+            params["height"] = _shot_size(height, 1080)
+        return await self.editor_command(session, name, params, consent=consent, op="screenshot", key="screenshot",
+                                         label="Unity screenshot · CLI live")
+
+    async def _shot_live_framed(self, session: dict, out: Path, shot: dict, consent: dict | None) -> BridgeResult:
+        try:
+            code = live_shot_code(out, **{k: shot.get(k) for k in ("width", "height", "camera", "cam_pos", "cam_rot",
+                                                                   "fov", "view_target")})
+        except ValueError as e:
+            return BridgeResult("error", str(e), "cli_live")
+        return await self.editor_command(session, "eval", {"code": code}, consent=consent, op="eval", key="eval",
+                                         code=code, label="Unity screenshot (temporary camera) · CLI live")
+
+    async def _mcp_out(self, session: dict, tool: str, args: dict, consent: dict | None, timeout: float,
+                       ctx: Any = None) -> Any:
+        """The whole ToolOutput (text and images) of one unity MCP tool call, under `ctx` or the hook context."""
+        from .mcp_feature import tool_name
+        from ..agent.tools import ToolOutput
+
+        session = self.app.store.get(session["id"])
+        if session is None:
+            return ToolOutput("The session no longer exists.", is_error=True)
+        if session.get("mode") == "plan" and tool in (MCP_SHOT_TOOL, "manage_editor"):
+            return ToolOutput("Plan only mode: further captures and play are refused.", is_error=True)
+        c = replace(ctx, session=session) if ctx else hook_context(self.app, session, consent=consent)
+        # MCPManager.call includes the user's approval wait; short execution timeouts must not cut it off.
+        timeout = max(timeout, uc.cfg_int(self.cfg(), "screenshot_timeout_s", 60, 4 * 3600))
+        return await asyncio.wait_for(self.app.mcp.call(c, tool_name(UNITY_SERVER, tool), args), timeout)
+
+    async def _shot_mcp(self, session: dict, root: Path, out: Path, shot: dict, consent: dict | None, ctx: Any,
+                        t0: float) -> BridgeResult:
+        if not self._has_shot_mcp():
+            return BridgeResult("skipped", "The connected Unity MCP server doesn't expose manage_camera.", "mcp")
+        w, h = _shot_size(shot.get("width"), 1920), _shot_size(shot.get("height"), 1080)
+        try:
+            rel_dir = out.parent.resolve().relative_to(root).as_posix()
+        except ValueError:
+            return BridgeResult("error", "screenshot `out` must be inside the project on the MCP route", "mcp")
+        args: dict[str, Any] = {"action": "screenshot", "capture_source": "game_view", "include_image": True,
+                                "max_resolution": max(w, h), "screenshot_file_name": out.stem, "output_folder": rel_dir}
+        if shot.get("camera"):
+            args["camera"] = str(shot["camera"])
+        try:
+            if shot.get("cam_pos") is not None:
+                args["view_position"] = [float(x) for x in uc.vec_arg(shot["cam_pos"]).split(",")]
+            if shot.get("cam_rot") is not None:
+                args["view_rotation"] = [float(x) for x in uc.vec_arg(shot["cam_rot"]).split(",")]
+        except ValueError as e:
+            return BridgeResult("error", str(e), "mcp")
+        if shot.get("view_target"):
+            args["view_target"] = str(shot["view_target"])
+        ev: dict[str, Any] = {"route": "mcp", "tool": f"{UNITY_SERVER}.{MCP_SHOT_TOOL}", "args": args, "started_at": t0}
+        if shot.get("fov") is not None:
+            ev["note"] = "MCP for Unity's screenshot has no field-of-view parameter; fov was not applied"
+        assets = root / "Assets"
+        # Snapshot before the call: timestamps alone cannot distinguish pre-existing folders/metas.
+        assets_before = await asyncio.to_thread(lambda: set(assets.rglob("*")))
+        try:
+            res = await self._mcp_out(session, MCP_SHOT_TOOL, args, consent, max(self.gate_timeout(), 120), ctx)
+        except asyncio.TimeoutError:
+            return BridgeResult("skipped", "MCP for Unity didn't answer the screenshot in time", "mcp", evidence=ev)
+        except KeyError:
+            return BridgeResult("skipped", "The connected Unity MCP server no longer exposes manage_camera.", "mcp", evidence=ev)
+        text = unwrap_untrusted(res.text or "")
+        if res.is_error:
+            return BridgeResult("fail", f"manage_camera screenshot failed: {text[:300]}", "mcp", report=text[-3000:],
+                                evidence=ev)
+        found = _find_shot(root, out, text, t0)
+        if found in assets_before:
+            found = None  # never move an existing asset, even if MCP rewrote its timestamp
+        if found and found != out:
+            try:
+                shutil.move(str(found), str(out))  # our own fresh capture, saved elsewhere by the tool (e.g. Assets/)
+                ev["moved_from"] = str(found)
+                _cleanup_shot_assets(assets, found, assets_before, t0)
+            except OSError as e:
+                ev["move_error"] = str(e)
+                out = found
+        elif not found and res.images:
+            try:
+                out.write_bytes(res.images[0].load_bytes())  # the inline PNG (include_image) when no file turned up
+                ev["from_inline_image"] = True
+            except Exception as e:  # noqa: BLE001
+                ev["inline_error"] = f"{type(e).__name__}: {e}"[:200]
+        ok = out.is_file()
+        return BridgeResult("pass" if ok else "fail",
+                            f"screenshot saved to {out}" if ok else "manage_camera returned no image file",
+                            "mcp", report=text[-3000:], evidence=ev)
+
+    async def _shot_batch(self, session: dict, st: EditorState, root: Path, out: Path, shot: dict,
+                          consent: dict | None, cancel: asyncio.Event | None) -> BridgeResult:
+        if nh := await self._needs_harness(root, "a batch screenshot (HarnessCli.Screenshot)", st.mode,
+                                           min_version=SHOT_HARNESS_VERSION):
+            return nh
+        if not self.unity_sh():
+            return BridgeResult("skipped", "headless-ops unity.sh not found", st.mode)
+        try:
+            args = uc.sh_screenshot_args(out, width=int(shot.get("width") or 1920), height=int(shot.get("height") or 1080),
+                                         scene=shot.get("scene"), camera=shot.get("camera"), cam_pos=shot.get("cam_pos"),
+                                         cam_rot=shot.get("cam_rot"), fov=shot.get("fov"),
+                                         time_of_day=shot.get("time_of_day"))
+        except (TypeError, ValueError) as e:
+            return BridgeResult("error", str(e), st.mode)
+        t = uc.cfg_int(self.cfg(), "screenshot_timeout_s", 60, 4 * 3600)
+        detail = ("Renders one PNG with the Editor closed: opens the scene in batch mode **without saving it**, "
+                  f"with a graphics device (no -nographics), and writes only **{out}**.")
+
+        async def run(at: Path) -> BridgeResult:
+            note = detail + (f" Runs {uclone.CLONE_NOTE}." if at != root else "")
+            code, body, res, refused, t0 = await self._raw(session, "screenshot", args, consent, source="tool",
+                                                           key="screenshot", label="Unity screenshot · unity.sh",
+                                                           timeout_s=t, cancel=cancel, root=at, detail=note)
+            r = _raw_result("screenshot", code, body, res, refused, t0)
+            r.mode = st.mode
+            r.evidence.update({"route": st.mode, "runner": "unity.sh", "args": args, "shot": _shot_used(res or body)})
+            return r
+
+        if st.extra.get("clone"):
+            return await self._on_clone(session, run)
+        return await run(root)
 
     async def play(self, session: dict, action: str = "start", *, consent: dict | None = None) -> BridgeResult:
         """start: set_autotick (keeps an unfocused Editor ticking) + editor_play; stop: editor_stop;
@@ -1449,6 +1661,142 @@ def _raw_result(op: str, code: int | None, body: str, res: str, refused: str, t0
         why = {3: "Unity batchmode isn't set up", 4: "Unity has this project open", 124: "timed out"}[code]
         return BridgeResult("skipped", f"{why}: {res}".strip(": "), "raw_batch", report=body[-2000:], evidence=ev)
     return BridgeResult("fail", res or f"unity.sh {op} failed (exit {code})", "raw_batch", report=body[-4000:], evidence=ev)
+
+
+_SHOT_USED = re.compile(r"scene=(?P<scene>\S+).*?pos=(?P<pos>[-\d.,]+) rot=(?P<rot>[-\d.,]+) fov=(?P<fov>[-\d.]+)")
+
+
+def _shot_size(value: Any, default: int) -> int:
+    return max(16, min(int(default if value is None else value), 8192))
+
+
+def _cleanup_shot_assets(assets: Path, png: Path, before: set[Path], t0: float) -> None:
+    """Remove only this new capture's sidecars and newly-created, now-empty asset folders."""
+    if not png.is_relative_to(assets) or png in before:
+        return
+
+    def remove_meta(path: Path) -> None:
+        meta = Path(str(path) + ".meta")
+        if meta not in before and not meta.is_symlink() and meta.is_file() and meta.stat().st_ctime >= t0:
+            meta.unlink()
+
+    try:
+        remove_meta(png)
+        parent = png.parent
+        while parent != assets and parent.is_relative_to(assets):
+            if parent in before or parent.is_symlink() or parent.stat().st_ctime < t0:
+                break
+            parent.rmdir()  # refuses nonempty folders, including anything another capture is using
+            remove_meta(parent)
+            parent = parent.parent
+    except OSError:
+        log.debug("Unity screenshot asset cleanup stopped at an occupied or unavailable path", exc_info=True)
+
+
+def _shot_used(text: str) -> dict:
+    """What HarnessCli.Screenshot reported using (`SHOT OK … scene=… pos=x,y,z rot=x,y,z fov=f`)."""
+    lines = [ln for ln in (text or "").splitlines() if "SHOT OK" in ln or ln.startswith("RESULT: OK screenshot")]
+    m = _SHOT_USED.search(lines[-1]) if lines else None
+    if not m:
+        return {}
+    vec = lambda v: [float(x) for x in v.split(",")]  # noqa: E731
+    try:
+        return {"used_scene": m["scene"], "used_pos": vec(m["pos"]), "used_rot": vec(m["rot"]), "used_fov": float(m["fov"])}
+    except ValueError:
+        return {}
+
+
+def _find_shot(root: Path, out: Path, text: str, t0: float) -> Path | None:
+    """The PNG an MCP screenshot wrote: `out`, a name starting with out's stem in its folder (or the same folder
+    under Assets/), or a .png path in the result text; only files inside the project written since t0."""
+    cands = [out, *sorted(out.parent.glob(f"{out.stem}*.png"))]
+    try:
+        rel = out.parent.resolve().relative_to(root)
+        alt = root / "Assets" / rel
+        cands += sorted(alt.glob(f"{out.stem}*.png")) if alt.is_dir() else []
+    except ValueError:
+        pass
+    for raw in re.findall(r"([A-Za-z0-9_~./\\:-][A-Za-z0-9_ ~./\\:-]*?\.png)\b", text or ""):
+        q = Path(raw.strip().strip("'\"")).expanduser()
+        cands.append(q if q.is_absolute() else root / q)
+    for c in cands:
+        try:
+            p = c.resolve()
+            if p.is_file() and (p == root or root in p.parents) and p.stat().st_mtime >= t0 - 1:
+                return p
+        except OSError:
+            continue
+    return None
+
+
+def _cs(v: Any) -> str:
+    """A C# float literal."""
+    return uc._num(v) + "f"
+
+
+def live_shot_code(out: Path, *, width: Any = None, height: Any = None, camera: str | None = None, cam_pos: Any = None,
+                   cam_rot: Any = None, fov: Any = None, view_target: str | None = None) -> str:
+    """C# for the live Editor (cli_live eval): render a HideAndDontSave temporary camera (settings copied from
+    `camera` or Camera.main) into a RenderTexture, write a PNG to `out`, destroy everything again. Nothing in the
+    open scene changes or gets dirty. Only numbers and JSON-quoted strings are interpolated."""
+    w, h = _shot_size(width, 1920), _shot_size(height, 1080)
+    q = json.dumps
+    lines = [
+        "var __go = UnityEditor.EditorUtility.CreateGameObjectWithHideFlags(\"HarnessScreenshotCamera\", "
+        "UnityEngine.HideFlags.HideAndDontSave, typeof(UnityEngine.Camera));",
+        f"var __rt = new UnityEngine.RenderTexture({w}, {h}, 24);",
+        f"var __tex = new UnityEngine.Texture2D({w}, {h}, UnityEngine.TextureFormat.RGB24, false);",
+        "var __prev = UnityEngine.RenderTexture.active;",
+        "try {",
+        "  var __cam = __go.GetComponent<UnityEngine.Camera>();",
+        "  UnityEngine.Camera __src = UnityEngine.Camera.main;",
+    ]
+    if camera:
+        name = str(camera).strip()
+        if not name or any(c in name for c in "\r\n\0"):
+            raise ValueError(f"bad camera name {camera!r}")
+        lines += [
+            "  __src = null;",
+            "  foreach (var __c in UnityEngine.Object.FindObjectsByType<UnityEngine.Camera>(UnityEngine.FindObjectsInactive.Include, "
+            "UnityEngine.FindObjectsSortMode.None))",
+            f"    if (string.Equals(__c.name, {q(name)}, System.StringComparison.OrdinalIgnoreCase)) {{ __src = __c; break; }}",
+            f"  if (__src == null) throw new System.Exception(\"camera not found: \" + {q(name)});",
+        ]
+    lines += ["  if (__src != null) { __cam.CopyFrom(__src); __go.transform.SetPositionAndRotation(__src.transform.position, "
+              "__src.transform.rotation); }"]
+    if cam_pos is not None:
+        x, y, z = uc.vec_arg(cam_pos).split(",")
+        lines.append(f"  __go.transform.position = new UnityEngine.Vector3({_cs(x)}, {_cs(y)}, {_cs(z)});")
+    if cam_rot is not None:
+        x, y, z = uc.vec_arg(cam_rot).split(",")
+        lines.append(f"  __go.transform.eulerAngles = new UnityEngine.Vector3({_cs(x)}, {_cs(y)}, {_cs(z)});")
+    elif view_target:
+        t = str(view_target).strip()
+        if any(c in t for c in "\r\n\0"):
+            raise ValueError(f"bad view_target {view_target!r}")
+        lines += [f"  var __t = UnityEngine.GameObject.Find({q(t)});",
+                  "  if (__t != null) __go.transform.LookAt(__t.transform);"]
+    if fov is not None:
+        f = float(fov)
+        if not 0.1 < f < 179:
+            raise ValueError("fov must be between 0.1 and 179")
+        lines.append(f"  __cam.fieldOfView = {_cs(f)};")
+    lines += [
+        "  __cam.targetTexture = __rt;",
+        "  __cam.Render();",
+        "  UnityEngine.RenderTexture.active = __rt;",
+        f"  __tex.ReadPixels(new UnityEngine.Rect(0, 0, {w}, {h}), 0, 0);",
+        "  __tex.Apply();",
+        f"  System.IO.Directory.CreateDirectory({q(str(Path(out).parent))});",
+        f"  System.IO.File.WriteAllBytes({q(str(out))}, UnityEngine.ImageConversion.EncodeToPNG(__tex));",
+        "} finally {",
+        "  UnityEngine.RenderTexture.active = __prev;",
+        "  UnityEngine.Object.DestroyImmediate(__go);",
+        "  __rt.Release(); UnityEngine.Object.DestroyImmediate(__rt);",
+        "  UnityEngine.Object.DestroyImmediate(__tex);",
+        "}",
+    ]
+    return "\n".join(lines)
 
 
 async def editor_has_project(project: Path, *, check_lock: bool = True) -> bool:
@@ -1491,7 +1839,8 @@ class FakeUnityBridge(UnityBridge):
 
     def __init__(self, app: "AppState", *, compile: list | None = None, tests: list | None = None,
                  state: EditorState | None = None, route: str | None = None, build: list | None = None,
-                 exec: list | None = None, eval: list | None = None, command: list | None = None):
+                 exec: list | None = None, eval: list | None = None, command: list | None = None,
+                 shots: list | None = None):
         super().__init__(app)
         self._compile = list(compile or [BridgeResult("pass", "0 compile errors", "fake")])
         self._tests = list(tests or [BridgeResult("pass", "1 tests passed", "fake")])
@@ -1499,6 +1848,9 @@ class FakeUnityBridge(UnityBridge):
         self._exec = list(exec or [BridgeResult("pass", "exec ok", "fake")])
         self._eval = list(eval or [BridgeResult("pass", "eval ok", "fake")])
         self._command = list(command or [BridgeResult("pass", "command ok", "fake")])
+        # screenshot: a "pass" result writes a small PNG at `out` (evidence.screenshot), like a real capture.
+        self._shots = list(shots or [BridgeResult("pass", "screenshot ok", "fake")])
+        self.shot_calls: list[dict] = []
         self.state = state or EditorState("mcp", True, True, True)
         self.route = route
         self.calls: list[tuple[str, str, dict | None]] = []
@@ -1509,6 +1861,9 @@ class FakeUnityBridge(UnityBridge):
         if self.route:
             r = BridgeResult(r.status, r.summary, self.route, r.report, r.errors, dict(r.evidence))
         return r
+
+    def _has_shot_mcp(self) -> bool:
+        return self.state.mode == "mcp"  # the scripted fake supplies screenshots without a real MCP connection
 
     async def editor_state(self, session: dict, op: str = "compile", *, wait: bool = False,
                            force_route: str | None = None, memo: dict | None = None) -> EditorState:
@@ -1545,6 +1900,22 @@ class FakeUnityBridge(UnityBridge):
         self.calls.append(("command", session["id"], kw.get("consent")))
         return self._next(self._command)
 
+    async def screenshot(self, session: dict, out: Path, **kw: Any) -> BridgeResult:  # type: ignore[override]
+        self.calls.append(("screenshot", session["id"], kw.get("consent")))
+        self.shot_calls.append({"out": str(out), **{k: v for k, v in kw.items() if k not in ("ctx", "cancel")}})
+        r = self._next(self._shots)
+        r = BridgeResult(r.status, r.summary, r.mode or self.state.mode, r.report, r.errors, dict(r.evidence))
+        shot = {k: kw[k] for k in ("camera", "cam_pos", "cam_rot", "fov", "scene", "view_target", "width", "height")
+                if kw.get(k) not in (None, "")}
+        r.evidence.setdefault("route", r.mode)
+        r.evidence["shot"] = {**shot, **(r.evidence.get("shot") or {})}
+        if r.status == "pass":
+            Path(out).parent.mkdir(parents=True, exist_ok=True)
+            Path(out).write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 32)
+            r.evidence["screenshot"] = str(out)
+        return r
 
-__all__ = ["BACKENDS", "ROUTES", "BridgeResult", "EditorState", "FakeUnityBridge", "UnityBridge", "editor_has_project",
-           "get_bridge", "is_unity_project", "load_script", "parse_compile_output", "unwrap_untrusted", "UNITY_SERVER"]
+
+__all__ = ["BACKENDS", "ROUTES", "SHOT_DIR", "BridgeResult", "EditorState", "FakeUnityBridge", "UnityBridge",
+           "editor_has_project", "get_bridge", "is_unity_project", "live_shot_code", "load_script", "parse_compile_output",
+           "unwrap_untrusted", "UNITY_SERVER"]

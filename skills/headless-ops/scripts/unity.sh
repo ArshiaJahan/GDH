@@ -21,6 +21,12 @@ commands
                                           asset path (Assets/...asset). Needs HarnessCli. Writes build-report.json.
   menu "<Path/To/Item>"                    run a menu item (EditorApplication.ExecuteMenuItem), then save assets.
                                           Needs HarnessCli (HarnessCli.MenuItem).
+  screenshot --out FILE.png [--scene Assets/X.unity] [--camera NAME] [--cam-pos x,y,z] [--cam-rot x,y,z]
+             [--fov F] [--width 1920] [--height 1080] [--time-of-day TEXT]
+                                          render one PNG of a scene with the Editor closed (HarnessCli.Screenshot):
+                                          default scene = first enabled build scene; a temporary camera unless
+                                          --camera names one (and no --cam-pos/--cam-rot); the scene is never saved.
+                                          Always runs WITH graphics (never -nographics). Needs HarnessCli version 3.
   exec <Ns.Class.Method> [unity args...] [--no-quit]
                                           run a static editor method with -quit; extra args go to Unity verbatim.
                                           --no-quit for methods that end with a deferred EditorApplication.Exit
@@ -29,11 +35,11 @@ commands
 
 common flags (anywhere before a literal --)
   --project DIR      Unity project root (default: $UNITY_PROJECT, else walk up from the current directory)
-  --timeout SEC      watchdog; default compile 900, import 1800, test 1800, build 3600, exec 1800, menu 900
+  --timeout SEC      watchdog; default compile 900, import 1800, test 1800, build 3600, exec 1800, menu 900, screenshot 900
   --log FILE         Unity log file (default <project>/Logs/harness/<command>-<timestamp>.log)
   --unity PATH       editor binary (default: $UNITY_PATH, else from ProjectSettings/ProjectVersion.txt)
   --accept-apiupdate pass -accept-apiupdate (lets the API updater rewrite obsolete API in your scripts)
-  --graphics         do not pass -nographics (playmode tests never get -nographics)
+  --graphics         do not pass -nographics (playmode tests and screenshot never get -nographics)
   -h, --help         this text
 
 last line printed:  RESULT: OK <summary>   or   RESULT: FAIL <reason>
@@ -68,7 +74,7 @@ CMD="${POS[0]}"
 ARGS=("${POS[@]:1}")
 
 case "$CMD" in
-  compile|test|import|build|exec|menu) ;;
+  compile|test|import|build|exec|menu|screenshot) ;;
   *) echo "unknown command: $CMD" >&2; usage >&2; result 3 FAIL "usage unknown command $CMD" ;;
 esac
 
@@ -336,6 +342,42 @@ menu)
   finish_generic "menu $ITEM"
   grep -qF '[HARNESS] MENU OK' "$LOG" 2>/dev/null || result 1 FAIL "menu $ITEM did not report MENU OK (log $LOG)"
   result 0 OK "menu $ITEM (log $LOG)"
+  ;;
+
+screenshot)
+  : "${TIMEOUT:=900}"
+  need_harness_cli
+  grep -rqs --include='HarnessCli.cs' 'public static void Screenshot()' "$ROOT/Assets" "$ROOT/Packages" 2>/dev/null \
+    || result 3 FAIL "setup HarnessCli.cs has no Screenshot entry point (harness-version 3): update Assets/Harness/Headless/Editor"
+  OUT=""; S=(-executeMethod Harness.Headless.HarnessCli.Screenshot)
+  set -- ${ARGS[@]+"${ARGS[@]}"}
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --out) OUT="${2:?--out needs a value}"; shift 2 ;;
+      --scene) S+=(-scene "${2:?}"); shift 2 ;;
+      --camera) S+=(-camera "${2:?}"); shift 2 ;;
+      --cam-pos) S+=(-camPos "${2:?}"); shift 2 ;;
+      --cam-rot) S+=(-camRot "${2:?}"); shift 2 ;;
+      --fov) S+=(-camFov "${2:?}"); shift 2 ;;
+      --width) S+=(-width "${2:?}"); shift 2 ;;
+      --height) S+=(-height "${2:?}"); shift 2 ;;
+      --time-of-day) S+=(-timeOfDay "${2:?}"); shift 2 ;;
+      *) result 3 FAIL "usage screenshot: unknown arg $1" ;;
+    esac
+  done
+  [ -n "$OUT" ] || result 3 FAIL "usage screenshot --out FILE.png"
+  case "$OUT" in *.png|*.PNG) ;; *) result 3 FAIL "usage screenshot: --out must end in .png" ;; esac
+  case "$OUT" in /*) ;; *) OUT="$PWD/$OUT" ;; esac
+  [ ! -e "$OUT" ] && [ ! -L "$OUT" ] || result 3 FAIL "screenshot: refusing to overwrite existing --out file $OUT"
+  mkdir -p "$(dirname "$OUT")"
+  S+=(-out "$OUT")
+  # Rendering needs a graphics device: no -nographics here, whatever --graphics says. No -quit (deferred Exit).
+  run_unity "$TIMEOUT" ${API[@]+"${API[@]}"} "${S[@]}"
+  finish_generic screenshot
+  LINE="$(grep -F '[HARNESS] SHOT OK' "$LOG" 2>/dev/null | tail -1 | sed 's/^.*\[HARNESS\] SHOT OK //' || true)"
+  [ -n "$LINE" ] && [ -s "$OUT" ] || result 1 FAIL "screenshot did not report SHOT OK or wrote no file (log $LOG)"
+  echo "ARTIFACT: $OUT"
+  result 0 OK "screenshot $LINE (log $LOG)"
   ;;
 
 exec)

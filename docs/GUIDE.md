@@ -14,7 +14,7 @@ transcription, sound and music. Everything runs locally; the backend listens on 
 - [Setup and development](#setup-and-development)
 - [Adding API keys](#adding-api-keys)
 - [Configuration](#configuration)
-- [Pages and panels](#pages-and-panels)
+- [Pages and panels](#pages-and-panels) (and [Gallery](#gallery))
 - [Task board](#task-board)
 - [Campaigns and workflows](#campaigns-and-workflows)
 - [Sessions](#sessions)
@@ -226,13 +226,56 @@ windows at least 1200 px wide and closed in narrower ones:
 4. **Shared tools** — let the session use MCP servers from other machines. This is off by
    default, every job asks first, and it can only be changed while the session is idle.
 5. **Outputs** — what this session produced, with a link to the Artifacts page.
-6. **Changes** — changed files (git diff in a repo, including subagent worktrees; snapshots
+6. **Gallery** — the images, videos and audio this session generated, plus Unity screenshots on
+   request (see [Gallery](#gallery)).
+7. **Changes** — changed files (git diff in a repo, including subagent worktrees; snapshots
    otherwise), +/− counts, side-by-side diff and per-file revert. Files over 5 MB aren't
    snapshotted: they're listed as "too large to snapshot", without diff or revert. Each subagent worktree has
    **Discard worktree** (removes it and its `gdw/<unit>` branch; asks again, saying what
    would be lost, when it holds work that isn't merged).
-7. **Background tasks** — subagents, commands, Codex CLI runs and ElevenLabs jobs with a log
+8. **Background tasks** — subagents, commands, Codex CLI runs and ElevenLabs jobs with a log
    tail and cancel.
+
+### Gallery
+
+The **Gallery** card sits in the side panel under **Outputs**. It shows what the session *generated*
+(media items from the agent, its tools and commands that announce `ARTIFACT:` / `TRAILER_OUTPUT:` lines;
+your own attachments are left out) as a strip from left to right, newest first. The mouse wheel
+scrolls it sideways. Click an image or a video to open it larger, with its prompt, how it was captured
+and **Open in Finder**. Videos and audio show a play badge.
+
+**Take a screenshot.** Type what the picture should show in the box ("player at the cave entrance,
+night, low angle") and press **Take screenshot** (or Enter). A spinner card appears right away and says
+whether the shot is still being framed or has been captured. Behind it, a short side agent
+(`[unity] screenshot_tier`, Sonnet by default, effort low, `screenshot_max_turns` = 12 turns) finds the
+subject, frames the shot and captures it. It only has the read-only file tools, a scene-file reader and a
+screenshot-only Unity tool. It never edits project source files or saves a scene, and it can't move anything in your
+scene. Captures use a temporary camera that is removed again, or render an existing camera as it is.
+If it started Play Mode, the app attempts to stop it afterwards; exiting Play Mode is best effort.
+Approval depends on the route: MCP uses an **MCP tool** card; live captures with framing use an
+**eval** card showing the temporary-camera code; batch and plain live captures use a **Unity screenshot**
+card with **Always allow `screenshot` in this project**. Plan only mode refuses screenshots, including
+further captures and play calls if you switch modes during a request. Screenshots only write into
+`<project>/Logs/harness/screenshots/` (Unity's default `.gitignore` already ignores `Logs/`), and the
+gallery entry keeps your prompt as its caption, the route and the camera it used.
+
+How each route captures:
+
+| Route | Capture |
+|---|---|
+| MCP for Unity | Requires `manage_camera`: `action=screenshot` (Game view), a named camera or a temporary camera at a position and rotation (or aimed at an object) that the tool removes again. Uses the MCP tool approval card |
+| Unity CLI, live Editor | the Pipeline `screenshot` command (the Game view as it is); with framing, an `eval` of a fixed snippet that renders a hidden temporary camera and destroys it (the eval card shows the code) |
+| Unity CLI batch / unity.sh (Editor closed) | `unity.sh screenshot` → `HarnessCli.Screenshot` (harness scripts version 3): opens the scene without saving it, renders a temporary camera (or a named one) to a PNG, exits. Always with a graphics device, never `-nographics` |
+
+**Batch limits.** With the Editor closed the agent can't look at the scene. It reads the saved `.unity`
+file instead (cameras, lights and objects with their world positions) and picks an existing camera or a
+position plus a look-at target from it. So only saved changes are in the picture. Lighting and time of
+day aren't changed (the request's time of day is recorded, not applied). The default scene is the first
+enabled scene in the build list. Text serialization (Unity's default) is needed to read the scene. Older
+harness scripts (version 2) have no screenshot entry point: the entry fails with **Install harness editor
+scripts** as the fix. With the Editor open but no live route, the shot runs on a copy of the project
+when `clone_when_open` isn't `"never"` (unsaved changes not included); otherwise the entry fails with
+the reason and the chip's actions (install the Pipeline package, close the Editor).
 
 **Terminal** (⌘J). Shell tabs run your login zsh in the session folder. Agent commands stream
 into their own read-only tabs.
@@ -845,8 +888,8 @@ made during a long compile isn't covered by it. `unity test … --output X` or `
 **MCP stays off in CLI mode.** With the `cli` backend, invoking a Unity skill doesn't turn on the
 `unity` MCP server (`[unity] mcp_server`).
 
-**Harness editor scripts.** Asset import, menu items with the Editor closed, a forced clean
-recompile, a development build and `Harness.*` exec methods need `HarnessCli` (the `headless-ops`
+**Harness editor scripts.** Asset import, menu items with the Editor closed, a batch screenshot
+(version 3), a forced clean recompile, a development build and `Harness.*` exec methods need `HarnessCli` (the `headless-ops`
 editor scripts) in the project. When they're missing, the `unity` tool returns a "needs harness"
 result instead of failing, and the chip offers **Install harness editor scripts** behind an approval
 card.
