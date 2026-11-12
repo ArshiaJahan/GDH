@@ -1,6 +1,6 @@
 import { Archive, Brain, ChevronRight, Clock, GitBranch, PanelRight, Sparkles, Square, Trash2, TriangleAlert, Wrench } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { fileUrl, get, inTauri, patch, post } from "../lib/api";
+import { fileUrl, inTauri, post } from "../lib/api";
 import { MdLite } from "../lib/mdlite";
 import { openLocalFile } from "../lib/native";
 import { sessionActions } from "../lib/sessions";
@@ -9,7 +9,8 @@ import { ApprovalCard } from "./ApprovalCard";
 import { Composer } from "./Composer";
 import { SafeMarkdown } from "./SafeMarkdown";
 import { NoKeyNotice, SetupChecklist } from "./SetupChecklist";
-import { ClaudeCodeChip, ClaudeLoginNotice, HarnessSelect } from "./ClaudeCode";
+import { ClaudeCodeChip, ClaudeLoginNotice } from "./ClaudeCode";
+import { NewSession } from "./NewSession";
 import { metaRow } from "./rows";
 import { SessionLimitBanner } from "./LimitsBanner";
 import { SessionTasks } from "./SessionTasks";
@@ -18,20 +19,6 @@ import { EffortMeter, ProviderDot, fmtUsd, modelLabel, tiersOf, useModelCatalog 
 
 const EMPTY: Msg[] = [];
 const STOPPABLE_JOBS = new Set(["subagent", "codex_cli", "command"]);
-
-/** The new-session flow's harness choice: shown on a session that has no messages yet. */
-function NewSessionHarness({ sid, harness }: { sid: string; harness: string }) {
-  const [env, setEnv] = useState<any>(null);
-  useEffect(() => { get("/environment").then(setEnv).catch(() => setEnv(null)); }, []);
-  return (
-    <div className="mb-4 flex items-center gap-2 text-[13px]" data-testid="new-session-harness">
-      <span className="text-muted">Run this session with</span>
-      <HarnessSelect value={harness} available={env?.harnesses} onChange={async (v) => {
-        try { await patch(`/sessions/${sid}`, { harness: v }); } catch (e: any) { actions.toast(e.message, "error"); }
-      }} />
-    </div>
-  );
-}
 
 /** "Rate limited, retrying in Ns" with a live countdown. */
 function StatusLine({ s }: { s: AgentStatus }) {
@@ -113,15 +100,7 @@ export function Chat() {
     if (el && stick.current && !anchor.current) el.scrollTop = el.scrollHeight;
   }, [messages, streaming, pending.length]);
 
-  if (!session) {
-    return (
-      <div className="h-full flex flex-col items-center justify-center gap-3 text-muted">
-        <div className="w-full max-w-[560px] px-5"><SetupChecklist /></div>
-        <p>Start a session to chat with your agents.</p>
-        <button className="btn btn-primary" onClick={() => sessionActions.create()}>New session</button>
-      </div>
-    );
-  }
+  if (!session) return <NewSession />; // no session open: the new-session screen
   const running = session.status === "running";
   const visible = messages.filter((m) => !m.meta?.tool_results);
   const firstLive = visible.findIndex((m) => !m.meta?.compacted);
@@ -129,7 +108,7 @@ export function Chat() {
   return (
     <div className="h-full flex flex-col min-w-0">
       <header className="flex items-center gap-2 px-4 h-11 border-b border-line surface shrink-0" data-tauri-drag-region>
-        <h1 className="font-medium truncate">{session.title}</h1>
+        <h1 className="font-medium truncate min-w-[6rem]">{session.title}</h1>
         <span className="chip whitespace-nowrap shrink-0"><ProviderDot model={session.model} />{modelLabel(session.model)} <EffortMeter effort={session.effort} /> {session.effort}</span>
         <SessionTasks sessionId={session.id} />
         {session.harness === "claude_code" && <ClaudeCodeChip s={session} />}
@@ -158,7 +137,6 @@ export function Chat() {
           {visible.length === 0 && !streaming && (
             <div className="text-muted text-[13px] py-10">
               <SetupChecklist />
-              {!running && <NewSessionHarness sid={session.id} harness={session.harness} />}
               Ask anything, attach files, or hand over a job to plan and delegate. Type <code className="font-mono">/</code> for commands.
             </div>
           )}

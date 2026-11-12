@@ -1,5 +1,5 @@
-import { ArrowUp, Flag, Paperclip, Sparkles, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowUp, Flag, Paperclip, Plug, Sparkles, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { get, patch, post, upload } from "../lib/api";
 import { campaignsApi, parseWorkflowCommand, type ChainTemplate } from "../lib/campaigns";
 import { actions, useStore, type Session } from "../lib/store";
@@ -8,10 +8,24 @@ import { Popover } from "./Popover";
 import { UnityChip } from "./UnityChip";
 import { modelLabel } from "./ui";
 
-type Att = { path: string; name: string; mime: string; size?: number; item_id?: string; text?: string };
+export type Att = { path: string; name: string; mime: string; size?: number; item_id?: string; text?: string };
 
-const EFFORTS = ["none", "low", "medium", "high", "xhigh", "max"];
-const MODES: Record<string, string> = { ask: "Ask before edits", accept_edits: "Accept edits", plan: "Plan only" };
+export const EFFORTS = ["none", "low", "medium", "high", "xhigh", "max"];
+export const MODES: Record<string, string> = { ask: "Ask before edits", accept_edits: "Accept edits", plan: "Plan only" };
+
+/** The new-session screen's composer: no session exists yet. The settings live on the screen
+ *  (/model, /effort, /mode change them there), and sending creates the session with the first message. */
+export type ComposerDraft = {
+  set: (body: { model?: string; effort?: string; mode?: string }) => void;
+  /** Create the session and send the first message; false when it didn't start (the text stays). */
+  start: (text: string, skill: string | null) => Promise<boolean>;
+  /** The card's two control rows (location, folder, model; effort, mode). Tools and Send are added. */
+  rows: [ReactNode, ReactNode];
+  placeholder: string;
+};
+/** Commands that need a session that already exists. */
+const SESSION_ONLY = ["/compact", "/clear", "/workflow"];
+const WORKFLOW_UNAVAILABLE = "Workflows run on the built-in loop with an API key, so they aren't available in Claude subscription sessions.";
 
 type SkillInfo = { name: string; description: string; featured?: boolean };
 /** Short menu blurbs for the built-in skills pinned at the top of the skills menu. */
@@ -90,15 +104,22 @@ function SkillPicker({ open, skills, onPick, onClose, workflows = [], onPickWork
   );
 }
 
-export function Composer({ session, running }: { session: Session; running: boolean }) {
+export function Composer({ session, running, draft }: { session: Session; running: boolean; draft?: ComposerDraft }) {
   const appState = useStore((s) => s.appState);
   const [text, setText] = useState("");
   const [atts, setAtts] = useState<Att[]>([]);
   const drafts = useStore((s) => s.drafts[session.id]);
   useEffect(() => {
     if (drafts?.length) {
-      setAtts((a) => [...a, ...(drafts as Att[])]);
-      useStore.setState((x) => ({ drafts: { ...x.drafts, [session.id]: [] } }));
+      const files: Att[] = [];
+      const texts: string[] = [];
+      for (const d of drafts) {
+        if ("kind" in d && d.kind === "text") texts.push(d.text);
+        else if ("path" in d) files.push(d);
+      }
+      if (texts.length) setText(texts.join("\n\n"));
+      if (files.length) setAtts((a) => [...a, ...files]);
+      actions.setDrafts(session.id, []);
     }
   }, [drafts, session.id]);
   const skill = useStore((s) => s.skillChips[session.id] ?? null);
@@ -108,11 +129,12 @@ export function Composer({ session, running }: { session: Session; running: bool
   // Workflows (chain templates for this folder) and the one picked for the next message.
   const [workflows, setWorkflows] = useState<ChainTemplate[]>([]);
   const [workflow, setWorkflow] = useState<ChainTemplate | null>(null);
+  const subscription = !!draft || session.harness === "claude_code";
   const loadWorkflows = () => {
-    if (!session.folder) return setWorkflows([]);
+    if (!session.folder || subscription) return setWorkflows([]);
     campaignsApi.chains(session.folder, "chain").then((r) => setWorkflows(r.templates.filter((t) => t.kinds.includes("chain")))).catch(() => setWorkflows([]));
   };
-  useEffect(() => { setWorkflow(null); loadWorkflows(); }, [session.id, session.folder]);
+  useEffect(() => { setWorkflow(null); loadWorkflows(); }, [session.id, session.folder, subscription]);
   const closeSkillMenu = useCallback(() => setSkillMenu(false), []);
   const loadSkills = () => get("/skills").then((r) => {
     const all: SkillInfo[] = r.skills;
@@ -137,7 +159,12 @@ export function Composer({ session, running }: { session: Session; running: bool
     { cmd: "/skill", hint: "Use a skill in this message", args: skills.map((s) => s.name) },
     { cmd: "/task", hint: "Task board: new, <code>, move, done, list, link", args: TASK_SUBCOMMANDS.map(([s]) => s) },
     { cmd: "/workflow", hint: "Run a workflow (phases with checks) in this session", args: workflows.map((w) => w.id) },
-  ], [modelChoices, skills, workflows]);
+  ].filter((c) => (!draft || !SESSION_ONLY.includes(c.cmd)) && !(subscription && c.cmd === "/workflow")), [modelChoices, skills, workflows, !!draft, subscription]);
+  /** PATCH the session, or on the new-session screen change its settings there. */
+  const update = async (body: { model?: string; effort?: string; mode?: string }) => {
+    if (draft) draft.set(body);
+    else await patch(`/sessions/${session.id}`, body);
+  };
 
   // /task autocomplete: task codes from the board (matched by the backend) and its column names.
   const [taskHits, setTaskHits] = useState<TaskHit[]>([]);
@@ -171,6 +198,7 @@ export function Composer({ session, running }: { session: Session; running: bool
   }, [text, commands, taskHits, taskCols, skills, workflows]);
 
   const addFiles = async (files: FileList | File[]) => {
+    if (draft) return; // the new-session screen has no attachments (Claude Code reads only its folder)
     setBusy(true);
     try {
       const ups = await Promise.all(Array.from(files).map((f) => upload(f, session.id)));
@@ -187,21 +215,23 @@ export function Composer({ session, running }: { session: Session; running: bool
   const runSlash = async (line: string): Promise<boolean> => {
     const [cmd, ...rest] = line.trim().split(/\s+/);
     const arg = rest.join(" ");
+    if (cmd === "/workflow" && subscription) return actions.toast(WORKFLOW_UNAVAILABLE, "error"), true;
+    if (draft && SESSION_ONLY.includes(cmd)) return actions.toast(`${cmd} works in a session that has started. Send a message first.`, "error"), true;
     try {
       switch (cmd) {
         case "/model":
           if (!arg) return actions.toast(`Model: ${modelLabel(session.model)}`), true;
-          await patch(`/sessions/${session.id}`, { model: arg });
+          await update({ model: arg });
           actions.toast(`Model set to ${modelLabel(arg)}`);
           return true;
         case "/effort":
           if (!EFFORTS.includes(arg)) return actions.toast(`Effort must be one of: ${EFFORTS.join(", ")}`, "error"), true;
-          await patch(`/sessions/${session.id}`, { effort: arg });
+          await update({ effort: arg });
           actions.toast(["xhigh", "max"].includes(arg) ? `Effort set to ${arg}. You'll be asked to approve it on the next turn.` : `Effort set to ${arg}`);
           return true;
         case "/mode":
           if (!MODES[arg]) return actions.toast("Mode must be ask, accept_edits or plan", "error"), true;
-          await patch(`/sessions/${session.id}`, { mode: arg });
+          await update({ mode: arg });
           actions.toast(`Mode: ${MODES[arg]}`);
           return true;
         case "/compact": {
@@ -244,6 +274,10 @@ export function Composer({ session, running }: { session: Session; running: bool
   const runTask = async (line: string): Promise<boolean> => {
     const c = parseTaskCommand(line);
     const open = (code: string) => ({ label: "Open", run: () => actions.go("board", { task: code }) });
+    if (draft && (c.kind === "open" || c.kind === "link")) {
+      actions.toast("Start the session first (send a message), then bring the task into it.", "error");
+      return true;
+    }
     switch (c.kind) {
       case "board":
         actions.go("board");
@@ -286,7 +320,9 @@ export function Composer({ session, running }: { session: Session; running: bool
   const sendMessage = async (t: string, sk: string | null) => {
     setBusy(true);
     try {
-      await post(`/sessions/${session.id}/messages`, { text: t, attachments: atts, ...(sk ? { skill: sk } : {}) });
+      if (draft) {
+        if (!(await draft.start(t, sk))) return;
+      } else await post(`/sessions/${session.id}/messages`, { text: t, attachments: atts, ...(sk ? { skill: sk } : {}) });
       setText("");
       setAtts([]);
       setSkill(null);
@@ -345,6 +381,103 @@ export function Composer({ session, running }: { session: Session; running: bool
     setSel(0);
   };
 
+  const suggestionList = suggestions.length > 0 && (
+    <ul className={`absolute ${draft ? "top-full mt-1" : "bottom-full mb-1"} left-0 w-[min(600px,100%)] rounded-md border border-line bg-raised shadow-lg py-1 text-[13px] z-10`} role="listbox">
+      {suggestions.map((s, i) => (
+        <li key={s.value} role="option" aria-selected={i === sel}>
+          <button className={`w-full text-left px-3 py-1 flex items-baseline gap-3 ${i === sel ? "bg-sunken" : ""}`} title={s.hint || undefined}
+            onMouseDown={(e) => { e.preventDefault(); choose(s.value); ta.current?.focus(); }}>
+            <span className="font-mono shrink-0 max-w-[45%] truncate">{s.label}</span><span className="text-muted min-w-0 flex-1 truncate">{s.hint}</span>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+  const chips = (atts.length > 0 || skill || workflow) && (
+    <div className={`flex flex-wrap gap-1.5 ${draft ? "mb-1.5" : "mb-2"}`}>
+      {workflow && (
+        <span className="chip text-text" title={`Sending starts the ${workflow.title} workflow in this session: ${workflow.phases.map((p) => p.name).join(" → ")}`}>
+          <Flag size={12} className="text-action" />Workflow: {workflow.title}
+          <button aria-label={`Remove workflow ${workflow.title}`} onClick={() => setWorkflow(null)}><X size={12} /></button>
+        </span>
+      )}
+      {skill && (
+        <span className="chip text-text" title="This message invokes the skill; it stays on for the session">
+          <Sparkles size={12} className="text-action" />{skill}
+          <button aria-label={`Remove skill ${skill}`} onClick={() => setSkill(null)}><X size={12} /></button>
+        </span>
+      )}
+      {atts.map((a, i) => (
+        <span key={i} className="chip">{a.name}<button aria-label={`Remove ${a.name}`} onClick={() => setAtts(atts.filter((_, j) => j !== i))}><X size={12} /></button></span>
+      ))}
+    </div>
+  );
+  const openSkills = () => {
+    if (skillMenu) return setSkillMenu(false);
+    loadSkills();
+    loadWorkflows();
+    setSkillMenu(true);
+  };
+  const skillPicker = (
+    <SkillPicker open={skillMenu} skills={skills} onClose={closeSkillMenu} workflows={subscription ? [] : workflows}
+      onPickWorkflow={(w) => { setWorkflow(w); setSkillMenu(false); ta.current?.focus(); }}
+      onPick={(n) => { setSkill(n); setSkillMenu(false); ta.current?.focus(); }} />
+  );
+  const canSend = !(busy || running || (!text.trim() && !atts.length && !skill && !workflow));
+  const textarea = (
+    <textarea
+      id="composer"
+      ref={ta}
+      rows={draft ? 2 : 1}
+      value={text}
+      aria-label={draft ? "Describe a task" : undefined}
+      placeholder={running ? "Agent is working… (Stop to interrupt)" : workflow ? `What should the ${workflow.title} workflow do?` : skill ? `What should ${skill} work on? (or send as is)` : draft ? draft.placeholder : "Message the agent, or / for commands"}
+      className={draft ? "w-full resize-none bg-transparent outline-none focus-visible:outline-none px-1 py-0.5 min-h-[52px] max-h-72 text-[15px] leading-[1.6] placeholder:text-faint"
+        : "flex-1 resize-none bg-transparent outline-none focus-visible:outline-none py-1 max-h-60 leading-6"}
+      onChange={(e) => { setText(e.target.value); setSel(0); e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, draft ? 288 : 240)}px`; }}
+      onPaste={(e) => { if (!draft && e.clipboardData.files.length) { e.preventDefault(); addFiles(e.clipboardData.files); } }}
+      onKeyDown={(e) => {
+        if (suggestions.length && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+          e.preventDefault();
+          setSel((sel + (e.key === "ArrowDown" ? 1 : suggestions.length - 1)) % suggestions.length);
+        } else if (suggestions.length && e.key === "Tab") {
+          e.preventDefault();
+          choose(suggestions[sel].value);
+        } else if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+          e.preventDefault();
+          // `/model sol`: a partial name or label picks the highlighted model instead of setting "sol".
+          const modelArg = text.trim().match(/^\/model\s+(.+)$/)?.[1];
+          const pickModel = modelArg !== undefined && !modelChoices.includes(modelArg);
+          const pickTask = /^\/task\s/.test(text) && taskPick(text, taskCols); // a half-typed task code or column
+          if (suggestions.length && suggestions[sel].value.trim() !== text.trim() && (pickModel || pickTask || !text.includes(" ") || /^\/(skill|workflow) \S*$/.test(text))) choose(suggestions[sel].value);
+          else send();
+        }
+      }}
+    />
+  );
+
+  if (draft) {
+    // The new-session card: the editor, then the screen's settings and Tools, then Send.
+    return (
+      <div className="relative rounded-[20px] border border-line surface-raised px-4 pt-3.5 pb-2.5 shadow-[0_1px_2px_rgb(0_0_0/0.04),0_6px_24px_-8px_rgb(0_0_0/0.10)] focus-within:border-[color-mix(in_srgb,var(--action)_35%,var(--line))]">
+        {chips}
+        {textarea}
+        {suggestionList}
+        <div className="mt-2 flex items-center gap-1 min-w-0">{draft.rows[0]}</div>
+        <div className="mt-1 flex items-center gap-1 min-w-0">
+          {draft.rows[1]}
+          <div className="relative">
+            <button className={`btn btn-ghost gap-1.5 px-2 text-[14px] ${skill || workflow ? "text-action" : ""}`} title="Skills for this message" aria-label="Tools"
+              aria-haspopup="dialog" aria-expanded={skillMenu} onClick={openSkills}><Plug size={15} aria-hidden />Tools</button>
+            {skillPicker}
+          </div>
+          <button className="ml-auto shrink-0 size-9 rounded-full inline-flex items-center justify-center bg-action text-action-text transition hover:brightness-110 disabled:opacity-35 disabled:hover:brightness-100"
+            disabled={!canSend} onClick={send} aria-label="Send" title="Start the session (Enter)"><ArrowUp size={18} strokeWidth={2.25} /></button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={`shrink-0 border-t border-line surface px-4 py-3 ${drag ? "outline-2 outline-dashed outline-action -outline-offset-4" : ""}`}
@@ -353,80 +486,18 @@ export function Composer({ session, running }: { session: Session; running: bool
       onDrop={(e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); }}
     >
       <div className="max-w-[780px] mx-auto relative">
-        {suggestions.length > 0 && (
-          <ul className="absolute bottom-full mb-1 left-0 w-[min(600px,100%)] rounded-md border border-line bg-raised shadow-lg py-1 text-[13px] z-10" role="listbox">
-            {suggestions.map((s, i) => (
-              <li key={s.value} role="option" aria-selected={i === sel}>
-                <button className={`w-full text-left px-3 py-1 flex items-baseline gap-3 ${i === sel ? "bg-sunken" : ""}`} title={s.hint || undefined}
-                  onMouseDown={(e) => { e.preventDefault(); choose(s.value); ta.current?.focus(); }}>
-                  <span className="font-mono shrink-0 max-w-[45%] truncate">{s.label}</span><span className="text-muted min-w-0 flex-1 truncate">{s.hint}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-        {(atts.length > 0 || skill || workflow) && (
-          <div className="flex flex-wrap gap-1.5 mb-2">
-            {workflow && (
-              <span className="chip text-text" title={`Sending starts the ${workflow.title} workflow in this session: ${workflow.phases.map((p) => p.name).join(" → ")}`}>
-                <Flag size={12} className="text-action" />Workflow: {workflow.title}
-                <button aria-label={`Remove workflow ${workflow.title}`} onClick={() => setWorkflow(null)}><X size={12} /></button>
-              </span>
-            )}
-            {skill && (
-              <span className="chip text-text" title="This message invokes the skill; it stays on for the session">
-                <Sparkles size={12} className="text-action" />{skill}
-                <button aria-label={`Remove skill ${skill}`} onClick={() => setSkill(null)}><X size={12} /></button>
-              </span>
-            )}
-            {atts.map((a, i) => (
-              <span key={i} className="chip">{a.name}<button aria-label={`Remove ${a.name}`} onClick={() => setAtts(atts.filter((_, j) => j !== i))}><X size={12} /></button></span>
-            ))}
-          </div>
-        )}
+        {suggestionList}
+        {chips}
         <div className="flex items-end gap-2 rounded-lg border border-line surface-raised px-2 py-1.5 focus-within:border-action">
           <button className="btn btn-ghost px-1.5 mb-0.5" title="Attach files" aria-label="Attach files" onClick={() => fileIn.current?.click()}><Paperclip size={16} /></button>
           <div className="relative mb-0.5">
             <button className={`btn btn-ghost px-1.5 ${skill ? "text-action" : ""}`} title="Use a skill" aria-label="Use a skill" aria-haspopup="dialog" aria-expanded={skillMenu}
-              onClick={() => {
-                if (skillMenu) return setSkillMenu(false);
-                loadSkills();
-                loadWorkflows();
-                setSkillMenu(true);
-              }}><Sparkles size={16} /></button>
-            <SkillPicker open={skillMenu} skills={skills} onClose={closeSkillMenu} workflows={workflows}
-              onPickWorkflow={(w) => { setWorkflow(w); setSkillMenu(false); ta.current?.focus(); }}
-              onPick={(n) => { setSkill(n); setSkillMenu(false); ta.current?.focus(); }} />
+              onClick={openSkills}><Sparkles size={16} /></button>
+            {skillPicker}
           </div>
           <input ref={fileIn} type="file" multiple hidden onChange={(e) => e.target.files && addFiles(e.target.files)} />
-          <textarea
-            id="composer"
-            ref={ta}
-            rows={1}
-            value={text}
-            placeholder={running ? "Agent is working… (Stop to interrupt)" : workflow ? `What should the ${workflow.title} workflow do?` : skill ? `What should ${skill} work on? (or send as is)` : "Message the agent, or / for commands"}
-            className="flex-1 resize-none bg-transparent outline-none focus-visible:outline-none py-1 max-h-60 leading-6"
-            onChange={(e) => { setText(e.target.value); setSel(0); e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, 240)}px`; }}
-            onPaste={(e) => { if (e.clipboardData.files.length) { e.preventDefault(); addFiles(e.clipboardData.files); } }}
-            onKeyDown={(e) => {
-              if (suggestions.length && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
-                e.preventDefault();
-                setSel((sel + (e.key === "ArrowDown" ? 1 : suggestions.length - 1)) % suggestions.length);
-              } else if (suggestions.length && e.key === "Tab") {
-                e.preventDefault();
-                choose(suggestions[sel].value);
-              } else if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                // `/model sol`: a partial name or label picks the highlighted model instead of setting "sol".
-                const modelArg = text.trim().match(/^\/model\s+(.+)$/)?.[1];
-                const pickModel = modelArg !== undefined && !modelChoices.includes(modelArg);
-                const pickTask = /^\/task\s/.test(text) && taskPick(text, taskCols); // a half-typed task code or column
-                if (suggestions.length && suggestions[sel].value.trim() !== text.trim() && (pickModel || pickTask || !text.includes(" ") || /^\/(skill|workflow) \S*$/.test(text))) choose(suggestions[sel].value);
-                else send();
-              }
-            }}
-          />
-          <button className="btn btn-primary px-2 mb-0.5" disabled={busy || running || (!text.trim() && !atts.length && !skill && !workflow)} onClick={send} aria-label="Send"><ArrowUp size={16} /></button>
+          {textarea}
+          <button className="btn btn-primary px-2 mb-0.5" disabled={!canSend} onClick={send} aria-label="Send"><ArrowUp size={16} /></button>
         </div>
         <div className="mt-1 flex items-center gap-2 text-[11.5px] text-faint">
           <span className="flex-1 min-w-0">{MODES[session.mode] ?? session.mode} · Enter to send, Shift+Enter for a new line · drop files to attach</span>

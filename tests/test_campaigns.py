@@ -89,6 +89,18 @@ def chain_session(app, proj, **kw):
     return app.store.create(folder=str(proj), mode="accept_edits", **kw)
 
 
+@pytest.mark.parametrize("with_folder", [True, False])
+async def test_workflows_unavailable_in_claude_subscription_sessions(app, mgr, proj, with_folder):
+    s = app.store.create(harness="claude_code", folder=str(proj) if with_folder else None)
+    with pytest.raises(CampaignError) as error:
+        await mgr.create({"template": "flow", "kind": "chain", "session_id": s["id"]})
+    assert error.value.status == 400
+    assert str(error.value) == ("Workflows run on the built-in loop with an API key, so they aren't "
+                                "available in Claude subscription sessions.")
+    assert app.store.get(s["id"])["harness"] == "claude_code"
+    assert not app.db.all("SELECT * FROM campaigns")
+
+
 def tool_results(app, sid):
     out = []
     for m in app.store.messages(sid):

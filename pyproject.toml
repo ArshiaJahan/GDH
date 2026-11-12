@@ -44,4 +44,5 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = ["live: hits real provider APIs (skipped without keys)",
-           "auto_title: keep session auto-titling on (other tests turn it off)"]
+           "auto_title: keep session auto-titling on (other tests turn it off)",
+           "shipped_harness_default: new sessions get the shipped [sessions].default_harness (others pin builtin)"]

@@ -53,6 +53,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import shutil
 import signal
 import time
@@ -64,14 +65,14 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, Body, FastAPI, HTTPException
 
 from ..children import CHILDREN
-from ..config import data_dir
+from ..config import data_dir, sessions_dir
 from ..core.types import Message, TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock, Usage, new_id
 from ..providers.base import compute_cost
 from ..skills import turn_skill_segments
 from ..store import remove_claude_code_folder, valid_claude_code_session
 from .claude_cli import LOGIN_HINT, CliProbe, redact
 from .gdw_mcp import PROMPT_TOOL, SERVER, GdwMcp, mount
-from .harnesses import DEFERRED_SDK_TOOLS, HOOK_TIMEOUT_S, _cwd, _project_instructions, _prompt_text, make_gate
+from .harnesses import DEFERRED_SDK_TOOLS, HOOK_TIMEOUT_S, _project_instructions, _prompt_text, make_gate
 
 if TYPE_CHECKING:
     from ..app import AppState
@@ -138,6 +139,36 @@ def is_plan_file(name: str, inp: dict) -> bool:
     except (OSError, RuntimeError):
         return False
     return full.parent == root and full.suffix == ".md"
+
+
+def work_dir(sid: str) -> Path:
+    """A chat-only session's private scratch folder, data_dir/claude_code/<sid>/work (0700): the CLI's
+    cwd and the gate's folder scope when the session has no folder. It sits inside the session's
+    claude_code folder (next to, not above, the MCP config), so remove_claude_code_folder cleans it up."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", sid):
+        raise ValueError(f"Bad session id {sid!r}")
+    d = data_dir() / "claude_code" / sid / "work"
+    d.mkdir(parents=True, exist_ok=True)
+    os.chmod(d.parent, 0o700)
+    os.chmod(d, 0o700)
+    return d
+
+
+def session_cwd(s: dict) -> Path:
+    """Keep old chat transcripts in their original cwd; new chats use a private work_dir."""
+    if s.get("folder"):
+        return Path(s["folder"])
+    sid = s["id"]
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", sid):
+        raise ValueError(f"Bad session id {sid!r}")
+    legacy = sessions_dir() / sid
+    # The work folder identifies chats created after the cwd change. They must keep it on
+    # later turns too, after claude_code_session has been saved by their first turn.
+    work = data_dir() / "claude_code" / sid / "work"
+    if legacy.exists() or ((s.get("settings") or {}).get("claude_code_session") and not work.is_dir()):
+        legacy.mkdir(parents=True, exist_ok=True)
+        return legacy
+    return work_dir(sid)
 
 
 def _cap_prompt(text: str) -> str:
@@ -713,7 +744,8 @@ class ClaudeCode:
     def _system_prompt(self, s: dict, cwd: Path) -> str:
         app = self.app
         mode = {"ask": "Ask before edits", "accept_edits": "Accept edits", "plan": "Plan only (no edits or commands)"}
-        seg = [CONTEXT_HEAD, f"Session folder: {s.get('folder') or cwd}\nMode: {mode.get(s['mode'], s['mode'])}"]
+        where = s.get("folder") or f"none (chat only). Working folder: {cwd}, a private scratch folder for this session"
+        seg = [CONTEXT_HEAD, f"Session folder: {where}\nMode: {mode.get(s['mode'], s['mode'])}"]
         context = turn_skill_segments(s["settings"], app.hooks.turn(s["id"]))
         for fn in getattr(app, "prompt_notes", None) or []:
             try:
@@ -785,7 +817,7 @@ class ClaudeCode:
                 proc.billing = billing
                 touched: list[Path] = []
                 turn = Turn(sid=sid, model=model, effort=effort, jid=jid, touched=touched,
-                            gate=make_gate(app, lambda: app.store.get(sid) or s, _cwd(s), touched))
+                            gate=make_gate(app, lambda: app.store.get(sid) or s, session_cwd(s), touched))
                 proc.turn = turn
                 proc.last_used = time.monotonic()
                 if proc.reader.done():  # it already exited (bad flags, crash at start)
@@ -834,7 +866,7 @@ class ClaudeCode:
             cli = self.probe.cached() and self.probe.cached().get("path")  # type: ignore[union-attr]
             if not cli:
                 raise RuntimeError("The claude CLI isn't installed.")
-            cwd = _cwd(s)
+            cwd = session_cwd(s)
             sig = self._signature(s, cli, model, effort, cwd)
             cur = self.procs.get(sid)
             if cur and cur.alive and cur.signature == sig and cur.turn is None and not cur.starting \
@@ -954,7 +986,7 @@ class ClaudeCode:
         s = self.app.store.get(sid)
         if not s:
             return None
-        return make_gate(self.app, lambda: self.app.store.get(sid) or s, _cwd(s), [])
+        return make_gate(self.app, lambda: self.app.store.get(sid) or s, session_cwd(s), [])
 
     def _note_plan(self, sid: str, name: str, inp: dict) -> None:
         """Keep the plan text the CLI writes (GDW never reads ~/.claude), for the plan card."""
@@ -1126,7 +1158,7 @@ class ClaudeCode:
         cs = (s.get("settings") or {}).get("claude_code_session")
         cs = cs if valid_claude_code_session(cs) else None
         p = self.procs.get(sid)
-        return {"session_id": cs, "resume_command": f"claude --resume {cs}" if cs else None,
+        return {"session_id": cs, "resume_command": f"cd {shlex.quote(str(session_cwd(s)))} && claude --resume {cs}" if cs else None,
                 "running": bool(p and p.alive), "busy": bool(p and p.turn)}
 
 

@@ -60,7 +60,10 @@ type State = {
   /** Every session, including archived ones and those in Trash (the sidebar filters by view). */
   sessions: Session[];
   groups: Group[];
+  /** null: the new-session screen (when the chat page shows). */
   currentId: string | null;
+  /** The group a session started from the new-session screen joins (⌘N in a grouped session). */
+  draftGroup: string | null;
   sidebarView: SidebarView;
   /** Multi-selection in the sidebar (⌘-click / ⇧-click). */
   selection: string[];
@@ -78,7 +81,7 @@ type State = {
   assistantRuns: Record<string, AssistRun>;
   focusMessage: string | null;
   artifactsTab: string;
-  drafts: Record<string, { path: string; name: string; mime: string; item_id?: string; text?: string }[]>;
+  drafts: Record<string, ({ path: string; name: string; mime: string; item_id?: string; text?: string } | { kind: "text"; text: string })[]>;
   /** Skill chip on each session's composer draft (sent as the message's invoked skill). */
   skillChips: Record<string, string | null>;
   page: Page;
@@ -113,6 +116,7 @@ export const useStore = create<State>(() => ({
   sessions: [],
   groups: [],
   currentId: localStorage.getItem("currentSession"),
+  draftGroup: null,
   sidebarView: "active",
   selection: [],
   renamingId: null,
@@ -290,6 +294,10 @@ export const actions = {
     // Back to the chat of an open session that got a reply meanwhile: it's being read now.
     const id = st().currentId;
     if (page === "chat" && id && viewing(id) && st().sessions.find((s) => s.id === id)?.unread) actions.markRead(id);
+  },
+  /** Replace the queued text and attachments for a session's composer. */
+  setDrafts(sessionId: string, drafts: State["drafts"][string]) {
+    set((x) => ({ drafts: { ...x.drafts, [sessionId]: drafts } }));
   },
   /** Put a file on a session's composer (from the Artifacts or ElevenLabs page). */
   attachToChat(sessionId: string, att: { path: string; name: string; mime: string; item_id?: string; text?: string }, warning?: string | null) {

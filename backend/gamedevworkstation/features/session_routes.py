@@ -1,8 +1,14 @@
-"""Side-panel APIs: environment options, context breakdown and Compact."""
+"""Side-panel APIs: environment options, context breakdown and Compact; the new-session greeting."""
 from __future__ import annotations
 
+import asyncio
 import json
+import os
+import re
 import shutil
+import subprocess
+import sys
+from functools import cache
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, FastAPI, HTTPException
@@ -10,6 +16,7 @@ from fastapi import APIRouter, FastAPI, HTTPException
 from ..agent import context as cx
 from ..core.types import ToolResultBlock
 from ..skills import skills_prompt, turn_skill_segments
+from ..store import SESSION_MODES
 
 if TYPE_CHECKING:
     from ..app import AppState
@@ -104,7 +111,48 @@ async def compact(app: "AppState", sid: str) -> dict:
         raise HTTPException(502, f"Compact failed: {e}") from e
 
 
+@cache
+def account_full_name() -> str:
+    """The Mac account's full name (`id -F`), else the passwd entry's gecos name; "" when unknown.
+    Only the local account: never the Claude login or any email address."""
+    if sys.platform == "darwin":
+        try:
+            r = subprocess.run(["/usr/bin/id", "-F"], capture_output=True, text=True, timeout=3)
+            if r.returncode == 0 and r.stdout.strip():
+                return r.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            pass
+    try:
+        import pwd
+
+        return pwd.getpwuid(os.getuid()).pw_gecos.split(",")[0].strip()
+    except (ImportError, KeyError, OSError):
+        return ""
+
+
+def greeting_name(full: str) -> str | None:
+    """"Arshia Jahan" → "Arshia J." (first name and last initial), "Arshia" → "Arshia"; None when
+    there's no usable name, or it looks like an email address or a handle rather than a name."""
+    full = " ".join((full or "").split())
+    if not full or "@" in full or "/" in full:
+        return None
+    words = [w for w in full.split(" ") if re.search(r"[^\W\d_]", w)]
+    if not words:
+        return None
+    first = words[0][:40]
+    if len(words) == 1:
+        return first
+    initial = next((c for c in words[-1] if c.isalpha()), "")
+    return f"{first} {initial.upper()}." if initial else first
+
+
 def register(app: FastAPI, api: APIRouter, S: "AppState") -> None:
+    @api.get("/greeting")
+    async def greeting() -> dict:
+        """The new-session screen's "What should we work on, <name>?": the Mac account's first name
+        and last initial (null: "What should we work on?")."""
+        return {"name": greeting_name(await asyncio.to_thread(account_full_name))}
+
     @api.get("/sessions/{sid}/context")
     async def ctx(sid: str) -> dict:
         return context_breakdown(S, sid)
@@ -133,4 +181,5 @@ def register(app: FastAPI, api: APIRouter, S: "AppState") -> None:
                        for k, v in S.config.models.items()],
             "tiers": S.config.tiers,
             "tier_models": S.config.tier_models(),
+            "modes": list(SESSION_MODES),  # Plan / Ask / Accept edits; no bypass mode
         }

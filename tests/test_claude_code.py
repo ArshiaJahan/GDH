@@ -8,6 +8,7 @@ import asyncio
 import errno
 import json
 import os
+import shlex
 import signal
 import socket
 import stat
@@ -223,7 +224,7 @@ def test_turn_flags_env_and_event_mapping(live, tmp_path):
     jobs = live.c.get("/api/jobs", params={"session_id": sid}).json()
     assert [j["status"] for j in jobs if j["kind"] == "claude_code"] == ["done", "done"]
     info = live.c.get(f"/api/claude-code/sessions/{sid}").json()
-    assert info["resume_command"] == f"claude --resume {s['settings']['claude_code_session']}"
+    assert info["resume_command"] == f"cd {shlex.quote(str(folder))} && claude --resume {s['settings']['claude_code_session']}"
 
 
 def test_child_env_strips_every_auth_override():
@@ -1121,7 +1122,7 @@ async def test_session_patch_rejects_invalid_uuid_and_store_drops_it(rig):
         r = await client.patch(f"/api/sessions/{rig.sid}", json={"settings": {"claude_code_session": good}})
         assert r.status_code == 200 and r.json()["settings"]["claude_code_session"] == good
         info = await client.get(f"/api/claude-code/sessions/{rig.sid}")
-        assert info.json()["resume_command"] == f"claude --resume {good}"
+        assert info.json()["resume_command"] == f"cd {shlex.quote(str(ccm.session_cwd(rig.app.store.get(rig.sid))))} && claude --resume {good}"
     rig.app.store.update(rig.sid, settings={"claude_code_session": "invalid"})
     assert rig.app.store.get(rig.sid)["settings"]["claude_code_session"] == good
     created = rig.app.store.create(claude_code_session="invalid")
@@ -1300,3 +1301,132 @@ async def test_purge_expired_removes_claude_code_folder(rig):
 
     assert await TrashJanitor(rig.app).run_once_async() == [rig.sid]
     assert not folder.exists() and rig.sid not in rig.cc.procs
+
+
+# ------------------------------------------------- chat only: the private scratch folder
+
+
+def test_chat_only_session_works_in_its_scratch_folder(live, tmp_path):
+    r = live.c.post("/api/sessions", json={"harness": "claude_code", "mode": "accept_edits", "model": "claude-sonnet-5-5"})
+    assert r.status_code == 200, r.text
+    s = r.json()
+    sid = s["id"]
+    assert s["folder"] is None and s["harness"] == "claude_code"
+    live.send(sid, "hello")
+    live.wait_idle(sid)
+    assert live.msgs(sid)[-1]["content"][0]["text"] == "Hello from fake claude (turn 1)."
+    work = data_dir() / "claude_code" / sid / "work"
+    (start,) = live.starts()
+    assert start["cwd"] == str(work.resolve())
+    assert stat.S_IMODE(work.stat().st_mode) == 0o700 and stat.S_IMODE(work.parent.stat().st_mode) == 0o700
+    prompt = _opt(start["argv"], "--append-system-prompt")
+    assert f"Session folder: none (chat only). Working folder: {work}" in prompt
+    # The MCP config sits next to the scratch folder, outside it.
+    assert Path(_opt(start["argv"], "--mcp-config")).parent == work.parent
+    # Delete for good: the scratch folder goes with the session's claude_code folder.
+    assert live.c.delete(f"/api/sessions/{sid}", params={"purge": True}).status_code == 200
+    assert not work.parent.exists()
+
+
+def test_chat_only_gate_scopes_to_the_scratch_folder(tmp_path, monkeypatch):
+    from gamedevworkstation.config import sessions_dir
+
+    monkeypatch.setattr(ccm, "plans_dir", lambda: tmp_path / "plans")
+    S = AppState(db_path=tmp_path / "chat.db")
+    cc = ccm.ClaudeCode(S)
+    sid = S.store.create(mode="accept_edits", harness="claude_code")["id"]
+    work = ccm.session_cwd(S.store.get(sid))
+    assert work == data_dir() / "claude_code" / sid / "work" and work.is_dir()
+
+    def decision(name: str, inp: dict) -> dict:
+        return asyncio.run(cc.pre_tool_use(sid, {"tool_name": name, "tool_input": inp}))["hookSpecificOutput"]
+
+    assert decision("Write", {"file_path": str(work / "notes.md"), "content": "x"})["permissionDecision"] == "allow"
+    assert decision("Read", {"file_path": "notes.md"})["permissionDecision"] == "allow"  # relative: the scratch folder
+    for outside in (work.parent / "mcp-x.json", sessions_dir() / sid / "x.txt", work / ".." / "escape.md", tmp_path / "x"):
+        d = decision("Read", {"file_path": str(outside)})
+        assert d["permissionDecision"] == "deny" and "outside the session folder" in d["permissionDecisionReason"]
+    # A session with a folder keeps it.
+    folder = _project(tmp_path)
+    assert ccm.session_cwd({"id": sid, "folder": str(folder)}) == folder
+    with pytest.raises(ValueError):
+        ccm.work_dir("../escape")
+
+
+@pytest.mark.parametrize("has_directory,has_transcript", [(True, False), (False, True), (True, True)])
+def test_legacy_chat_only_cwd_gate_and_resume_command(tmp_path, monkeypatch, has_directory, has_transcript):
+    from gamedevworkstation.config import sessions_dir
+
+    monkeypatch.setattr(ccm, "plans_dir", lambda: tmp_path / "plans")
+    app = AppState(db_path=tmp_path / "legacy.db")
+    cc = ccm.ClaudeCode(app)
+    transcript = "12345678-1234-1234-1234-123456789abc"
+    s = app.store.create(harness="claude_code", mode="accept_edits",
+                         **({"claude_code_session": transcript} if has_transcript else {}))
+    legacy = sessions_dir() / s["id"]
+    if has_directory:
+        legacy.mkdir()
+        (legacy / "notes.txt").write_text("old chat")
+    assert ccm.session_cwd(s) == legacy
+    assert legacy.is_dir()
+    assert not (data_dir() / "claude_code" / s["id"] / "work").exists()
+    allowed = asyncio.run(cc.pre_tool_use(s["id"], {
+        "tool_name": "Write", "tool_input": {"file_path": str(legacy / "notes.txt"), "content": "update"},
+    }))["hookSpecificOutput"]
+    assert allowed["permissionDecision"] == "allow"
+    denied = asyncio.run(cc.pre_tool_use(s["id"], {
+        "tool_name": "Read", "tool_input": {"file_path": str(data_dir() / "claude_code" / s["id"] / "work" / "notes.txt")},
+    }))["hookSpecificOutput"]
+    assert denied["permissionDecision"] == "deny"
+    if has_transcript:
+        assert cc.info(s["id"])["resume_command"] == f"cd {shlex.quote(str(legacy))} && claude --resume {transcript}"
+
+
+def test_new_chat_keeps_its_work_dir_after_saving_the_transcript(tmp_path):
+    app = AppState(db_path=tmp_path / "new-chat.db")
+    s = app.store.create(harness="claude_code")
+    work = ccm.session_cwd(s)
+    transcript = "12345678-1234-1234-1234-123456789abc"
+    app.store.update(s["id"], settings={"claude_code_session": transcript})
+    assert ccm.session_cwd(app.store.get(s["id"])) == work
+    assert ccm.ClaudeCode(app).info(s["id"])["resume_command"] == f"cd {shlex.quote(str(work))} && claude --resume {transcript}"
+
+
+@pytest.mark.parametrize("legacy", [True, False])
+async def test_chat_only_cli_restarts_and_resumes_in_the_same_cwd(rig, legacy):
+    from gamedevworkstation.config import sessions_dir
+
+    rig.app.store.update(rig.sid, folder=None)
+    expected = sessions_dir() / rig.sid if legacy else data_dir() / "claude_code" / rig.sid / "work"
+    if legacy:
+        expected.mkdir()
+    await rig.send()
+    transcript = rig.app.store.get(rig.sid)["settings"]["claude_code_session"]
+    await rig.cc.close_session(rig.sid)
+    await rig.send("again")
+    starts = [e for e in rig.entries() if "argv" in e]
+    assert len(starts) == 2
+    assert all(e["cwd"] == str(expected) for e in starts)
+    assert _opt(starts[-1]["argv"], "--resume") == transcript
+
+
+def test_resume_command_shell_quotes_the_project_folder(tmp_path):
+    app = AppState(db_path=tmp_path / "quoted.db")
+    folder = tmp_path / "Alice's game; $(unsafe)"
+    folder.mkdir()
+    transcript = "12345678-1234-1234-1234-123456789abc"
+    s = app.store.create(harness="claude_code", folder=str(folder), claude_code_session=transcript)
+    command = ccm.ClaudeCode(app).info(s["id"])["resume_command"]
+    assert command == f"cd {shlex.quote(str(folder))} && claude --resume {transcript}"
+    assert shlex.split(command) == ["cd", str(folder), "&&", "claude", "--resume", transcript]
+
+
+@pytest.mark.parametrize("sid", ["", ".", "..", "../escape", "a/b", "/absolute", "white space", "é", "a" * 65, "bad\n"])
+def test_work_dir_rejects_invalid_session_ids(sid):
+    with pytest.raises(ValueError, match="Bad session id"):
+        ccm.work_dir(sid)
+
+
+@pytest.mark.parametrize("sid", ["a", "A0_-", "a" * 64])
+def test_work_dir_accepts_valid_session_ids(sid):
+    assert ccm.work_dir(sid) == data_dir() / "claude_code" / sid / "work"

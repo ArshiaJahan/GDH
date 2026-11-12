@@ -142,8 +142,11 @@ keep an explicit **Save**.
 - `[fleet]` parallel waves: `enabled`, `max_units` (writing units per wave), `unit_timeout_min`
   (`build`, `research`) and `relay_tokens` (discoveries passed to the next wave).
 - `[sessions]` `auto_title` (name new sessions after the first reply, default on), `trash_days`
-  (sessions in Trash are deleted for good after this many days, default 30) and
-  `event_retention_days` (how long the event log keeps events, default 7; see Settings → Storage).
+  (sessions in Trash are deleted for good after this many days, default 30),
+  `event_retention_days` (how long the event log keeps events, default 7; see Settings → Storage)
+  and `default_harness` (the harness of every new session, also `POST /api/sessions` without one:
+  `claude_code`, your Claude subscription through your own `claude` CLI; or `builtin`, `agent_sdk`,
+  `codex_cli`). Scheduled tasks, campaigns, fleet and subagents keep the harness they always used.
 - `[mcp.presets.<key>]` built-in MCP servers (name, transport, command, args, description) added
   once to Skills & MCP; `[skills.mcp_on_invoke]` maps a skill to the MCP servers that invoking it
   turns on for the session (every Unity skill → `unity`).
@@ -180,7 +183,7 @@ there's more to scroll.
 **Chat.** Streaming replies with collapsible thinking and tool calls, subagent cards (tier,
 effort meter, status, tokens, cost, stop), inline players for ElevenLabs audio, and drag and
 drop attachments. Slash commands are `/model`, `/effort`, `/mode`, `/compact`, `/clear`,
-`/skill`, `/task` (see [Task board](#task-board)) and `/workflow` (see
+`/skill`, `/task` (see [Task board](#task-board)) and, in built-in loop sessions with an API key, `/workflow` (see
 [Campaigns and workflows](#campaigns-and-workflows)). A task code such as `Task00012` in a message
 (yours or the agent's) shows as a chip that opens the task; the chat header shows the tasks
 linked to the session.
@@ -215,8 +218,8 @@ missed too much.
 windows at least 1200 px wide and closed in narrower ones:
 
 1. **Environment** — where it runs (Local), folder, model and effort, account profile per provider,
-   mode, harness. The harness picker is locked while the session runs a campaign or workflow
-   (they need the built-in loop).
+   mode, and the session's harness (read-only: new sessions run Claude Code; older sessions keep
+   the harness they were made with).
 2. **Context** — tokens by system, tools, skills, messages and attachments, as a share of the
    window, plus this session's cost per model. **Compact** summarizes older turns with
    `claude.fast` at low effort (the last 3 turns, or inside one long turn the last 4 tool
@@ -477,6 +480,9 @@ The tables (migration 4) are `task_boards`, `task_columns`, `board_tasks`, `task
 
 ## Campaigns and workflows
 
+Campaigns and workflows run on the built-in loop with an API key. Workflows aren't available
+in Claude subscription sessions, including sessions from the new-session screen.
+
 Two ways to run work in phases whose checks the app evaluates itself (an agent saying "done"
 never counts):
 
@@ -510,7 +516,7 @@ script's `RESULT:` line, e.g. `asset_audit`), `metric_threshold` (`[VERIFY]`/`[P
 (a fresh screenshot), `git_clean` and `manual` (you answer Pass or Fail on a card); every phase
 needs at least one the app can check.
 
-**Starting a workflow.** In the composer type `/workflow <id> <what to do>`, or `/workflow <id>`
+**Starting a workflow.** In a built-in loop session with an API key, type `/workflow <id> <what to do>` in the composer, or `/workflow <id>`
 to attach it as a chip and type the request next; the skills button lists the folder's
 **Workflows** first. Sending starts the chain in this session. The agent finishes each step with a
 `---HANDOFF---` block (What / Decisions / Unresolved / Reversibility) and `chain_step_done`; the
@@ -562,9 +568,10 @@ stays advisory.
 **Tasks.** Task codes in a campaign's or workflow's request (`Task00012`) link every session of the
 run to those tasks on the task board.
 
-**Harness.** Campaigns and workflows use the built-in loop (their tools, autopilot and gates live
-there): a workflow can't start in a session on another harness, and the harness picker is locked
-while one runs.
+**Harness.** Campaigns and workflows use the built-in loop with an API key (their tools, autopilot
+and gates live there). Workflows aren't available in Claude subscription sessions: the Tools menu
+hides them and `/workflow` explains why. New sessions from the new-session screen use the Claude
+subscription. A session's harness can't change while a campaign or workflow runs.
 
 **The agent's tools** (only in campaign or workflow sessions; the `campaign` skill is pinned
 there): `campaign_status`, `campaign_log` (decision, discovery or note), `campaign_pause` (with an
@@ -601,8 +608,30 @@ The app remembers these choices in this browser profile (`localStorage`).
 Hover a row, or move the keyboard focus to it, for its **…** button, which opens the same menu
 as a right-click (Tab reaches it from the focused row).
 
-**New session (+ or ⌘N)** reuses an untitled session without messages in the same group instead
-of adding another empty "New session".
+**New session (+ or ⌘N)** opens the new-session screen; the session is made when you send its
+first message, so no empty "New session" rows pile up. It joins the current session's group (or the
+group whose **+** you pressed).
+
+**The new-session screen** asks *What should we work on, <your first name and last initial>?* (the
+Mac account's full name; never your Claude login or email). Below it, a card holds the editor and
+the new session's settings:
+
+- **Location**: **Chat only** (no folder: Claude Code works in a private scratch folder,
+  `<data>/claude_code/<session>/work`, deleted with the session) or **Folder** (Claude Code reads,
+  edits and runs commands in that project folder). The folder chip opens the folder picker; your
+  recent session folders are the pills under the card, and a click picks one.
+- **Model** (Claude models, with their tiers), **effort**, and **mode**: Plan only, Ask before
+  edits or Accept edits. There is no bypass-permissions mode.
+- **Tools** picks a skill for the first message; `/` commands work as in the chat (`/model`,
+  `/effort` and `/mode` change the card; `/task new` makes a board card).
+- **Send** (Enter) creates the session and sends the message.
+
+Every new session from this screen runs **Claude Code on your Claude subscription** (harness `claude_code`, the
+`[sessions].default_harness`); there's no harness choice. Sessions made before keep their harness,
+shown read-only in the Environment card. If the `claude` CLI is missing or logged out, the screen
+shows a slim notice (*Claude Code isn't logged in: run `claude auth login`*) with Copy and Retry.
+The screen has no attachments (Claude Code reads only its folder); attach files once the session
+has started.
 
 **The session menu** has:
 
@@ -697,8 +726,12 @@ change these details: see Troubleshooting.
 (Claude Code, installed by you and never modified or bundled) inside GameDevWorkstation. You chat
 in the normal chat; Claude Code's own loop and tools do the work in the session folder (a worktree
 folder works too: the CLI runs there), and its replies, tool cards, approvals and usage show up like
-any other session. Pick it in a new session's **Run this session with** menu (shown until the first
-message) or in the side panel's Environment card → **Harness**.
+any other session. Every new session from the new-session screen uses it (see
+[the new-session screen](#sessions)); older sessions keep their harness. A chat-only session (no
+folder) runs in a private scratch folder, `<data>/claude_code/<session>/work`: the CLI's working
+directory and the folder scope of its approvals, removed when the session is deleted for good.
+Older chat-only sessions keep `<data>/sessions/<session>` so Claude can find their transcripts
+when resuming.
 
 **Your login.** These sessions use the Claude account you logged in to with `claude auth login`.
 GameDevWorkstation passes no API key and never uses `--bare`. Every CLI process (including status

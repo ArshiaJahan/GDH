@@ -23,6 +23,9 @@ SESSION_FIELDS = ("title", "pinned", "folder", "model", "effort", "account", "mo
 # and where its title came from. Duplicates and forks don't copy them.
 NOT_COPIED = ("agent_sdk_session", "codex_thread", "claude_code_session", "claude_code_totals", "claude_code_since",
               "claude_code_sent", "scheduled_task", "title_source")
+# Permission modes a session can have (Plan / Ask / Accept edits). There is no bypass mode: Claude
+# Code sessions never get bypassPermissions (claude_code.FORBIDDEN_MODES).
+SESSION_MODES = ("plan", "ask", "accept_edits")
 MAX_CLEARS = 100  # /clear times kept in settings.cleared_at (for forks from before a clear)
 GROUP_COLORS = ("gray", "blue", "teal", "green", "yellow", "orange", "red", "violet")
 VIEWS = {  # GET /api/sessions?view=
@@ -89,7 +92,9 @@ class SessionStore:
     # ------------------------------------------------------------------ sessions
 
     def create(self, title: str = "New session", folder: str | None = None, model: str | None = None,
-               effort: str | None = None, mode: str | None = None, **settings: Any) -> dict:
+               effort: str | None = None, mode: str | None = None, harness: str = "builtin", **settings: Any) -> dict:
+        """A new session. `harness` defaults to the built-in loop for internal creators (scheduled
+        tasks, campaigns, fleet); POST /api/sessions passes [sessions].default_harness."""
         settings = _claude_settings(settings)
         o = self.config.orchestrator
         global_skills = self.db.kv_get("skills_global", ["delegation"])
@@ -101,7 +106,7 @@ class SessionStore:
             "effort": effort or o.get("effort", "medium"),
             "account": self.config.profiles("anthropic")[0],
             "mode": mode or self.config.modes.get("default", "ask"),
-            "harness": "builtin", "location": "local",
+            "harness": harness, "location": "local",
             "settings": json.dumps({"skills": global_skills, "connectors": {},
                                    "shared_tools": False, "accounts": self.config.session_accounts(None),
                                    **settings}),

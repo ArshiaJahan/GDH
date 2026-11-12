@@ -49,6 +49,19 @@ def _no_auto_title(request, monkeypatch):
         monkeypatch.setattr(sessions_mgmt.Titler, "enabled", lambda self: False)
 
 
+@pytest.fixture(autouse=True)
+def _builtin_new_sessions(request, monkeypatch):
+    """New sessions default to claude_code (the user's own claude CLI), which tests must never run.
+    Most tests create sessions to drive the built-in loop with a FakeProvider, so POST /api/sessions
+    without a harness gives them "builtin" here; tests about the shipped default opt out with
+    @pytest.mark.shipped_harness_default."""
+    if "shipped_harness_default" in request.keywords:
+        return
+    from gamedevworkstation import server
+
+    monkeypatch.setattr(server, "new_session_harness", lambda config: "builtin")
+
+
 @pytest.fixture
 def cfg():
     from gamedevworkstation.config import get_config

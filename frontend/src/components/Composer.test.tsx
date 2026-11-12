@@ -27,6 +27,23 @@ const options = () => screen.queryAllByRole("option").map((o) => o.textContent ?
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe("Composer slash commands", () => {
+  it.each([false, true])("hides workflows and explains /workflow for Claude subscription sessions (draft=%s)", async (draft) => {
+    render(<Composer session={{ ...SESSION, harness: "claude_code" }} running={false}
+      draft={draft ? { set: vi.fn(), start: vi.fn(), rows: [null, null], placeholder: "Task" } : undefined} />);
+    await act(async () => {});
+    expect(chains).not.toHaveBeenCalled();
+    await type("/");
+    expect(options().some((o) => o.startsWith("/workflow"))).toBe(false);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: draft ? "Tools" : "Use a skill" })); });
+    expect(screen.getByRole("dialog", { name: "Use a skill" }).textContent).not.toContain("Bug fix");
+    fireEvent.keyDown(document, { key: "Escape" });
+    await type("/workflow bugfix fix it");
+    await act(async () => { fireEvent.keyDown(box(), { key: "Enter" }); });
+    expect(toast).toHaveBeenCalledWith("Workflows run on the built-in loop with an API key, so they aren't available in Claude subscription sessions.", "error");
+    expect(create).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
+  });
+
   it("offers /task and /workflow, completes both and runs /task", async () => {
     render(<Composer session={SESSION} running={false} />);
     await act(async () => {});

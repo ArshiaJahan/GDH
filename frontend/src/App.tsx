@@ -113,6 +113,7 @@ export default function App() {
   const connected = useStore((s) => s.connected);
   const page = useStore((s) => s.page);
   const sidePanelOpen = useStore((s) => s.sidePanelOpen);
+  const hasSession = useStore((s) => !!s.currentId); // the new-session screen has no side panel
   const terminalOpen = useStore((s) => s.terminalOpen);
   const toast = useStore((s) => s.toast);
   const searchOpen = useStore((s) => s.searchOpen);
@@ -170,7 +171,7 @@ export default function App() {
               </Panel>
             </Group>
           </Panel>
-          {page === "chat" && sidePanelOpen && (
+          {page === "chat" && sidePanelOpen && hasSession && (
             <>
               <Separator className="rh" />
               <Panel id="side" defaultSize="300px" minSize="260px" maxSize="560px"><SidePanel /></Panel>

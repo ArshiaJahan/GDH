@@ -176,40 +176,60 @@ function planLeave(ids: string[]): () => void {
   };
 }
 
-let creating: Promise<void> | null = null;
+let starting: Promise<boolean> | null = null;
 
-/** Untitled, never used, idle and not yet set up (no folder, no skills beyond the defaults every new
- *  session starts with, no connectors or shared tools turned on): what "+" reuses rather than making
- *  another empty session. A session already pointed at a folder isn't blank, so "+" for another
- *  folder never hands it back. `defaults` is /api/state's default_skills. */
-export function isBlank(s: Session, messages: Record<string, unknown[]> = st().messages as Record<string, unknown[]>,
-  defaults: string[] = st().appState?.default_skills ?? ["delegation"]): boolean {
-  const cfg = s.settings ?? {};
-  const skills: string[] = cfg.skills ?? [];
-  const sameSkills = skills.length === 0 || (skills.length === defaults.length && skills.every((k) => defaults.includes(k)));
-  return s.title === "New session" && !s.deleted && !s.archived && !s.pinned && !s.forked_from && s.status !== "running"
-    && !s.activity_at && !(messages[s.id]?.length) && !s.folder
-    && sameSkills && !Object.values(cfg.connectors ?? {}).some(Boolean) && !cfg.shared_tools;
-}
+/** What the new-session screen sends: every new session runs Claude Code on the user's Claude
+ *  subscription (harness claude_code). No folder = chat only (a private scratch folder). */
+export type NewSessionRequest = { text: string; skill?: string | null; folder: string | null; model: string; effort: string; mode: string };
 
 export const sessionActions = {
-  /** ⌘N: a new session; it joins the current session's group. */
-  async create(opts: { group_id?: string | null } = {}) {
-    if (creating) return creating; // a double click makes one session, not two
-    creating = (async () => {
-      const cur = find(st().currentId ?? "");
-      const group_id = opts.group_id !== undefined ? opts.group_id : cur && !cur.deleted && !cur.archived ? cur.group_id : null;
-      // An untitled session with no messages in the same group is reused instead of adding another
-      // empty "New session": the current one first, else the newest such session.
-      const reuse = cur && isBlank(cur) && (cur.group_id ?? null) === (group_id ?? null) ? cur
-        : st().sessions.filter((x) => isBlank(x) && (x.group_id ?? null) === (group_id ?? null)).sort((a, b) => b.created_at - a.created_at)[0];
-      const s = reuse ?? await attempt(() => post<Session>("/sessions", group_id ? { group_id } : {}));
-      if (!s) return;
-      if (st().sidebarView !== "active") set({ sidebarView: "active" });
-      if (st().currentId !== s.id || st().page !== "chat") await actions.openSession(s.id);
+  /** ⌘N / New session: the new-session screen. The session is made when its first message is sent
+   *  (start); it joins the current session's group, or `group_id`. */
+  create(opts: { group_id?: string | null } = {}) {
+    const cur = find(st().currentId ?? "");
+    const draftGroup = opts.group_id !== undefined ? opts.group_id : cur && !cur.deleted && !cur.archived ? cur.group_id : null;
+    set({ currentId: null, page: "chat", draftGroup, sidebarView: "active", selection: [] });
+    requestAnimationFrame(() => document.getElementById("composer")?.focus());
+  },
+  /** The new-session screen's Send: create the session (harness claude_code) and send the first
+   *  message. False on failure; an unsent first message becomes the new session's draft. */
+  async start(r: NewSessionRequest): Promise<boolean> {
+    if (starting) return starting; // a double click makes one session, not two
+    starting = (async () => {
+      const group_id = st().draftGroup;
+      let s: Session;
+      try {
+        s = await post<Session>("/sessions", {
+          harness: "claude_code", folder: r.folder || null, model: r.model, effort: r.effort, mode: r.mode, ...(group_id ? { group_id } : {}),
+        });
+      } catch (e: any) {
+        if (e?.status === 400 && e.message.startsWith("Folder not found")) {
+          try {
+            const prefs = JSON.parse(localStorage.getItem("newSession.prefs") ?? "{}");
+            localStorage.setItem("newSession.prefs", JSON.stringify({ ...prefs, folder: null, location: "chat" }));
+          } catch { /* private window: preferences may not be available */ }
+        }
+        if (e?.status === 400 && e.message.startsWith("No such group")) set({ draftGroup: null });
+        actions.toast(e?.message ?? String(e), "error");
+        return false;
+      }
+      set((x) => ({ draftGroup: null, sessions: x.sessions.some((v) => v.id === s.id) ? x.sessions : [...x.sessions, s] }));
+      try {
+        await post(`/sessions/${s.id}/messages`, { text: r.text, attachments: [], ...(r.skill ? { skill: r.skill } : {}) });
+      } catch (e: any) {
+        actions.setDrafts(s.id, [...(st().drafts[s.id] ?? []), { kind: "text", text: r.text }]);
+        if (r.skill) actions.setSkillChip(s.id, r.skill);
+        actions.toast(e?.message ?? String(e), "error");
+        // openSession selects the session before loading its history. A second network
+        // failure must still leave the recovered draft selected and return false.
+        await actions.openSession(s.id).catch(() => {});
+        return false;
+      }
+      await actions.openSession(s.id);
       requestAnimationFrame(() => document.getElementById("composer")?.focus());
+      return true;
     })();
-    try { await creating; } finally { creating = null; }
+    try { return await starting; } finally { starting = null; }
   },
   async rename(id: string, title: string) {
     set({ renamingId: null });

@@ -25,9 +25,17 @@ from .core.media import prepare_image
 from .core.types import AudioBlock, FileBlock, ImageBlock, Message, TextBlock, new_id
 from .events import REPLAY_MAX
 from .skills import get_skill, pinned_skill_names, skill_invocation, skill_load_text, skill_lru
-from .store import valid_claude_code_session
+from .store import SESSION_MODES, valid_claude_code_session
 
 HARNESSES = ("builtin", "agent_sdk", "codex_cli", "claude_code")
+NEW_SESSION_HARNESS = "claude_code"  # the new-session default when [sessions].default_harness is missing or unknown
+
+
+def new_session_harness(config: Any) -> str:
+    """The harness POST /api/sessions gives a session that doesn't name one: [sessions].default_harness,
+    claude_code (your Claude subscription through the claude CLI) out of the box."""
+    h = (config.sessions or {}).get("default_harness")
+    return h if h in HARNESSES else NEW_SESSION_HARNESS
 WS_OVERFLOW = 4000  # close code: this client fell too far behind; reconnect with ?since=<last seq>
 
 # /api/file serves these inline as they are; a browser shows them but runs nothing in them.
@@ -194,17 +202,24 @@ def create_app(token: str, state: AppState | None = None) -> FastAPI:
                 raise HTTPException(400, f"Folder not found: {f}")
             folder = str(f.resolve())
         group_id = sessions_mgmt.valid_group(S, body.get("group_id"))
+        _check_mode(body.get("mode"))
         harness = body.get("harness")
         if harness is not None:
             await _check_harness(harness)
+        else:
+            # Not checked for the CLI: without it the session still opens, and its first turn says
+            # how to install or log in (claude_code.run_turn).
+            harness = new_session_harness(S.config)
         s = S.store.create(title=body.get("title") or "New session", folder=folder,
                            model=_model_arg(body["model"]) if body.get("model") else None,
-                           effort=body.get("effort"), mode=body.get("mode"))  # skill disclosure: store.create
+                           effort=body.get("effort"), mode=body.get("mode"), harness=harness)  # skill disclosure: store.create
         if group_id:  # ⌘N in a grouped session: the new one joins that group
             s = S.store.update(s["id"], group_id=group_id) or s
-        if harness not in (None, s["harness"]):  # the new-session flow's harness choice
-            s = S.store.update(s["id"], harness=harness) or s
         return s
+
+    def _check_mode(mode: Any) -> None:
+        if mode is not None and mode not in SESSION_MODES:
+            raise HTTPException(400, f"Mode must be one of: {', '.join(SESSION_MODES)}")
 
     async def _check_harness(h: Any) -> None:
         if h not in HARNESSES:
@@ -235,6 +250,8 @@ def create_app(token: str, state: AppState | None = None) -> FastAPI:
             body["folder"] = str(f.resolve())
         if body.get("model"):
             body["model"] = _model_arg(body["model"], cur.get("model"))
+        if body.get("mode") not in (None, cur["mode"]):
+            _check_mode(body["mode"])
         if body.get("harness") not in (None, cur["harness"]):
             await _check_harness(body["harness"])
         if body.get("harness") not in (None, cur["harness"]) and (camp := S.extensions.get("campaigns")) is not None \

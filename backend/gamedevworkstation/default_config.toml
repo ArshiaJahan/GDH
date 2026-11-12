@@ -71,6 +71,11 @@ theme = "system"                    # system | light | dark
 auto_title = true                   # name sessions after the first reply (claude.fast, low effort, a fraction of a cent)
 trash_days = 30                     # sessions in Trash are deleted for good after this many days
 event_retention_days = 7            # the event log (replay for briefly disconnected windows) keeps this many days
+# Harness of every new session (the new-session screen, the sidebar's New session, POST /api/sessions
+# without one): claude_code = your Claude subscription through your own `claude` CLI login. Other
+# values: builtin | agent_sdk | codex_cli. Existing sessions keep theirs; scheduled tasks, campaigns,
+# fleet and subagents keep the harness they always used.
+default_harness = "claude_code"
 
 [updates]
 # `make release` builds new versions into this folder; the app checks it and offers

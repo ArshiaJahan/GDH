@@ -1,5 +1,5 @@
-// Claude Code sessions in the UI: the harness option (new-session flow and Environment card), the
-// session header chip with the `claude --resume` command, and the "log in" card's Retry.
+// Claude Code sessions in the UI: harness names (shown read-only), the new-session screen's login
+// notice, the session header chip with the `claude --resume` command, and the "log in" card's Retry.
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -12,27 +12,39 @@ const loginMessages = vi.hoisted(() => [
 vi.mock("../lib/api", () => ({ get, post }));
 vi.mock("../lib/store", () => ({ actions: { toast }, useStore: (sel: (s: any) => unknown) => sel({ currentId: "s1", messages: { s1: loginMessages } }) }));
 
-import { ClaudeCodeChip, ClaudeLoginNotice, HarnessSelect, HARNESSES } from "./ClaudeCode";
+import { ClaudeCodeChip, ClaudeLoginNotice, ClaudeStatusNotice, harnessName, HARNESSES } from "./ClaudeCode";
 
 afterEach(() => { cleanup(); get.mockReset(); post.mockClear(); toast.mockClear(); });
 
-describe("HarnessSelect", () => {
-  it("offers Claude Code (subscription) and picks it", () => {
-    const onChange = vi.fn();
-    render(<HarnessSelect value="builtin" onChange={onChange} available={{ builtin: true, agent_sdk: false, codex_cli: true, claude_code: true }} />);
-    const opt = screen.getByRole("option", { name: "Claude Code (subscription)" }) as HTMLOptionElement;
-    expect(opt.value).toBe("claude_code");
-    expect(opt.disabled).toBe(false);
-    expect(opt.title).toContain("your own Claude login");
-    fireEvent.change(screen.getByLabelText("Harness"), { target: { value: "claude_code" } });
-    expect(onChange).toHaveBeenCalledWith("claude_code");
+describe("harness names", () => {
+  it("names Claude Code (subscription) and keeps unknown ids", () => {
     expect(HARNESSES.map(([v]) => v)).toEqual(["builtin", "agent_sdk", "codex_cli", "claude_code"]);
+    expect(harnessName("claude_code")).toBe("Claude Code (subscription)");
+    expect(harnessName("builtin")).toBe("Built-in loop");
+    expect(harnessName("other")).toBe("other");
   });
+});
 
-  it("marks it not installed when the CLI is missing", () => {
-    render(<HarnessSelect value="builtin" onChange={vi.fn()} available={{ builtin: true, claude_code: false }} />);
-    const opt = screen.getByRole("option", { name: "Claude Code (subscription) (not installed)" }) as HTMLOptionElement;
-    expect(opt.disabled).toBe(true);
+describe("ClaudeStatusNotice", () => {
+  it("says nothing while Claude Code is ready or still being checked", () => {
+    const { container } = render(<><ClaudeStatusNotice st={null} retry={vi.fn()} />
+      <ClaudeStatusNotice st={{ installed: true, logged_in: true } as any} retry={vi.fn()} /></>);
+    expect(container.textContent).toBe("");
+  });
+  it("tells you to log in, copies the command and retries", async () => {
+    const retry = vi.fn();
+    const writeText = vi.fn(async () => {});
+    Object.assign(navigator, { clipboard: { writeText } });
+    render(<ClaudeStatusNotice st={{ installed: true, logged_in: false } as any} retry={retry} />);
+    expect(screen.getByTestId("claude-status-notice").textContent).toContain("Claude Code isn't logged in: run claude auth login");
+    await act(async () => { fireEvent.click(screen.getByLabelText("Copy claude auth login")); });
+    expect(writeText).toHaveBeenCalledWith("claude auth login");
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(retry).toHaveBeenCalled();
+  });
+  it("says when the CLI is missing", () => {
+    render(<ClaudeStatusNotice st={{ installed: false, logged_in: false } as any} retry={vi.fn()} />);
+    expect(screen.getByTestId("claude-status-notice").textContent).toContain("The claude CLI isn't installed");
   });
 });
 
@@ -47,6 +59,13 @@ describe("ClaudeCodeChip", () => {
     const chip = screen.getByTestId("claude-code-chip");
     expect(chip.textContent).toContain("Logged in (claude.ai)");
     expect(chip.textContent).toContain(`claude --resume ${id}`);
+    expect(chip.classList.contains("shrink")).toBe(true);
+    expect(chip.classList.contains("min-w-0")).toBe(true);
+    expect(chip.classList.contains("overflow-hidden")).toBe(true);
+    expect(chip.classList.contains("shrink-0")).toBe(false);
+    expect(chip.querySelector("code")?.classList.contains("min-[1500px]:inline")).toBe(true);
+    expect(chip.querySelector("code")?.classList.contains("md:inline")).toBe(false);
+    expect(screen.getByLabelText("Copy the claude --resume command").parentElement?.classList.contains("shrink-0")).toBe(true);
     await act(async () => { fireEvent.click(screen.getByLabelText("Copy the claude --resume command")); });
     expect(writeText).toHaveBeenCalledWith(`claude --resume ${id}`);
   });

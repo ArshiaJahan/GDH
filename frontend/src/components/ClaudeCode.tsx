@@ -1,7 +1,8 @@
-// Claude Code sessions (harness claude_code): the harness picker shared by the new-session flow and
-// the Environment card, the session header chip (login status, `claude --resume <id>` to copy), the
-// "log in" card, and Settings → Claude Code. The session runs the user's own `claude` CLI on their own
-// Claude login; GameDevWorkstation never sees their tokens.
+// Claude Code sessions (harness claude_code): harness names (the Environment card shows a session's
+// harness read-only; every new session runs Claude Code), the new-session screen's login notice, the
+// session header chip (login status, `claude --resume <id>` to copy), the "log in" card, and
+// Settings → Claude Code. The session runs the user's own `claude` CLI on their own Claude login;
+// GameDevWorkstation never sees their tokens.
 import { Check, Copy, KeyRound, RefreshCw, TerminalSquare } from "lucide-react";
 import { useEffect, useState } from "react";
 import { get, post } from "../lib/api";
@@ -36,23 +37,12 @@ export function loginLabel(st: ClaudeStatus | null): string {
   return st.bills_api ? "Logged in with an API key" : `Logged in${st.auth_method ? ` (${st.auth_method})` : ""}`;
 }
 
-/** The harness <select>. `available` is /environment's harnesses map (missing → not offered as installed). */
-export function HarnessSelect({ value, onChange, available, disabled, title, label = (v, l) => l }: {
-  value: string; onChange: (v: string) => void; available?: Record<string, boolean> | null; disabled?: boolean; title?: string;
-  label?: (v: string, l: string, full: boolean) => string;
-}) {
-  return (
-    <select className="input py-0.5" value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} aria-label="Harness" title={title}>
-      {HARNESSES.map(([v, l]) => (
-        <option key={v} value={v} disabled={!!available && !available[v]} title={HARNESS_HINT[v] ?? label(v, l, true)}>
-          {label(v, l, false)}{available && !available[v] ? " (not installed)" : ""}
-        </option>
-      ))}
-    </select>
-  );
+/** A harness's display name ("claude_code" → "Claude Code (subscription)"); unknown ids as they are. */
+export function harnessName(v: string): string {
+  return HARNESSES.find(([k]) => k === v)?.[1] ?? v;
 }
 
-function CopyButton({ text, label }: { text: string; label: string }) {
+export function CopyButton({ text, label }: { text: string; label: string }) {
   const [done, setDone] = useState(false);
   return (
     <button className="btn btn-ghost px-1 py-0.5" aria-label={label} title={label}
@@ -63,6 +53,27 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   );
 }
 
+/** The new-session screen's slim notice when the claude CLI is missing or logged out: what to run,
+ *  Copy, and Retry (re-checks /claude-code/status). Nothing while it's fine or still checking. */
+export function ClaudeStatusNotice({ st, retry }: { st: ClaudeStatus | null; retry: () => void }) {
+  if (!st || (st.installed && st.logged_in)) return null;
+  const cmd = "claude auth login";
+  return (
+    <div role="status" data-testid="claude-status-notice"
+      className="flex items-center gap-2 rounded-full border border-line surface-raised pl-3 pr-1 py-0.5 text-[12.5px] max-w-full">
+      <KeyRound size={13} className="text-warn shrink-0" aria-hidden />
+      <span className="min-w-0 truncate">
+        {st.installed ? "Claude Code isn't logged in" : "The claude CLI isn't installed"}: {st.installed ? "run " : "install Claude Code, then run "}
+        <code className="font-mono">{cmd}</code>
+      </span>
+      <CopyButton text={cmd} label="Copy claude auth login" />
+      <button className="btn btn-ghost py-0 px-1.5 text-[12.5px] shrink-0" onClick={retry} title="Check again">
+        <RefreshCw size={12} aria-hidden />Retry
+      </button>
+    </div>
+  );
+}
+
 /** The session header chip of a Claude Code session: login status and `claude --resume <id>`. */
 export function ClaudeCodeChip({ s }: { s: Session }) {
   const [st] = useClaudeStatus(true);
@@ -70,12 +81,12 @@ export function ClaudeCodeChip({ s }: { s: Session }) {
   const cmd = typeof id === "string" && /^[0-9a-f-]{36}$/i.test(id) ? `claude --resume ${id}` : null;
   const ok = !!st?.installed && st.logged_in;
   return (
-    <span className="chip whitespace-nowrap shrink-0 gap-1" data-testid="claude-code-chip"
+    <span className="chip whitespace-nowrap shrink min-w-0 overflow-hidden gap-1" data-testid="claude-code-chip"
       title={cmd ? `Continue this conversation in a terminal: ${cmd}` : "Claude Code (your CLI login)"}>
       <TerminalSquare size={12} aria-hidden />
       <span>Claude Code</span>
       <span className={ok ? "text-ok" : "text-warn"}>· {loginLabel(st)}</span>
-      {cmd && <><code className="font-mono text-[11.5px] text-muted hidden md:inline">{cmd}</code><CopyButton text={cmd} label="Copy the claude --resume command" /></>}
+      {cmd && <><code className="font-mono text-[11.5px] text-muted hidden min-[1500px]:inline">{cmd}</code><span className="shrink-0"><CopyButton text={cmd} label="Copy the claude --resume command" /></span></>}
     </span>
   );
 }

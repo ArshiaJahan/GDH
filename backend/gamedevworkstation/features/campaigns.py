@@ -427,13 +427,13 @@ class Campaigns:
             session = app.store.get(str(body.get("session_id") or ""))
             if not session or session["deleted"]:
                 raise CampaignError(404, "A chain runs in an existing session: session_id not found")
+            if (session.get("harness") or "builtin") != "builtin":
+                raise CampaignError(400, "Workflows run on the built-in loop with an API key, so they aren't "
+                                         "available in Claude subscription sessions.")
             if not session.get("folder"):
                 raise CampaignError(400, "This session has no folder; pick one first.")
             if (cur := self.of_session(session)) and cur["status"] not in FINAL:
                 raise CampaignError(409, f"This session already runs {cur['title']} ({cur['status']}).")
-            if (session.get("harness") or "builtin") != "builtin":
-                raise CampaignError(400, "Workflows run on the built-in loop: switch this session's harness to "
-                                         "Built-in loop (side panel, Environment) first.")
             folder = str(Path(session["folder"]).expanduser().resolve())
             model, effort, mode = session["model"], session["effort"], session["mode"]
         else:
