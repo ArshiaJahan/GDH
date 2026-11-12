@@ -1,6 +1,7 @@
 import { ChevronRight, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { get, patch, post } from "../lib/api";
+import { CAMPAIGN_EVENTS, FINAL_STATUSES, campaignsApi } from "../lib/campaigns";
 import { actions, sessionProfile, useStore, type Job, type Session } from "../lib/store";
 import { CampaignCard } from "./cards/CampaignCard";
 import { ChangesCard } from "./cards/ChangesCard";
@@ -97,11 +98,31 @@ function AccountsRow({ s, upd }: { s: Session; upd: (body: Record<string, unknow
   );
 }
 
+/** The title of the campaign or chain this session runs while it isn't done or abandoned (null
+ *  otherwise): those need the built-in loop, so the harness picker is locked. */
+function useActiveCampaign(cid: string | undefined): string | null {
+  const [title, setTitle] = useState<string | null>(null);
+  useEffect(() => {
+    setTitle(null);
+    if (!cid) return;
+    let live = true;
+    campaignsApi.detail(cid).then((d) => live && setTitle(FINAL_STATUSES.includes(d.status) ? null : d.title)).catch(() => {});
+    const off = actions.onEvent((e) => {
+      if (!CAMPAIGN_EVENTS.includes(e.type) || e.data?.id !== cid) return;
+      const status = e.type === "campaign.done" ? "done" : e.data.status;
+      if (status) setTitle(FINAL_STATUSES.includes(status) ? null : e.data.title ?? "a campaign");
+    });
+    return () => { live = false; off(); };
+  }, [cid]);
+  return title;
+}
+
 function EnvironmentCard({ s }: { s: Session }) {
   useModelCatalog();
   const [env, setEnv] = useState<any>(null);
   useEffect(() => { get("/environment").then(setEnv); }, []);
   const running = s.status === "running";
+  const campaign = useActiveCampaign(s.settings?.campaign_id ?? undefined);
   const upd = async (body: Record<string, unknown>) => {
     try { await patch(`/sessions/${s.id}`, body); } catch (e: any) { actions.toast(e.message, "error"); }
   };
@@ -135,7 +156,8 @@ function EnvironmentCard({ s }: { s: Session }) {
         </select>
       </Row>
       <Row label="Harness">
-        <select className="input py-0.5" value={s.harness} disabled={running} onChange={(e) => upd({ harness: e.target.value })} aria-label="Harness">
+        <select className="input py-0.5" value={s.harness} disabled={running || !!campaign} onChange={(e) => upd({ harness: e.target.value })} aria-label="Harness"
+          title={campaign ? `This session runs ${campaign}: campaigns and workflows use the built-in loop` : undefined}>
           {HARNESS.map(([v, l]) => (
             <option key={v} value={v} disabled={env && !env.harnesses[v]} title={harnessLabel(v, l, s, env, true)}>{harnessLabel(v, l, s, env)}{env && !env.harnesses[v] ? " (not installed)" : ""}</option>
           ))}

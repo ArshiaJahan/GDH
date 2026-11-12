@@ -203,6 +203,10 @@ def create_app(token: str, state: AppState | None = None) -> FastAPI:
             body["model"] = _model_arg(body["model"], cur.get("model"))
         if body.get("harness") == "codex_cli" and not shutil.which("codex"):
             raise HTTPException(400, "Codex CLI isn't installed (npm i -g @openai/codex)")
+        if body.get("harness") not in (None, cur["harness"]) and (camp := S.extensions.get("campaigns")) is not None \
+                and (c := camp.of_session(cur)) and c["status"] not in ("done", "abandoned"):
+            # campaign_* / chain_step_done tools, autopilot and the gates live in the built-in loop
+            raise HTTPException(400, f"This session runs {c['title']}, a {c['kind']} that needs the built-in loop.")
 
         def bad_accounts(acc: Any) -> bool:  # {provider: profile}: the session's key profile per provider
             return acc is not None and (not isinstance(acc, dict) or any(

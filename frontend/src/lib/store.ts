@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { get, post, type WsEvent } from "./api";
+import { campaignNotice } from "./campaigns";
 
 export type Session = {
   id: string; title: string; created_at: number; updated_at: number; pinned: boolean;
@@ -520,6 +521,12 @@ export function handleEvent(ev: WsEvent) {
       });
       if (d.reason === "new_day") actions.toast("A new day: the daily spend limit has reset and agents can run again.");
       break;
+    case "campaign.paused": // done, parked, waiting for you: shown on any page, with a way to the campaign
+    case "campaign.done": {
+      const n = campaignNotice(ev.type, d);
+      if (n) actions.toast(n.text, n.kind, { label: "Open", run: () => actions.go("campaigns", { id: n.id }) });
+      break;
+    }
   }
   st().listeners.forEach((fn) => fn(ev));
 }

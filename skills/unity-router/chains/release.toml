@@ -1,0 +1,45 @@
+# Workflow template (features/chains.py). done_when types adapted from SethGammon/Citadel (MIT).
+id = "release"
+title = "Release"
+summary = "Freeze (milestone stories done) → full tests → build → headless smoke → spec-audit critique → changelog and tag"
+kinds = ["chain", "campaign"]
+applies_to = "unity"
+critique = true
+blocking_gates = ["unity.antipatterns"]
+
+[[phase]]
+name = "Freeze"
+type = "plan"
+skills = ["gdd-to-backlog"]
+done_when = [{ type = "gate", level = "story", stories = "milestone" }]
+
+[[phase]]
+name = "Full tests"
+type = "verify"
+skills = ["headless-ops"]
+done_when = [{ type = "gate", level = "L2" }]
+
+[[phase]]
+name = "Build"
+type = "build"
+skills = ["build-ship"]
+done_when = [{ type = "command_passes", observe = "package_macos" }]
+
+[[phase]]
+name = "Smoke"
+type = "verify"
+skills = ["build-ship", "headless-ops"]
+done_when = [{ type = "command_passes", observe = "smoke_test" }]
+
+[[phase]]
+name = "Spec audit"
+type = "verify"
+skills = ["design-critique"]
+critique = true
+done_when = [{ type = "gate", level = "L4", stories = "milestone" }]
+
+[[phase]]
+name = "Changelog and tag"
+type = "wire"
+skills = ["vcs-hygiene", "build-ship"]
+done_when = [{ type = "git_clean" }]

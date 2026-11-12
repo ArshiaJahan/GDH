@@ -57,6 +57,10 @@ Built on the hook bus (features/hookbus.py, app.hooks). Two kinds of hooks run h
        level = "L1"                      # quality-ladder level stored with the gate result
        gate = "my.gate"                  # gate id (default: builtin name, else id)
 
+   In a campaign or chain session, the gates its template lists in `blocking_gates` (e.g.
+   unity.antipatterns for perf-pass and release) block like `on_fail = "block"` (and built-in
+   `options.blocking = true`) even where the hook file makes them advisory.
+
    Plan only mode runs only block and note actions (and in-process built-ins); commands, MCP
    calls and the Unity gates don't run. Gate output a model sees is wrapped as untrusted.
 
@@ -906,11 +910,28 @@ class HooksEngine:
         except Exception:  # noqa: BLE001
             return None
 
+    def blocking_gates(self, session: dict | None) -> set[str]:
+        """Gate ids the session's campaign or chain makes blocking (its template's blocking_gates),
+        while it isn't done or abandoned."""
+        cid = ((session or {}).get("settings") or {}).get("campaign_id")
+        if not cid:
+            return set()
+        try:
+            row = self.app.db.one("SELECT status, breaker FROM campaigns WHERE id=?", [cid])
+            if not row or row["status"] in ("done", "abandoned"):
+                return set()
+            gates = (json.loads(row["breaker"] or "{}") or {}).get("blocking_gates") or []
+            return {str(g) for g in gates if isinstance(g, str)}
+        except Exception:  # noqa: BLE001 — the campaigns table belongs to another feature
+            return set()
+
     async def run_entry(self, e: HookEntry, src: HookSource | None, ev: HookEvent, project: Path,
                         changed: list[str], *, force: bool = False,
                         prior: list[HookResult] | None = None) -> list[HookResult]:
         """Run one entry's action. Plan only mode runs only block / note (and plan_ok built-ins)."""
         session = ev.ctx.session
+        if e.event in BLOCKING_EVENTS and (bg := self.blocking_gates(session)) and (e.gate_id() in bg or e.id in bg):
+            e = dataclasses.replace(e, on_fail="block", options={**(e.options or {}), "blocking": True})
         plan = session.get("mode") == "plan"
         consent = src.consent_sets() if src else {"mcp": set(), "run_command": set()}
         ac = ActionContext(session, project, consent, changed, force, src, list(prior or []))

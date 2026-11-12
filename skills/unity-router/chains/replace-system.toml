@@ -1,0 +1,35 @@
+# Workflow template (features/chains.py). done_when types adapted from SethGammon/Citadel (MIT).
+# "Layer, don't replace": the new system is built beside the old one, proven equal, switched, and
+# only then is the old one removed, in its own phase (deletes still ask).
+id = "replace-system"
+title = "Replace a system"
+summary = "Build beside (behind a flag or scene) → parity verify → switch → remove the old system"
+kinds = ["chain", "campaign"]
+applies_to = "unity"
+critique = false
+
+[[phase]]
+name = "Build beside"
+type = "build"
+skills = ["architecture-patterns", "compile-fix-loop"]
+instructions = "Build the new system next to the old one, behind a flag or in its own scene. Don't touch the old one."
+done_when = [{ type = "gate", level = "L1" }]
+
+[[phase]]
+name = "Parity verify"
+type = "verify"
+skills = ["play-verify"]
+instructions = "Show the new system matches the old: the same [VERIFY] metrics and screenshots, old vs new."
+done_when = [{ type = "gate", level = "L3" }, { type = "visual_verify", newer_than = "phase_start" }]
+
+[[phase]]
+name = "Switch"
+type = "wire"
+skills = ["architecture-patterns", "scene-prefab-safety"]
+done_when = [{ type = "gate", level = "L1" }, { type = "gate", level = "L2" }]
+
+[[phase]]
+name = "Remove old"
+type = "prune"
+skills = ["vcs-hygiene", "compile-fix-loop"]
+done_when = [{ type = "gate", level = "L1" }, { type = "git_clean", paths = ["Assets", "Packages", "ProjectSettings"] }]

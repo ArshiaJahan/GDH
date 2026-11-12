@@ -1,0 +1,39 @@
+# Workflow template (features/chains.py). done_when types adapted from SethGammon/Citadel (MIT).
+id = "juice-pass"
+title = "Juice pass"
+summary = "Baseline screenshots → game-feel pass → before/after play evidence → design critique → commit"
+kinds = ["chain", "campaign"]
+applies_to = "unity"
+critique = true
+
+[[phase]]
+name = "Baseline"
+type = "research"
+skills = ["play-verify"]
+instructions = "Capture 'before' screenshots of the moments you will change (play-verify, screenshot names ending in -before)."
+done_when = [{ type = "visual_verify", newer_than = "phase_start" }]
+
+[[phase]]
+name = "Feel"
+type = "build"
+skills = ["game-feel-pass", "compile-fix-loop"]
+done_when = [{ type = "gate", level = "L1" }]
+
+[[phase]]
+name = "Verify"
+type = "verify"
+skills = ["play-verify"]
+done_when = [{ type = "gate", level = "L3" }, { type = "visual_verify", newer_than = "phase_start" }]
+
+[[phase]]
+name = "Critique"
+type = "verify"
+skills = ["design-critique"]
+critique = true
+done_when = [{ type = "gate", level = "L4" }]
+
+[[phase]]
+name = "Commit"
+type = "wire"
+skills = ["vcs-hygiene"]
+done_when = [{ type = "git_clean", paths = ["Assets", "Packages", "ProjectSettings"] }]

@@ -45,9 +45,16 @@ Reversibility / Files). A unit that fails, finishes without one, or runs past
 `[fleet] unit_timeout_min` (build = writers, research = read-only units) is dead: stopped, its
 claim released, its scope listed under "requeue", its branch kept (merge before cleanup).
 HANDOFFs are parsed deterministically, stored in fleet_units.discoveries, appended to
-`.workspace/discoveries/YYYY-MM-DD.jsonl` (append-only) and, when the campaigns feature provides
-`append_discovery(campaign_id, text)`, to the campaign file. The next wave of the same session or
-campaign gets them in its briefs (at most `[fleet] relay_tokens`, newest first, as untrusted data).
+`.workspace/discoveries/YYYY-MM-DD.jsonl` (append-only) and, for a wave of a campaign, to the
+campaign file's Discoveries (campaigns' `add_discovery(campaign_id, text, source="fleet:<unit>")`).
+The next wave of the same session or campaign gets them in its briefs (at most `[fleet]
+relay_tokens`, newest first, as untrusted data).
+
+Campaigns (wire_campaigns, plan §7 WP7): a campaign phase marked `fleet = true` calls
+campaign_phase_start when it starts in a session; that makes sure run_wave is offered there and
+returns the Fleet guidance the phase's brief (or continue message, or next-step result) carries.
+Units come from the agent, which splits the phase's work by folder; waves it starts in a campaign
+session belong to the campaign (fleet_waves.campaign_id).
 
 Public API (for campaigns and tests): get_fleet(app) -> FleetManager with start_wave(ctx, name,
 units, campaign_id=None), status(wave_id, wait=False), merge_wave(ctx, wave_id),
@@ -804,10 +811,13 @@ class FleetManager:
             except OSError:
                 log.warning("fleet: couldn't append the discovery of %s", row["sub_id"], exc_info=True)
         if w["campaign_id"]:
-            fn = getattr(self.app.extensions.get("campaigns"), "append_discovery", None)
-            if callable(fn):
+            camp = self.app.extensions.get("campaigns")
+            text = f"wave {w['n']} · {name} ({', '.join(scope) or '.'}): {_relay_line(rec)}"
+            add, legacy = getattr(camp, "add_discovery", None), getattr(camp, "append_discovery", None)
+            if callable(add) or callable(legacy):
                 try:
-                    r = fn(w["campaign_id"], f"wave {w['n']} · {name} ({', '.join(scope) or '.'}): {_relay_line(rec)}")
+                    r = add(w["campaign_id"], text, source=f"fleet:{name}") if callable(add) else \
+                        legacy(w["campaign_id"], text)
                     if asyncio.iscoroutine(r):
                         t = asyncio.ensure_future(r)
                         self._tasks.add(t)
@@ -1303,6 +1313,46 @@ def get_fleet(app: "AppState") -> FleetManager | None:
     return app.extensions.get("fleet")  # type: ignore[return-value]
 
 
+async def campaign_phase_start(app: "AppState", campaign: dict, i: int, session_id: str) -> str | None:
+    """Campaigns.fleet_starter: a phase marked `fleet = true` starts in `session_id`. Make sure
+    run_wave is offered there (delegation is pinned in progressive sessions; a legacy session gets
+    it enabled) and return the guidance for the phase's brief. None when Fleet isn't installed."""
+    fm = get_fleet(app)
+    s = app.store.get(session_id)
+    if fm is None or not s:
+        return None
+    p = (campaign.get("phases") or [])[i] if 0 <= i < len(campaign.get("phases") or []) else {}
+    if not fm.enabled():
+        return "Fleet is off ([fleet] enabled = false): do this phase here (spawn_subagent for side work)."
+    if not _git_folder(s.get("folder")):
+        return "Fleet needs the project to be a git repository (units work in worktrees): do this phase here."
+    if fm.stopped(session_id):
+        return "Fleet is stopped for this session after 2 merge conflicts: do this phase here."
+    st = _session_settings(s)
+    if "delegation" not in set(st.get("pinned_skills") or []) | set(st.get("skills") or []):
+        app.store.update(session_id, settings={"skills": [*(st.get("skills") or []), "delegation"]})
+    plan_note = (" The session is in Plan only mode, so only read_only units can run." if s.get("mode") == "plan"
+                 else "")
+    return (f"Fleet: this phase ({p.get('name') or i + 1}) can run as a wave. If its work splits into independent "
+            "units with one folder each (e.g. one unit per Assets/Game/<Kind>/<Item>/), call run_wave(name, units, "
+            f"campaign_id=\"{campaign['id']}\") with at most {fm.max_units()} writing units, each claiming only its "
+            "folder; then wave_status(wait=true), merge_wave and close_wave, and check the phase before declaring it "
+            "done. Unit discoveries go to the campaign file's Discoveries. One unit or one folder: do it here or "
+            "with spawn_subagent." + plan_note)
+
+
+def wire_campaigns(app: "AppState") -> None:
+    """Connect Fleet to the campaigns feature when both are installed (either order; idempotent)."""
+    camp = app.extensions.get("campaigns")
+    if camp is None or get_fleet(app) is None or getattr(camp, "fleet_starter", None) is not None:
+        return
+
+    async def starter(c: dict, i: int, session_id: str) -> str | None:
+        return await campaign_phase_start(app, c, i, session_id)
+
+    camp.fleet_starter = starter
+
+
 def install(S: "AppState") -> FleetManager:
     """Create the manager, register the hooks and the tools (no routes). Idempotent."""
     if fm := get_fleet(S):
@@ -1326,6 +1376,7 @@ def install(S: "AppState") -> FleetManager:
     except Exception:  # noqa: BLE001
         log.debug("hooks engine not available for fleet built-ins", exc_info=True)
     _register_tools(S, fm)
+    wire_campaigns(S)
     return fm
 
 

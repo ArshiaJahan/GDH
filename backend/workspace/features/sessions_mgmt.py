@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import math
 import re
+import time
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Body, FastAPI, HTTPException
@@ -42,6 +43,11 @@ async def purge_session(app: "AppState", sid: str) -> None:
 
     await halt_session(app, sid)
     app.store.delete(sid)
+    # Its gate results go with it; campaigns survive, keeping the session in their history (ended).
+    app.db.execute("DELETE FROM gate_runs WHERE session_id=?", [sid])
+    app.db.execute("UPDATE campaign_sessions SET ended_at=COALESCE(ended_at, ?), end_reason=COALESCE(end_reason, "
+                   "'deleted') WHERE session_id=?", [time.time(), sid])
+    app.db.execute("UPDATE campaigns SET claim_session=NULL WHERE claim_session=?", [sid])
     await cleanup_session(app, sid)
 
 

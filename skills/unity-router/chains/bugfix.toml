@@ -1,0 +1,33 @@
+# Workflow template (features/chains.py). done_when types adapted from SethGammon/Citadel (MIT).
+id = "bugfix"
+title = "Bug fix"
+summary = "Reproduce with a failing test → fix (compiles) → the repro test and the suite pass → commit"
+kinds = ["chain", "campaign"]
+applies_to = "unity"
+critique = false
+
+[[phase]]
+name = "Repro"
+type = "build"
+skills = ["play-verify"]
+instructions = "Write an EditMode or PlayMode test that fails because of the bug (not because it doesn't compile), and run it."
+# An observed test run since the phase started with at least one failing test; its names become the repro tests.
+done_when = [{ type = "gate", level = "L2", expect = "fail" }]
+
+[[phase]]
+name = "Fix"
+type = "build"
+skills = ["compile-fix-loop", "architecture-patterns"]
+done_when = [{ type = "gate", level = "L1" }]
+
+[[phase]]
+name = "Verify"
+type = "verify"
+skills = ["play-verify"]
+done_when = [{ type = "gate", level = "L2", tests = "repro" }, { type = "gate", level = "L2" }]
+
+[[phase]]
+name = "Commit"
+type = "wire"
+skills = ["vcs-hygiene"]
+done_when = [{ type = "git_clean", paths = ["Assets", "Packages", "ProjectSettings"] }]

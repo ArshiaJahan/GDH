@@ -1,6 +1,7 @@
-import { ArrowUp, Paperclip, Sparkles, X } from "lucide-react";
+import { ArrowUp, Flag, Paperclip, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { get, patch, post, upload } from "../lib/api";
+import { campaignsApi, parseWorkflowCommand, type ChainTemplate } from "../lib/campaigns";
 import { actions, useStore, type Session } from "../lib/store";
 import { parseTaskCommand, TASK_SUBCOMMANDS, taskCompletion, taskPick, taskSuggestions, type TaskHit } from "../lib/taskCodes";
 import { Popover } from "./Popover";
@@ -24,8 +25,12 @@ const FEATURED: Record<string, string> = {
 };
 const shortDesc = (s: SkillInfo) => FEATURED[s.name] ?? s.description;
 
-/** The composer's skills popover: type to filter (name or description), ↑ ↓ and Enter to pick. */
-function SkillPicker({ open, skills, onPick, onClose }: { open: boolean; skills: SkillInfo[]; onPick: (name: string) => void; onClose: () => void }) {
+/** The composer's skills popover: type to filter (name or description), ↑ ↓ and Enter to pick.
+ *  Workflows (chain templates that apply to the session folder) come first. */
+function SkillPicker({ open, skills, onPick, onClose, workflows = [], onPickWorkflow }: {
+  open: boolean; skills: SkillInfo[]; onPick: (name: string) => void; onClose: () => void;
+  workflows?: ChainTemplate[]; onPickWorkflow?: (t: ChainTemplate) => void;
+}) {
   const [q, setQ] = useState("");
   const [active, setActive] = useState(0);
   const list = useRef<HTMLUListElement>(null);
@@ -34,10 +39,21 @@ function SkillPicker({ open, skills, onPick, onClose }: { open: boolean; skills:
   const shown = t ? skills.filter((s) => s.name.toLowerCase().includes(t) || shortDesc(s).toLowerCase().includes(t)) : skills;
   const featured = t ? [] : shown.filter((s) => FEATURED[s.name]);
   const rest = t ? shown : shown.filter((s) => !FEATURED[s.name]);
+  const flows = onPickWorkflow ? (t ? workflows.filter((w) => w.title.toLowerCase().includes(t) || w.id.includes(t) || w.summary.toLowerCase().includes(t)) : workflows) : [];
   const ordered = [...featured, ...rest];
+  const total = flows.length + ordered.length;
+  const pickAt = (i: number) => { if (i < flows.length) onPickWorkflow?.(flows[i]); else if (ordered[i - flows.length]) onPick(ordered[i - flows.length].name); };
   useEffect(() => { list.current?.querySelector(`[data-i="${active}"]`)?.scrollIntoView({ block: "nearest" }); }, [active]);
+  const flowRow = (w: ChainTemplate, i: number) => (
+    <li key={`wf:${w.id}`} role="option" aria-selected={i === active} data-i={i}>
+      <button className={`w-full text-left px-3 py-1.5 ${i === active ? "bg-sunken" : "hover:bg-sunken"}`} onMouseEnter={() => setActive(i)} onClick={() => onPickWorkflow?.(w)}>
+        <span className="flex items-center gap-1.5"><Flag size={12} className="text-action" />{w.title}</span>
+        <span className="text-[12px] text-muted line-clamp-2">{w.summary || w.phases.map((p) => p.name).join(" → ")}</span>
+      </button>
+    </li>
+  );
   const row = (s: SkillInfo) => {
-    const i = ordered.indexOf(s);
+    const i = flows.length + ordered.indexOf(s);
     return (
       <li key={s.name} role="option" aria-selected={i === active} data-i={i}>
         <button className={`w-full text-left px-3 py-1.5 ${i === active ? "bg-sunken" : "hover:bg-sunken"}`} onMouseEnter={() => setActive(i)} onClick={() => onPick(s.name)}>
@@ -53,13 +69,16 @@ function SkillPicker({ open, skills, onPick, onClose }: { open: boolean; skills:
         <input autoFocus className="input py-1 text-[13px]" placeholder="Filter skills" value={q} aria-label="Filter skills"
           onChange={(e) => { setQ(e.target.value); setActive(0); }}
           onKeyDown={(e) => {
-            if (e.key === "ArrowDown") { e.preventDefault(); setActive((i) => Math.min(i + 1, ordered.length - 1)); }
+            if (e.key === "ArrowDown") { e.preventDefault(); setActive((i) => Math.min(i + 1, total - 1)); }
             else if (e.key === "ArrowUp") { e.preventDefault(); setActive((i) => Math.max(i - 1, 0)); }
-            else if (e.key === "Enter" && ordered[active]) { e.preventDefault(); onPick(ordered[active].name); }
+            else if (e.key === "Enter" && active < total) { e.preventDefault(); pickAt(active); }
           }} />
       </div>
       <ul ref={list} className="max-h-[min(60vh,460px)] overflow-y-auto scroll-thin py-1" role="listbox" aria-label="Skills">
-        {ordered.length === 0 && <li className="px-3 py-2 text-muted">{skills.length ? "No matching skills." : "No skills installed."}</li>}
+        {flows.length > 0 && <li className="label px-3 pt-1 pb-0.5" role="presentation">Workflows</li>}
+        {flows.map(flowRow)}
+        {flows.length > 0 && ordered.length > 0 && <li className="my-1 border-t border-line" role="presentation" />}
+        {ordered.length === 0 && flows.length === 0 && <li className="px-3 py-2 text-muted">{skills.length ? "No matching skills." : "No skills installed."}</li>}
         {featured.length > 0 && <li className="label px-3 pt-1 pb-0.5" role="presentation">Featured</li>}
         {featured.map(row)}
         {rest.length > 0 && !t && featured.length > 0 && <li className="my-1 border-t border-line" role="presentation" />}
@@ -85,6 +104,14 @@ export function Composer({ session, running }: { session: Session; running: bool
   const setSkill = (name: string | null) => actions.setSkillChip(session.id, name);
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [skillMenu, setSkillMenu] = useState(false);
+  // Workflows (chain templates for this folder) and the one picked for the next message.
+  const [workflows, setWorkflows] = useState<ChainTemplate[]>([]);
+  const [workflow, setWorkflow] = useState<ChainTemplate | null>(null);
+  const loadWorkflows = () => {
+    if (!session.folder) return setWorkflows([]);
+    campaignsApi.chains(session.folder, "chain").then((r) => setWorkflows(r.templates.filter((t) => t.kinds.includes("chain")))).catch(() => setWorkflows([]));
+  };
+  useEffect(() => { setWorkflow(null); loadWorkflows(); }, [session.id, session.folder]);
   const closeSkillMenu = useCallback(() => setSkillMenu(false), []);
   const loadSkills = () => get("/skills").then((r) => {
     const all: SkillInfo[] = r.skills;
@@ -108,7 +135,8 @@ export function Composer({ session, running }: { session: Session; running: bool
     { cmd: "/clear", hint: "Start fresh; history stays visible", args: [] },
     { cmd: "/skill", hint: "Use a skill in this message", args: skills.map((s) => s.name) },
     { cmd: "/task", hint: "Task board: new, <code>, move, done, list, link", args: TASK_SUBCOMMANDS.map(([s]) => s) },
-  ], [modelChoices, skills]);
+    { cmd: "/workflow", hint: "Run a workflow (phases with checks) in this session", args: workflows.map((w) => w.id) },
+  ], [modelChoices, skills, workflows]);
 
   // /task autocomplete: task codes from the board (matched by the backend) and its column names.
   const [taskHits, setTaskHits] = useState<TaskHit[]>([]);
@@ -132,12 +160,14 @@ export function Composer({ session, running }: { session: Session; running: bool
     if (!hasSpace) return commands.filter((x) => x.cmd.startsWith(c)).map((x) => ({ value: x.cmd + (x.args.length ? " " : ""), label: x.cmd, hint: x.hint }));
     if (c === "/skill" && /^\/skill \S+\s/.test(text)) return []; // the skill is chosen; the rest is the message
     if (c === "/task") return taskSuggestions(text, taskHits, taskCols);
+    if (c === "/workflow" && /^\/workflow \S+\s/.test(text)) return []; // the workflow is chosen; the rest is the request
     const cmd = commands.find((x) => x.cmd === c);
     // /model also matches real names ("/model sol" finds gpt-6.1-sol and codex.standard); the value stays the ID or tier key.
     const match = (a: string) => a.startsWith(arg) || (c === "/model" && !!arg && modelLabel(a).toLowerCase().includes(arg.toLowerCase()));
-    const hint = (a: string) => (c === "/mode" ? MODES[a] : c === "/model" ? modelLabel(a) : c === "/skill" ? shortDesc(skills.find((s) => s.name === a)!) : "");
+    const hint = (a: string) => (c === "/mode" ? MODES[a] : c === "/model" ? modelLabel(a) : c === "/skill" ? shortDesc(skills.find((s) => s.name === a)!)
+      : c === "/workflow" ? workflows.find((w) => w.id === a)?.title ?? "" : "");
     return (cmd?.args ?? []).filter(match).slice(0, 12).map((a) => ({ value: `${c} ${a}`, label: a, hint: hint(a) }));
-  }, [text, commands, taskHits, taskCols]);
+  }, [text, commands, taskHits, taskCols, skills, workflows]);
 
   const addFiles = async (files: FileList | File[]) => {
     setBusy(true);
@@ -185,6 +215,15 @@ export function Composer({ session, running }: { session: Session; running: bool
           return true;
         case "/task":
           return await runTask(line);
+        case "/workflow": {
+          const wf = parseWorkflowCommand(line.trim());
+          const t = wf && workflows.find((w) => w.id === wf.id);
+          if (!session.folder) return actions.toast("Workflows need a session folder; pick one first.", "error"), true;
+          if (!wf?.id || !t) return actions.toast(wf?.id ? `No workflow named ${wf.id} for this folder` : `Usage: /workflow <${workflows.map((w) => w.id).join(" | ") || "id"}> [request]`, "error"), true;
+          if (!wf.request) return setWorkflow(t), true; // attach the chip; the request follows
+          await startWorkflow(t, wf.request);
+          return true;
+        }
         case "/skill": {
           const [name, ...more] = rest;
           if (!name || !skills.some((s) => s.name === name)) return actions.toast(name ? `No skill named ${name}` : "Usage: /skill <name> [message]", "error"), true;
@@ -257,9 +296,29 @@ export function Composer({ session, running }: { session: Session; running: bool
     }
   };
 
+  /** Start a chain in this session (POST /api/campaigns kind chain), then send the request. */
+  const startWorkflow = async (t: ChainTemplate, request: string) => {
+    setBusy(true);
+    try {
+      await campaignsApi.create({ template: t.id, kind: "chain", session_id: session.id, request });
+    } catch (e: any) {
+      setBusy(false);
+      actions.toast(e.message, "error");
+      return;
+    }
+    setBusy(false);
+    setWorkflow(null);
+    await sendMessage(`Run the ${t.title} workflow.` + (request ? `\n\n${request}` : ""), skill);
+  };
+
   const send = async () => {
     const t = text.trim();
-    if ((!t && !atts.length && !skill) || busy || running) return;
+    if ((!t && !atts.length && !skill && !workflow) || busy || running) return;
+    if (workflow && !(t.startsWith("/") && !t.startsWith("/workflow"))) {
+      const wf = t.startsWith("/workflow") ? parseWorkflowCommand(t) : null;
+      await startWorkflow(workflow, wf ? wf.request : t);
+      return;
+    }
     if (t.startsWith("/") && !atts.length && (await runSlash(t))) {
       setText("");
       return;
@@ -269,6 +328,14 @@ export function Composer({ session, running }: { session: Session; running: bool
 
   /** Take an autocomplete suggestion; a complete `/skill <name>` attaches the chip right away. */
   const choose = (value: string) => {
+    const w = value.match(/^\/workflow (\S+)$/);
+    const wt = w && workflows.find((x) => x.id === w[1]);
+    if (wt) {
+      setWorkflow(wt);
+      setText("");
+      setSel(0);
+      return;
+    }
     const m = value.match(/^\/skill (\S+)$/);
     if (m && skills.some((s) => s.name === m[1])) {
       setSkill(m[1]);
@@ -297,8 +364,14 @@ export function Composer({ session, running }: { session: Session; running: bool
             ))}
           </ul>
         )}
-        {(atts.length > 0 || skill) && (
+        {(atts.length > 0 || skill || workflow) && (
           <div className="flex flex-wrap gap-1.5 mb-2">
+            {workflow && (
+              <span className="chip text-text" title={`Sending starts the ${workflow.title} workflow in this session: ${workflow.phases.map((p) => p.name).join(" → ")}`}>
+                <Flag size={12} className="text-action" />Workflow: {workflow.title}
+                <button aria-label={`Remove workflow ${workflow.title}`} onClick={() => setWorkflow(null)}><X size={12} /></button>
+              </span>
+            )}
             {skill && (
               <span className="chip text-text" title="This message invokes the skill; it stays on for the session">
                 <Sparkles size={12} className="text-action" />{skill}
@@ -317,9 +390,11 @@ export function Composer({ session, running }: { session: Session; running: bool
               onClick={() => {
                 if (skillMenu) return setSkillMenu(false);
                 loadSkills();
+                loadWorkflows();
                 setSkillMenu(true);
               }}><Sparkles size={16} /></button>
-            <SkillPicker open={skillMenu} skills={skills} onClose={closeSkillMenu}
+            <SkillPicker open={skillMenu} skills={skills} onClose={closeSkillMenu} workflows={workflows}
+              onPickWorkflow={(w) => { setWorkflow(w); setSkillMenu(false); ta.current?.focus(); }}
               onPick={(n) => { setSkill(n); setSkillMenu(false); ta.current?.focus(); }} />
           </div>
           <input ref={fileIn} type="file" multiple hidden onChange={(e) => e.target.files && addFiles(e.target.files)} />
@@ -328,7 +403,7 @@ export function Composer({ session, running }: { session: Session; running: bool
             ref={ta}
             rows={1}
             value={text}
-            placeholder={running ? "Agent is working… (Stop to interrupt)" : skill ? `What should ${skill} work on? (or send as is)` : "Message the agent, or / for commands"}
+            placeholder={running ? "Agent is working… (Stop to interrupt)" : workflow ? `What should the ${workflow.title} workflow do?` : skill ? `What should ${skill} work on? (or send as is)` : "Message the agent, or / for commands"}
             className="flex-1 resize-none bg-transparent outline-none focus-visible:outline-none py-1 max-h-60 leading-6"
             onChange={(e) => { setText(e.target.value); setSel(0); e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, 240)}px`; }}
             onPaste={(e) => { if (e.clipboardData.files.length) { e.preventDefault(); addFiles(e.clipboardData.files); } }}
@@ -345,12 +420,12 @@ export function Composer({ session, running }: { session: Session; running: bool
                 const modelArg = text.trim().match(/^\/model\s+(.+)$/)?.[1];
                 const pickModel = modelArg !== undefined && !modelChoices.includes(modelArg);
                 const pickTask = /^\/task\s/.test(text) && taskPick(text, taskCols); // a half-typed task code or column
-                if (suggestions.length && suggestions[sel].value.trim() !== text.trim() && (pickModel || pickTask || !text.includes(" ") || /^\/skill \S*$/.test(text))) choose(suggestions[sel].value);
+                if (suggestions.length && suggestions[sel].value.trim() !== text.trim() && (pickModel || pickTask || !text.includes(" ") || /^\/(skill|workflow) \S*$/.test(text))) choose(suggestions[sel].value);
                 else send();
               }
             }}
           />
-          <button className="btn btn-primary px-2 mb-0.5" disabled={busy || running || (!text.trim() && !atts.length && !skill)} onClick={send} aria-label="Send"><ArrowUp size={16} /></button>
+          <button className="btn btn-primary px-2 mb-0.5" disabled={busy || running || (!text.trim() && !atts.length && !skill && !workflow)} onClick={send} aria-label="Send"><ArrowUp size={16} /></button>
         </div>
         <div className="mt-1 text-[11.5px] text-faint">{MODES[session.mode] ?? session.mode} · Enter to send, Shift+Enter for a new line · drop files to attach</div>
       </div>

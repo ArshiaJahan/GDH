@@ -95,3 +95,21 @@ describe("ws.resync", () => {
     expect(useStore.getState().page).toBe("settings");
   });
 });
+
+describe("campaign notices", () => {
+  it("toasts parked and done campaigns on any page, with a way to the campaign", () => {
+    useStore.setState({ toast: null, page: "chat", pageArgs: {} });
+    handleEvent({ type: "campaign.paused", session_id: "s1", data: { id: "cmp_1", title: "Boss Rush", status: "parked", reason: "budget reached" } } as any);
+    const t = useStore.getState().toast!;
+    expect(t.text).toBe("Boss Rush is parked and needs you: budget reached");
+    expect(t.kind).toBe("error");
+    t.action!.run();
+    expect(useStore.getState().page).toBe("campaigns");
+    expect(useStore.getState().pageArgs).toEqual({ id: "cmp_1" });
+    handleEvent({ type: "campaign.done", data: { id: "cmp_1", title: "Boss Rush" } } as any);
+    expect(useStore.getState().toast!.text).toBe("Boss Rush is done.");
+    useStore.setState({ toast: null });
+    handleEvent({ type: "campaign.paused", data: { id: "cmp_1", title: "Boss Rush", status: "paused", reason: "paused by you" } } as any);
+    expect(useStore.getState().toast).toBeNull();
+  });
+});

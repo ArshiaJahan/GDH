@@ -1,0 +1,33 @@
+# Workflow template (features/chains.py). done_when types adapted from SethGammon/Citadel (MIT).
+id = "content-batch"
+title = "Content batch"
+summary = "Plan the items → produce them (one unit per Assets/Game/<Kind>/<Item>/) → wire → verify"
+kinds = ["chain", "campaign"]
+applies_to = "unity"
+critique = false
+
+[[phase]]
+name = "Plan items"
+type = "plan"
+skills = ["gdd-to-backlog"]
+done_when = [{ type = "command_passes", observe = "backlog_lint" }]
+
+[[phase]]
+name = "Produce"
+type = "build"
+skills = ["asset-pipeline", "scene-prefab-safety"]
+fleet = true                  # fleet-eligible: one unit per Assets/Game/<Kind>/<Item>/
+instructions = "Produce each item in its own folder Assets/Game/<Kind>/<Item>/."
+done_when = [{ type = "gate", level = "L1" }, { type = "command_passes", observe = "asset_audit" }]
+
+[[phase]]
+name = "Wire"
+type = "wire"
+skills = ["architecture-patterns", "compile-fix-loop"]
+done_when = [{ type = "gate", level = "L1" }]
+
+[[phase]]
+name = "Verify"
+type = "verify"
+skills = ["play-verify"]
+done_when = [{ type = "gate", level = "L1" }, { type = "gate", level = "L2" }, { type = "command_passes", observe = "asset_audit" }]

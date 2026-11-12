@@ -1,0 +1,37 @@
+# Workflow template (features/chains.py). done_when types adapted from SethGammon/Citadel (MIT).
+id = "new-mechanic"
+title = "New mechanic"
+summary = "Spec → backlog story → code → compile → behaviour tests → play-verify → commit"
+kinds = ["chain", "campaign"]
+applies_to = "unity"          # offered when ProjectSettings/ProjectVersion.txt exists
+critique = false
+
+[[phase]]
+name = "Spec"
+type = "plan"                 # research | plan | build | wire | verify | prune
+skills = ["game-designer"]
+done_when = [{ type = "file_exists", path = "docs/specs/*.md", newer_than = "phase_start" }]
+
+[[phase]]
+name = "Backlog"
+type = "plan"
+skills = ["gdd-to-backlog"]
+done_when = [{ type = "command_passes", observe = "backlog_lint" }]
+
+[[phase]]
+name = "Build"
+type = "build"
+skills = ["architecture-patterns", "compile-fix-loop"]
+done_when = [{ type = "gate", level = "L1" }]
+
+[[phase]]
+name = "Verify"
+type = "verify"
+skills = ["play-verify"]
+done_when = [{ type = "gate", level = "L2" }, { type = "gate", level = "L3" }]
+
+[[phase]]
+name = "Commit"
+type = "wire"
+skills = ["vcs-hygiene"]
+done_when = [{ type = "git_clean", paths = ["Assets", "Packages", "ProjectSettings"] }]

@@ -17,10 +17,10 @@
 
 [Highlights](#highlights) ·
 [Built for Unity](#built-for-unity) ·
+[Campaigns](#campaigns-and-workflows) ·
 [How it works](#how-it-works) ·
 [Security](#security-model) ·
 [Quick start](#quick-start) ·
-[Roadmap](#roadmap) ·
 [Full guide](docs/GUIDE.md)
 
 </div>
@@ -45,6 +45,7 @@ Everything runs locally; the backend listens on `127.0.0.1` only.
 | **Hooks and gates** | A hooks engine runs checks at fixed points of a turn: compile before finishing, tests in verify phases, blocked edits to generated files. |
 | **Quality ladder L1-L4** | Stories reach `done` only with fresh, app-observed evidence: compile, tests, play evidence and screenshots, design critique. |
 | **Taste and scars** | `TASTE.md`, `POSTMORTEMS.md` and an anti-pattern ratchet keep design judgement and past failures in the loop. |
+| **Campaigns and workflows** | Multi-session goals with a plan you approve, phases whose checks the app evaluates itself, a campaign file in the project (decisions, discoveries, handoffs), checkpoints, autopilot with budget and stall breakers; or a one-session workflow with `/workflow`. 8 Unity templates ship. |
 | **Fleet** | Parallel waves of subagents in their own worktrees, each with a claimed scope, scope-checked merges, a conflict circuit breaker and discoveries relayed to the next wave. |
 | **Progressive skill disclosure** | A compact skill index in the system prompt; full skill text is loaded only when used and survives compaction. |
 | **Task board** | A Kanban board (Tasks tab) you and the agent share: tasks with codes like `Task00001`, subtasks and checklists, comments, history and linked sessions, live updates. In chat: `/task new`, `/task <code>`, `/task move`, `/task done`, `/task list`, `/task link`; the agent uses `task_*` tools. Scheduled prompts live on the Schedule page. |
@@ -113,7 +114,7 @@ commands it runs:
 - **cs-compile** (L1): a turn that changed code can't finish until the project compiles, with up to 2 fix attempts before it's handed to you.
 - **merge-compile**: a worktree merge that brought code is compiled.
 - **verify-tests** (L2): EditMode tests in a campaign's verify phase.
-- **antipatterns**: an advisory scan of changed scripts.
+- **antipatterns**: a scan of changed scripts; advisory, but blocking in the Performance pass and Release workflows.
 - **backlog-lint**: lint errors after `BACKLOG.md` is written.
 
 Your own hook files (`.workspace/hooks.toml`) are ignored until you trust them by hash. A
@@ -132,6 +133,34 @@ missing event unsubscribes and more, with a weighted score. A baseline in
 - **`TASTE.md`**: three words, ranked heuristics, anti-patterns and hard constraints for your game.
 - **`design-critique`**: Spec Auditor, Player Advocate and Art Director review fresh screenshots; the minimum score counts, two rounds at most, then you decide.
 - **`POSTMORTEMS.md`**: each rule has an `Applies to:` glob, and the rule is shown to the agent the first time it touches a matching file in a session.
+
+## Campaigns and workflows
+
+A **workflow** (chain) runs a fixed sequence of phases in one session: type
+`/workflow <id> <what to do>` in the composer, or pick one under **Workflows** in the skills
+menu. A **campaign** spreads a larger goal over several sessions: a planning session writes the
+design target and scope into `.workspace/campaigns/<slug>.md`, a validator checks the plan covers
+your request, you approve it, and each phase then runs in a fresh session with a brief built from
+the campaign file. Either way the agent declares a phase done with a handoff and the **app**
+checks the phase's conditions (files, scripts, gates, quality-ladder levels, fresh screenshots,
+your own Pass/Fail); a failure costs a retry, and the last one parks the run for you.
+
+| Template | Phases |
+|---|---|
+| `new-mechanic` New mechanic | Spec → backlog story → code → compile → behaviour tests → play-verify → commit |
+| `bugfix` Bug fix | Reproduce with a failing test → fix → repro test and suite pass → commit |
+| `juice-pass` Juice pass | Baseline screenshots → game-feel pass → before/after evidence → design critique → commit |
+| `content-batch` Content batch | Plan the items → produce them (a Fleet wave, one unit per item folder) → wire → verify |
+| `perf-pass` Performance pass | Baseline perf report → fix loop (anti-pattern gate blocking) → compare |
+| `release` Release | Freeze → full tests → build → headless smoke → spec-audit critique → changelog and tag |
+| `replace-system` Replace a system | Build beside → parity verify → switch → remove the old system |
+| `milestone` Milestone (campaign only) | One phase per story of the current milestone, then the milestone exit |
+
+The **Campaigns** page lists every run with its status, phase, spend and checks, and has Pause,
+Resume, Park, Abandon, Rollover and the checkpoint refs (the app never resets your tree; it shows
+the restore command). Autopilot continues a running campaign while there is progress, within its
+budget, turn and session limits. Parked, waiting and finished runs show a notice on any page.
+Task codes (`Task00012`) in a campaign's request link its sessions to those tasks.
 
 ## How it works
 
@@ -203,15 +232,8 @@ the Editor, and invoke `unity-router` from the composer's skill button or with `
 
 Defaults ship with the app; [`config.example.toml`](config.example.toml) lists them with
 comments. Your `config.toml` holds only what you change, and most of it is editable in Settings:
-model tiers, delegation budgets, spend limits, modes and allowlist, `[skills]`, `[hooks]` and
-`[ladder]`. See the [guide](docs/GUIDE.md#configuration).
-
-## Roadmap
-
-Coming next:
-
-- **Campaigns and chains**: multi-session goals with a plan, phases, a decision log and exit
-  evidence, so work survives across sessions with autopilot and budget limits.
+model tiers, delegation budgets, spend limits, modes and allowlist, `[skills]`, `[hooks]`,
+`[ladder]`, `[campaigns]` and `[fleet]`. See the [guide](docs/GUIDE.md#configuration).
 
 <details>
 <summary><b>Project layout</b></summary>
@@ -255,8 +277,8 @@ run `make test` before submitting.
 
 ## Documentation
 
-The [full guide](docs/GUIDE.md) covers every page and panel, sessions, keyboard shortcuts,
-delegation rules, MCP and skills, building the app, versions and updates, where data lives, and
+The [full guide](docs/GUIDE.md) covers every page and panel, sessions, campaigns and
+workflows, keyboard shortcuts, delegation rules, MCP and skills, building the app, versions and updates, where data lives, and
 troubleshooting.
 
 ## Acknowledgements

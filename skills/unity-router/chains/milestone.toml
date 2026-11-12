@@ -1,0 +1,23 @@
+# Workflow template (features/chains.py). done_when types adapted from SethGammon/Citadel (MIT).
+# One phase per story of the current BACKLOG.md milestone (in BACKLOG order, stories already done
+# are skipped), generated when the plan is submitted, then the milestone exit.
+id = "milestone"
+title = "Milestone"
+summary = "One phase per story of the current milestone, each done with its ladder evidence, then the milestone exit"
+kinds = ["campaign"]
+applies_to = "backlog"        # offered when the folder has a BACKLOG.md
+critique = false
+
+[[phase]]
+name = "{id} {title}"
+type = "build"
+for_each = "milestone_story"
+skills = ["architecture-patterns", "compile-fix-loop", "play-verify"]
+done_when = [{ type = "gate", level = "story" }]
+
+[[phase]]
+name = "Milestone exit"
+type = "verify"
+skills = ["design-critique"]
+critique = true
+done_when = [{ type = "gate", level = "story", stories = "milestone" }, { type = "gate", level = "L4", stories = "milestone" }]

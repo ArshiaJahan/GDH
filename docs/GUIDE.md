@@ -16,6 +16,7 @@ transcription, sound and music. Everything runs locally; the backend listens on 
 - [Configuration](#configuration)
 - [Pages and panels](#pages-and-panels)
 - [Task board](#task-board)
+- [Campaigns and workflows](#campaigns-and-workflows)
 - [Sessions](#sessions)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [How delegation works](#how-delegation-works)
@@ -128,6 +129,13 @@ keep an explicit **Save**.
   approve `git status; curl … | sh`. Only the exact rule `run_command:*` allows every command. A rule
   with an empty pattern (`run_command:` or a bare `edit`) covers nothing. In Plan only mode no rule
   lets an edit, delete, merge or command through.
+- `[campaigns]` campaigns and workflows: `handoff` (`per_phase`: each phase in a new session;
+  `on_cost`: stay in the session until a request reaches `rollover_input_tokens`),
+  `max_auto_turns` and `stall_turns` (autopilot), `default_budget_usd`, `max_sessions`,
+  `validator_tier` (the plan check), `drift_tier` (the check every 2 phases) and `claim_stale_s`.
+  See [Campaigns and workflows](#campaigns-and-workflows).
+- `[fleet]` parallel waves: `enabled`, `max_units` (writing units per wave), `unit_timeout_min`
+  (`build`, `research`) and `relay_tokens` (discoveries passed to the next wave).
 - `[sessions]` `auto_title` (name new sessions after the first reply, default on), `trash_days`
   (sessions in Trash are deleted for good after this many days, default 30) and
   `event_retention_days` (how long the event log keeps events, default 7; see Settings → Storage).
@@ -156,7 +164,8 @@ there's more to scroll.
 **Chat.** Streaming replies with collapsible thinking and tool calls, subagent cards (tier,
 effort meter, status, tokens, cost, stop), inline players for ElevenLabs audio, and drag and
 drop attachments. Slash commands are `/model`, `/effort`, `/mode`, `/compact`, `/clear`,
-`/skill` and `/task` (see [Task board](#task-board)). A task code such as `Task00012` in a message
+`/skill`, `/task` (see [Task board](#task-board)) and `/workflow` (see
+[Campaigns and workflows](#campaigns-and-workflows)). A task code such as `Task00012` in a message
 (yours or the agent's) shows as a chip that opens the task; the chat header shows the tasks
 linked to the session.
 **Approval cards** appear here for effort above high (Approve / Run at high instead / Cancel),
@@ -190,7 +199,8 @@ missed too much.
 windows at least 1200 px wide and closed in narrower ones:
 
 1. **Environment** — where it runs (Local), folder, model and effort, account profile per provider,
-   mode, harness.
+   mode, harness. The harness picker is locked while the session runs a campaign or workflow
+   (they need the built-in loop).
 2. **Context** — tokens by system, tools, skills, messages and attachments, as a share of the
    window, plus this session's cost per model. **Compact** summarizes older turns with
    `claude.fast` at low effort (the last 3 turns, or inside one long turn the last 4 tool
@@ -398,6 +408,108 @@ tools off with the setting `task_board = false`.
 
 The tables (migration 4) are `task_boards`, `task_columns`, `board_tasks`, `task_counter`,
 `task_subtasks`, `task_checklist`, `task_comments`, `task_activity` and `task_sessions`.
+
+## Campaigns and workflows
+
+Two ways to run work in phases whose checks the app evaluates itself (an agent saying "done"
+never counts):
+
+- A **workflow** (a *chain*) runs in one session: its steps advance in place and its state lives
+  in the database.
+- A **campaign** spans several sessions. Its state is also a Markdown file in the project,
+  `.workspace/campaigns/<slug>.md` (request, design target, scope, constraints, phases, coverage,
+  feature ledger, decision log, discoveries, review queue, active context, continuation state,
+  completion), which you can read and edit; the app owns the Phases, Coverage, Feature ledger and
+  Continuation sections and keeps your own sections where they are.
+
+**Templates.** Both are built from workflow templates, TOML files in a skill's `chains/` folder
+(the format is in `backend/workspace/features/chains.py`). The Unity pack ships eight, offered in
+Unity projects:
+
+| Template | Runs as | Phases |
+|---|---|---|
+| `new-mechanic` New mechanic | chain, campaign | Spec → backlog story → code → compile → behaviour tests → play-verify → commit |
+| `bugfix` Bug fix | chain, campaign | Reproduce with a failing test → fix → the repro test and the suite pass → commit |
+| `juice-pass` Juice pass | chain, campaign | Baseline screenshots → game-feel pass → before/after play evidence → design critique → commit |
+| `content-batch` Content batch | chain, campaign | Plan the items → produce them (Fleet-eligible: one unit per `Assets/Game/<Kind>/<Item>/`) → wire → verify |
+| `perf-pass` Performance pass | chain, campaign | Baseline perf report → fix loop (no new anti-patterns) → compare |
+| `release` Release | chain, campaign | Freeze → full tests → build → headless smoke → spec-audit critique → changelog and tag |
+| `replace-system` Replace a system | chain, campaign | Build beside → parity verify → switch → remove the old system |
+| `milestone` Milestone | campaign | One phase per story of the current milestone (from `BACKLOG.md`), then the milestone exit |
+
+User skills can ship their own templates. An invalid file is left out and listed with its errors
+(`GET /api/chains`). A phase's `done_when` conditions are `file_exists`, `command_passes` (a
+script's `RESULT:` line, e.g. `asset_audit`), `metric_threshold` (`[VERIFY]`/`[PERF]` values),
+`gate` (a quality-ladder level of the stories in scope, or a hook gate by name), `visual_verify`
+(a fresh screenshot), `git_clean` and `manual` (you answer Pass or Fail on a card); every phase
+needs at least one the app can check.
+
+**Starting a workflow.** In the composer type `/workflow <id> <what to do>`, or `/workflow <id>`
+to attach it as a chip and type the request next; the skills button lists the folder's
+**Workflows** first. Sending starts the chain in this session. The agent finishes each step with a
+`---HANDOFF---` block (What / Decisions / Unresolved / Reversibility) and `chain_step_done`; the
+app checks the step, and a failure costs one of its retries (3 by default). When none are left the
+chain is **parked** and waits for you.
+
+**Starting a campaign.** On the **Campaigns** page, **New campaign**: template, project folder, the
+request (a request under about 20 words is better as a workflow), budget, autopilot, model, effort
+(high or below) and mode. **Start** opens the planning session: the agent fills the design target
+(end states, never "improve X"), scope (`BACKLOG.md` stories, claimed paths, out of scope) and
+constraints, and calls `campaign_submit_plan`. A read-only validator maps your request to the
+plan; gaps and "delta" targets go back to the agent (twice at most), then the **Approve plan** card
+appears (Approve / Revise / Park, with notes). Each phase then runs in a new session in the
+campaign's sidebar group, starting with a brief the app assembles from the campaign file. At
+the start of every phase the app records a checkpoint ref
+(`refs/workspace/checkpoints/<slug>/p<N>`); it never resets your tree, and the page shows the
+`git restore` command for you to run.
+
+**Autopilot** continues a running campaign or workflow after each turn while nothing waits for you,
+the turn didn't fail, spend is under the budget, there was progress (changed files, new evidence,
+a log entry) and the agent didn't end on a question. It pauses after `max_auto_turns` turns in a
+phase or `stall_turns` turns without progress, and moves to a new session before the context gets
+too large (`on_cost`). **Breakers** park a run: retries used up, compile errors up by 5 in a
+phase, a test that passed earlier in the campaign now failing, two failed drift checks (a cheap
+check every two phases that the work still serves the request), the budget or session limit.
+
+**On the page** each run shows its status, phase, spend, the current phase's checks and Next
+action, with **Start**, **Approve plan**, **Revise plan…**, **Pause**, **Resume** (claims the run
+for its session; only one session works on a campaign at a time), **Park**, **New session**
+(continue the phase in a fresh session), **Abandon**, the session chain and the checkpoints. The footer has cost and time per story,
+the first-pass gate rate, retries per phase, escalations and parks by reason. A session that runs
+a campaign or workflow has a **Campaign** card in its side panel with the same essentials. When a
+run is parked, waits for you, is paused by the app (for example, the next phase is ready in a new
+session with autopilot off) or is done, a notice appears on whatever page you're on, with
+**Open**.
+
+**Fleet phases.** A phase marked `fleet = true` (Produce in Content batch) gets a Fleet section in
+its brief: when the work splits by folder, the agent runs it as a wave (`run_wave` with the
+campaign's id, then `wave_status`, `merge_wave`, `close_wave`). Each unit's discoveries go to the
+campaign file's Discoveries (marked `fleet:<unit>`) and to `.workspace/discoveries/<date>.jsonl`.
+Without a git repository, or with `[fleet] enabled = false`, the brief says so and the phase runs
+in the session.
+
+**Blocking gates.** A template's `blocking_gates` make those hook gates block in its sessions even
+where the gate is advisory: Performance pass and Release make `unity.antipatterns` (new
+anti-patterns in changed scripts) block finishing a turn, with the usual fix attempts. Elsewhere it
+stays advisory.
+
+**Tasks.** Task codes in a campaign's or workflow's request (`Task00012`) link every session of the
+run to those tasks on the task board.
+
+**Harness.** Campaigns and workflows use the built-in loop (their tools, autopilot and gates live
+there): a workflow can't start in a session on another harness, and the harness picker is locked
+while one runs.
+
+**The agent's tools** (only in campaign or workflow sessions; the `campaign` skill is pinned
+there): `campaign_status`, `campaign_log` (decision, discovery or note), `campaign_pause` (with an
+optional question for the review queue), `campaign_submit_plan` and `campaign_phase_done`
+(campaigns), `chain_step_done` (workflows).
+
+**REST:** `GET /api/chains?folder=&kind=`, `GET/POST /api/campaigns`,
+`GET/PATCH /api/campaigns/{id}`, and `POST /api/campaigns/{id}/{start|pause|resume|park|abandon|`
+`approve_plan|revise_plan|rollover|check|review}`. Events: `campaign.updated`, `campaign.paused`,
+`campaign.done`. The tables (migration 3) are `campaigns`, `campaign_sessions`, `gate_runs`,
+`fleet_waves` and `fleet_units`.
 
 ## Sessions
 

@@ -133,7 +133,10 @@ critique_rounds = 2                 # then an escalation card
 arbiter_tier = ""                   # e.g. "codex.standard" for one binding pass first; empty = ask you
 
 [campaigns]
-# Multi-session work with a plan, phases and checks (and one-session chains).
+# Multi-session work with a plan, phases and checks (and one-session chains, `/workflow` in chat).
+# Workflow templates are skills/<skill>/chains/*.toml (the Unity pack ships 8); a template's
+# blocking_gates make those gates block in its sessions. Campaigns and chains run at effort high
+# or below, on the built-in loop.
 handoff = "per_phase"               # per_phase | on_cost: when a campaign moves to a new session
 rollover_input_tokens = 250000      # on_cost: a new session once a request is this large
 max_auto_turns = 8                  # autopilot turns per phase before it waits for you

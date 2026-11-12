@@ -1,0 +1,26 @@
+# Workflow template (features/chains.py). done_when types adapted from SethGammon/Citadel (MIT).
+id = "perf-pass"
+title = "Performance pass"
+summary = "Baseline perf report → fix loop (no new anti-patterns) → compare (perf_report RESULT: OK)"
+kinds = ["chain", "campaign"]
+applies_to = "unity"
+critique = false
+blocking_gates = ["unity.antipatterns"]
+
+[[phase]]
+name = "Baseline"
+type = "research"
+skills = ["perf-pass"]
+done_when = [{ type = "command_passes", observe = "perf_report" }]
+
+[[phase]]
+name = "Fix loop"
+type = "build"
+skills = ["perf-pass", "compile-fix-loop"]
+done_when = [{ type = "gate", level = "L1" }, { type = "gate", name = "unity.antipatterns" }]
+
+[[phase]]
+name = "Compare"
+type = "verify"
+skills = ["perf-pass"]
+done_when = [{ type = "command_passes", observe = "perf_report" }]
