@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   effort TEXT NOT NULL DEFAULT 'medium',
   account TEXT NOT NULL DEFAULT 'default',
   mode TEXT NOT NULL DEFAULT 'ask',    -- ask | accept_edits | plan
-  harness TEXT NOT NULL DEFAULT 'builtin', -- builtin | agent_sdk | codex_cli
+  harness TEXT NOT NULL DEFAULT 'builtin', -- builtin | agent_sdk | codex_cli | claude_code
   location TEXT NOT NULL DEFAULT 'local',
   settings TEXT NOT NULL DEFAULT '{}', -- json: connectors, skills, shared_tools, ...
   status TEXT NOT NULL DEFAULT 'idle'  -- idle | running | paused
@@ -433,6 +433,17 @@ def _v4_task_board(c: sqlite3.Connection) -> None:
 # transaction together with the version bump. Append new steps; never change a released one.
 MIGRATIONS: list[tuple[int, Any]] = [(1, _v1_session_columns), (2, _v2_storage), (3, _v3_citadel)]
 MIGRATIONS.append((4, _v4_task_board))
+
+
+def _v5_usage_billing(c: sqlite3.Connection) -> None:
+    """v5: usage_records.billing — "api" (an API key: counts against the USD spend limits) or
+    "subscription" (a Claude Code session on the user's own Claude login: cost_usd is the CLI's
+    estimate, shown on the Usage page but never counted against the limits)."""
+    if "billing" not in _columns(c, "usage_records"):
+        c.execute("ALTER TABLE usage_records ADD COLUMN billing TEXT NOT NULL DEFAULT 'api'")
+
+
+MIGRATIONS.append((5, _v5_usage_billing))
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 

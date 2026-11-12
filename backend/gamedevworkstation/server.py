@@ -25,7 +25,9 @@ from .core.media import prepare_image
 from .core.types import AudioBlock, FileBlock, ImageBlock, Message, TextBlock, new_id
 from .events import REPLAY_MAX
 from .skills import get_skill, pinned_skill_names, skill_invocation, skill_load_text, skill_lru
+from .store import valid_claude_code_session
 
+HARNESSES = ("builtin", "agent_sdk", "codex_cli", "claude_code")
 WS_OVERFLOW = 4000  # close code: this client fell too far behind; reconnect with ?since=<last seq>
 
 # /api/file serves these inline as they are; a browser shows them but runs nothing in them.
@@ -192,12 +194,27 @@ def create_app(token: str, state: AppState | None = None) -> FastAPI:
                 raise HTTPException(400, f"Folder not found: {f}")
             folder = str(f.resolve())
         group_id = sessions_mgmt.valid_group(S, body.get("group_id"))
+        harness = body.get("harness")
+        if harness is not None:
+            await _check_harness(harness)
         s = S.store.create(title=body.get("title") or "New session", folder=folder,
                            model=_model_arg(body["model"]) if body.get("model") else None,
                            effort=body.get("effort"), mode=body.get("mode"))  # skill disclosure: store.create
         if group_id:  # ⌘N in a grouped session: the new one joins that group
             s = S.store.update(s["id"], group_id=group_id) or s
+        if harness not in (None, s["harness"]):  # the new-session flow's harness choice
+            s = S.store.update(s["id"], harness=harness) or s
         return s
+
+    async def _check_harness(h: Any) -> None:
+        if h not in HARNESSES:
+            raise HTTPException(400, f"Unknown harness {h!r}")
+        if h == "codex_cli" and not shutil.which("codex"):
+            raise HTTPException(400, "Codex CLI isn't installed (npm i -g @openai/codex)")
+        if h == "claude_code" and (cc := S.extensions.get("claude_code")) is not None \
+                and not (await cc.probe.status())["installed"]:  # type: ignore[attr-defined]
+            raise HTTPException(400, "The claude CLI isn't installed (https://code.claude.com), or set "
+                                     "[claude_code].cli_path in Settings → Claude Code.")
 
     @api.get("/sessions/{sid}")
     async def get_session(sid: str) -> dict:
@@ -218,8 +235,8 @@ def create_app(token: str, state: AppState | None = None) -> FastAPI:
             body["folder"] = str(f.resolve())
         if body.get("model"):
             body["model"] = _model_arg(body["model"], cur.get("model"))
-        if body.get("harness") == "codex_cli" and not shutil.which("codex"):
-            raise HTTPException(400, "Codex CLI isn't installed (npm i -g @openai/codex)")
+        if body.get("harness") not in (None, cur["harness"]):
+            await _check_harness(body["harness"])
         if body.get("harness") not in (None, cur["harness"]) and (camp := S.extensions.get("campaigns")) is not None \
                 and (c := camp.of_session(cur)) and c["status"] not in ("done", "abandoned"):
             # campaign_* / chain_step_done tools, autopilot and the gates live in the built-in loop
@@ -232,6 +249,8 @@ def create_app(token: str, state: AppState | None = None) -> FastAPI:
         settings = body.get("settings")
         if settings is not None and not isinstance(settings, dict):
             raise HTTPException(400, "settings must be an object")
+        if (settings or {}).get("claude_code_session") is not None and not valid_claude_code_session(settings["claude_code_session"]):
+            raise HTTPException(400, "claude_code_session must be a UUID")
         if bad_accounts(body.get("accounts")) or bad_accounts((settings or {}).get("accounts")):
             raise HTTPException(400, "Unknown provider or account profile")
         if "account" in body and body["account"] not in S.config.profiles("anthropic"):  # legacy: the Anthropic one
@@ -243,6 +262,12 @@ def create_app(token: str, state: AppState | None = None) -> FastAPI:
         if body.get("title") and body["title"] != cur["title"]:  # renamed by hand: auto-title leaves it alone
             body["settings"] = {**(body.get("settings") or {}), "title_source": "user"}
         out = S.store.update(sid, **body)
+        if body.get("harness") not in (None, cur["harness"]) and (cc := S.extensions.get("claude_code")) is not None:
+            # Switching harness: a claude process left over ends, and switching (back) to Claude Code starts
+            # a new Claude Code conversation with a recap, since it hasn't seen the turns in between.
+            await cc.close_session(sid)  # type: ignore[attr-defined]
+            if body["harness"] == "claude_code":
+                out = S.store.update(sid, settings={"claude_code_session": None, "claude_code_totals": None}) or out
         # Skills ticked in the Connectors card turn on the MCP servers they use, like invoking them.
         new_skills = (settings or {}).get("skills")
         if S.mcp and isinstance(new_skills, list):

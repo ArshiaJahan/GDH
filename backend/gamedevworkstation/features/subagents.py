@@ -207,7 +207,8 @@ class SubagentManager:
         budget = float(cfg.delegation.get("job_budget_usd") or 0)
         if budget:
             since = self.app.turn_started.get(ctx.session_id, 0)
-            r = self.app.db.one("SELECT COALESCE(SUM(cost_usd),0) c FROM usage_records WHERE session_id=? AND ts>=?",
+            r = self.app.db.one("SELECT COALESCE(SUM(cost_usd),0) c FROM usage_records WHERE session_id=? AND ts>=? "
+                                "AND billing != 'subscription'",
                                 [ctx.session_id, since])
             if r["c"] >= budget:
                 raise ValueError(f"This job has spent ${r['c']:.2f}, at its job_budget_usd of ${budget:.2f}. "

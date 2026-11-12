@@ -1,6 +1,6 @@
 import { Archive, Brain, ChevronRight, Clock, GitBranch, PanelRight, Sparkles, Square, Trash2, TriangleAlert, Wrench } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { fileUrl, inTauri, post } from "../lib/api";
+import { fileUrl, get, inTauri, patch, post } from "../lib/api";
 import { MdLite } from "../lib/mdlite";
 import { openLocalFile } from "../lib/native";
 import { sessionActions } from "../lib/sessions";
@@ -9,6 +9,7 @@ import { ApprovalCard } from "./ApprovalCard";
 import { Composer } from "./Composer";
 import { SafeMarkdown } from "./SafeMarkdown";
 import { NoKeyNotice, SetupChecklist } from "./SetupChecklist";
+import { ClaudeCodeChip, ClaudeLoginNotice, HarnessSelect } from "./ClaudeCode";
 import { metaRow } from "./rows";
 import { SessionLimitBanner } from "./LimitsBanner";
 import { SessionTasks } from "./SessionTasks";
@@ -17,6 +18,20 @@ import { EffortMeter, ProviderDot, fmtUsd, modelLabel, tiersOf, useModelCatalog 
 
 const EMPTY: Msg[] = [];
 const STOPPABLE_JOBS = new Set(["subagent", "codex_cli", "command"]);
+
+/** The new-session flow's harness choice: shown on a session that has no messages yet. */
+function NewSessionHarness({ sid, harness }: { sid: string; harness: string }) {
+  const [env, setEnv] = useState<any>(null);
+  useEffect(() => { get("/environment").then(setEnv).catch(() => setEnv(null)); }, []);
+  return (
+    <div className="mb-4 flex items-center gap-2 text-[13px]" data-testid="new-session-harness">
+      <span className="text-muted">Run this session with</span>
+      <HarnessSelect value={harness} available={env?.harnesses} onChange={async (v) => {
+        try { await patch(`/sessions/${sid}`, { harness: v }); } catch (e: any) { actions.toast(e.message, "error"); }
+      }} />
+    </div>
+  );
+}
 
 /** "Rate limited, retrying in Ns" with a live countdown. */
 function StatusLine({ s }: { s: AgentStatus }) {
@@ -117,6 +132,7 @@ export function Chat() {
         <h1 className="font-medium truncate">{session.title}</h1>
         <span className="chip whitespace-nowrap shrink-0"><ProviderDot model={session.model} />{modelLabel(session.model)} <EffortMeter effort={session.effort} /> {session.effort}</span>
         <SessionTasks sessionId={session.id} />
+        {session.harness === "claude_code" && <ClaudeCodeChip s={session} />}
         <div className="ml-auto flex items-center gap-1">
           {(running || backgroundBusy) && <button className="btn" title={running ? "Stop the agent and everything it started" : "Stop this session's background subagents and commands"} onClick={() => post(`/sessions/${sid}/stop`)}><Square size={12} /> Stop</button>}
           <button className="btn btn-ghost px-1.5" title={sidePanelOpen ? "Hide side panel" : "Show side panel"} aria-label="Side panel" aria-pressed={sidePanelOpen} onClick={actions.toggleSidePanel}><PanelRight size={16} /></button>
@@ -142,6 +158,7 @@ export function Chat() {
           {visible.length === 0 && !streaming && (
             <div className="text-muted text-[13px] py-10">
               <SetupChecklist />
+              {!running && <NewSessionHarness sid={session.id} harness={session.harness} />}
               Ask anything, attach files, or hand over a job to plan and delegate. Type <code className="font-mono">/</code> for commands.
             </div>
           )}
@@ -288,6 +305,7 @@ const MessageView = memo(function MessageView({ m, results, onFork }: MsgProps) 
     );
   }
   if (m.meta?.error_kind === "no_key" || m.meta?.error === "no_key") return <NoKeyNotice m={m} />;
+  if (m.meta?.error_kind === "claude_login") return <ClaudeLoginNotice m={m} />;
   if (m.meta?.error) return <ErrorMessage m={m} />;
   const usage = m.meta?.usage;
   return (

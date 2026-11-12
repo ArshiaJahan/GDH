@@ -8,7 +8,7 @@ vi.mock("../lib/api", () => ({ api: vi.fn(), del: vi.fn(), get, post: vi.fn() })
 vi.mock("../lib/store", () => ({ actions: { toast: vi.fn(), refreshState: vi.fn() }, useStore: (sel: (s: any) => unknown) => sel({ pageArgs: {} }) }));
 vi.mock("../components/StorageSettings", () => ({ StorageSettings: () => null }));
 
-import { Allowlist, Num, savableAllowRules, UnitySettings, validAllowRule } from "./Settings";
+import { Allowlist, ClaudeCodeSection, Num, savableAllowRules, UnitySettings, validAllowRule } from "./Settings";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => {
@@ -156,5 +156,43 @@ describe("UnitySettings", () => {
     render(<UnitySettings st={{ unity: {} }} save={vi.fn()} />);
     await act(async () => {});
     expect(screen.getByTestId("unity-cli").textContent).toContain("Not found");
+  });
+});
+
+describe("ClaudeCodeSection", () => {
+  const STATUS = { installed: true, path: "/opt/homebrew/bin/claude", version: "2.1.308 (Claude Code)", logged_in: false,
+    auth_method: "none", auth: { loggedIn: false }, bills_api: false, error: null, login_hint: "" };
+
+  it("shows the detected CLI and login status, and saves its settings", async () => {
+    vi.useRealTimers();
+    get.mockImplementation(async (p: string) => (p.startsWith("/claude-code/status") ? STATUS : null));
+    const save = vi.fn(async () => true);
+    render(<ClaudeCodeSection st={{ claude_code: { cli_path: "", load_user_mcp: false, setting_sources: "" } }} save={save} />);
+    await act(async () => {});
+    expect(get).toHaveBeenCalledWith("/claude-code/status");
+    expect(screen.getByTestId("claude-cli").textContent).toContain("/opt/homebrew/bin/claude");
+    expect(screen.getByTestId("claude-cli").textContent).toContain("2.1.308");
+    expect(screen.getByTestId("claude-login").textContent).toBe("Not logged in");
+    expect(screen.getByText("claude auth login")).toBeTruthy();
+    const sources = screen.getByLabelText("Claude Code setting sources") as HTMLSelectElement;
+    expect(sources.value).toBe("");
+    fireEvent.change(sources, { target: { value: "user" } });
+    expect(save).toHaveBeenLastCalledWith({ claude_code: { setting_sources: "user" } }, "Settings files");
+    fireEvent.click(screen.getByLabelText("Load my Claude Code MCP servers"));
+    expect(save).toHaveBeenLastCalledWith({ claude_code: { load_user_mcp: true } }, "Your MCP servers");
+    const path = screen.getByLabelText("claude CLI path");
+    fireEvent.change(path, { target: { value: "/usr/local/bin/claude" } });
+    await act(async () => { fireEvent.blur(path); });
+    expect(save).toHaveBeenCalledWith({ claude_code: { cli_path: "/usr/local/bin/claude" } }, "CLI path");
+    expect(get).toHaveBeenLastCalledWith("/claude-code/status?refresh=1"); // re-checked after the new path
+  });
+
+  it("says when the CLI is missing", async () => {
+    vi.useRealTimers();
+    get.mockImplementation(async () => ({ ...STATUS, installed: false, path: null, version: null, error: "The claude CLI wasn't found" }));
+    render(<ClaudeCodeSection st={{ claude_code: {} }} save={vi.fn()} />);
+    await act(async () => {});
+    expect(screen.getByTestId("claude-cli").textContent).toContain("wasn't found");
+    expect(screen.getByTestId("claude-login").textContent).toBe("claude CLI not found");
   });
 });

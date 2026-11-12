@@ -296,7 +296,7 @@ async def test_campaign_sessions_link_the_tasks_their_request_mentions(app, mgr,
 
 def test_schema_has_campaign_and_task_board_tables(tmp_path):
     db = DB(tmp_path / "s.db")
-    assert db.user_version() == SCHEMA_VERSION == 4
+    assert db.user_version() == SCHEMA_VERSION == 5  # v5: usage_records.billing (Claude Code subscription)
     names = {r["name"] for r in db.all("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"campaigns", "campaign_sessions", "fleet_waves", "fleet_units", "gate_runs", "task_boards",
             "board_tasks", "task_sessions"} <= names

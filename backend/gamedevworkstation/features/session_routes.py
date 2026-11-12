@@ -64,7 +64,7 @@ def context_breakdown(app: "AppState", sid: str) -> dict:
     est_total = sum(parts.values())
     # Calibrate against the last real request when we have one.
     last = app.db.one("SELECT input_tokens + cache_read_tokens + cache_write_tokens AS t, model FROM usage_records "
-                      "WHERE session_id=? AND role='main' AND ok=1 ORDER BY ts DESC LIMIT 1", [sid])
+                      "WHERE session_id=? AND role='main' AND ok=1 AND billing != 'subscription' ORDER BY ts DESC LIMIT 1", [sid])
     calibrated = False
     if last and last["t"] and est_total and last["model"] == s["model"]:
         f = last["t"] / est_total
@@ -121,8 +121,12 @@ def register(app: FastAPI, api: APIRouter, S: "AppState") -> None:
             sdk = True
         except ImportError:
             sdk = False
+        cc = S.extensions.get("claude_code")
+        cc_status = await cc.probe.status() if cc is not None else None  # type: ignore[attr-defined]  # cached 60 s
         return {
-            "harnesses": {"builtin": True, "agent_sdk": sdk, "codex_cli": bool(shutil.which("codex"))},
+            "harnesses": {"builtin": True, "agent_sdk": sdk, "codex_cli": bool(shutil.which("codex")),
+                          "claude_code": bool(cc_status and cc_status["installed"])},
+            "claude_code": cc_status,
             "accounts": {p: S.config.profiles(p) for p in ("anthropic", "openai", "elevenlabs")},
             "models": [{"id": k, "display_name": v.display_name, "provider": v.provider, "tier": S.config.tier_of(k),
                         "efforts": ["none", *v.efforts]}

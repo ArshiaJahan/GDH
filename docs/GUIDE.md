@@ -18,6 +18,7 @@ transcription, sound and music. Everything runs locally; the backend listens on 
 - [Task board](#task-board)
 - [Campaigns and workflows](#campaigns-and-workflows)
 - [Sessions](#sessions)
+- [Claude Code sessions](#claude-code-sessions)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [How delegation works](#how-delegation-works)
 - [Built-in skills](#built-in-skills) (and [Unity: MCP or CLI](#unity-mcp-or-cli))
@@ -39,6 +40,7 @@ transcription, sound and music. Everything runs locally; the backend listens on 
 | Node 20+ | builds the UI | `brew install node` |
 | uv | Python 3.11+ backend | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
 | Codex CLI (optional) | `codex.cli` subagents and the Codex CLI harness | `npm i -g @openai/codex` |
+| Claude Code (optional) | [Claude Code sessions](#claude-code-sessions) on your own Claude subscription | see code.claude.com, then `claude auth login` |
 | ffmpeg (optional) | the `trailer-maker` skill's edit, exports and checks (run as an external program, never bundled) | `brew install ffmpeg` |
 
 `make app` checks all of these first and prints exactly what is missing.
@@ -152,6 +154,10 @@ keep an explicit **Save**.
   `test_timeout_s`, `build_timeout_s`), `nographics`, `extra_editor_args` and `eval` (`ask` | `off`), `harness_scripts` (`ask` | `never`),
   `harness_git_exclude` (default `true`) and `clone_when_open` (`ask` | `never` | `always`).
   Settings → Unity edits it.
+- `[claude_code]` [Claude Code sessions](#claude-code-sessions): `cli_path` (empty: find `claude`),
+  `load_user_mcp` (default `false`), `setting_sources` (default `""`, safe mode), `pre_tool_hook`
+  (default `true`), `max_processes` (default 4) and `interrupt_wait_s` (default 5). Settings →
+  Claude Code edits it.
 - `[data_policy]` which providers may receive files you mark sensitive.
 - `[models."…"]` the model catalog: prices per million tokens, context windows, accepted effort
   levels, how each model expresses "no thinking", and a `display_name` (Opus 5.5, Sonnet 5.5,
@@ -680,6 +686,105 @@ stay in sync:
 | `POST /api/sessions/{id}/read`, `/unread`, `/title` | read state, regenerate title |
 | `GET /api/sessions/search?q=` | title and message matches; snippets mark matches with `\x02`…`\x03` |
 | `GET/POST /api/groups`, `PATCH/DELETE /api/groups/{id}`, `POST /api/groups/reorder` | groups |
+
+## Claude Code sessions
+
+**Experimental: not yet verified against a live logged-in CLI.**
+
+**What it is.** A session on the **Claude Code (subscription)** harness runs your own `claude` CLI
+(Claude Code, installed by you and never modified or bundled) inside GameDevWorkstation. You chat
+in the normal chat; Claude Code's own loop and tools do the work in the session folder (a worktree
+folder works too: the CLI runs there), and its replies, tool cards, approvals and usage show up like
+any other session. Pick it in a new session's **Run this session with** menu (shown until the first
+message) or in the side panel's Environment card → **Harness**.
+
+**Your login.** These sessions use the Claude account you logged in to with `claude auth login`.
+GameDevWorkstation passes no API key and never uses `--bare`. Every CLI process (including status
+probes) receives an env allowlist: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_*`, `TERM`,
+`TMPDIR`, `TZ`, `SSH_AUTH_SOCK`, proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `ALL_PROXY`,
+any case), `XDG_*`, and `__CF_USER_TEXT_ENCODING`, plus GDW's `MCP_TOOL_TIMEOUT`. All other variables,
+including provider credentials, `GDW_KEY_*`, `GDW_TOKEN` and arbitrary secrets, are excluded.
+**GameDevWorkstation never reads, copies or stores your tokens**: it doesn't open `~/.claude` or the
+Keychain entry, and it never runs the login for you.
+
+**Logging in.** Run `claude auth login` in a terminal (it opens your browser). Settings → Claude
+Code shows the CLI it found, its version and what `claude auth status` says. If a session isn't
+logged in, its reply is a card: *Run `claude auth login` in a terminal, then retry*, with **Retry**.
+Only the most recent login card offers Retry. If `claude auth status` reports an API key login,
+the session warns, records usage with `billing='api'`, and checks the normal spend limits before
+each turn; a reached limit refuses the turn. Subscription logins record `billing='subscription'`.
+
+**How resume works.** Each GameDevWorkstation session keeps one `claude -p` process running
+(stream-json in and out) with its own Claude Code conversation id. When the process ends (you quit
+the app, it crashed, or you changed the model, effort, mode or Claude Code settings), the next
+message starts it again with `--resume <id>`, so the conversation carries on. The session header
+shows `claude --resume <id>` with a copy button: paste it in a terminal to continue the same
+conversation in Claude Code itself. Sessions started this way don't appear in `claude --resume`'s
+picker, only by id. If the saved conversation is gone (Claude Code deletes old transcripts, after 30
+days by default), the session starts a new one with a short recap. `/clear` starts a new Claude Code
+conversation too.
+
+**GameDevWorkstation's tools.** Claude Code gets GameDevWorkstation's own tools as `mcp__gdw__*`
+through a small MCP server inside the backend: the task board (`task_*`), `unity`, saved items
+(`list_items`, `get_item`, `read_output`), `read_skill`, gates (`run_gate`), `view_image`,
+ElevenLabs, and the MCP servers you turned on for the session in Skills & MCP (MCP for Unity, ...).
+They run exactly as in the built-in loop: same approval cards, same Plan only refusals. Tools Claude
+Code already has (files, shell, web) and tools that need the built-in loop or an API key
+(subagents, waves, campaigns, `critique`, `web_search`) aren't offered. The server only answers on
+127.0.0.1, checks the Host and Origin headers, and each claude process gets its own random token (in
+a `0600` file in the session's data folder) that only works for that session and stops working when
+the process ends (the token is revoked); the MCP config file is then removed. Purging a GDW session removes only its
+`data_dir/claude_code/<session-id>/` folder. Your own Claude Code MCP servers and a folder's
+`.mcp.json` are excluded by `--strict-mcp-config` unless you turn on Settings → Claude Code →
+**Your MCP servers** (`[claude_code].load_user_mcp`); safe mode also disables customization loading.
+
+**Approvals and modes.** Every tool call passes GameDevWorkstation's checks first (a `PreToolUse`
+hook, on by default: folder scope, sensitive files, git metadata, the before-write snapshot for the Changes card),
+then the usual cards: edits in Ask, commands, and anything else Claude Code would ask about (through
+`--permission-prompt-tool mcp__gdw__approve`). Questions Claude Code asks you get a card with its
+options. Ask runs Claude Code in `manual`, Accept edits in `acceptEdits` and Plan only in `plan`; in
+Plan known file edits and Bash commands are refused, and approving Claude Code's plan card switches the session to
+Ask. Unrecognized non-GDW tools still get an approval card in Plan mode; the harness cannot classify
+their effects. GameDevWorkstation never starts Claude Code in `bypassPermissions`, `dontAsk` or `auto`.
+Hook registration failure, timeout or cancellation ends the process with an error; there is no silent
+fallback. An explicit `pre_tool_hook=false` disables that hook.
+
+**Settings isolation.** **Settings files** defaults to **None (safe mode: your ~/.claude hooks,
+plugins and settings files are ignored)**. This passes `--safe-mode`, disabling custom `CLAUDE.md`,
+skills, installed plugins, hooks, MCP servers, custom commands and agents, and output styles.
+Admin-managed policies still apply; auth, model selection, built-in tools and plugins, and permissions
+work normally. Selecting a subset of `user,project,local` instead passes `--setting-sources=<list>`
+and omits safe mode. Startup fails closed if the CLI reports hooks or plugins (even with explicit
+setting sources), or if an MCP server
+other than `gdw` appears while **Your MCP servers** is off; missing fields are accepted. GDW explicitly
+adds the session folder's `CLAUDE.md`, enabled GDW skills and context pack to the appended system
+prompt, capped at 64 KB with a truncation note. CLI stderr and errors redact bearer tokens and API keys.
+
+**Usage.** Each turn records the change in Claude Code's reported tokens and cost. The cost is
+Claude Code's own estimate: for subscription logins, My usage shows it as **Claude subscription
+(estimated)**, outside daily and session spend limits. API key logins record API spend and use those
+limits. Totals retain their conversation id and process pid: after a restart a smaller total counts
+in full, while continuing conversation totals contribute only their increase. Your plan's real limits
+(its usage windows) aren't visible to GameDevWorkstation; when Claude Code reports a rate limit the
+chat shows it retrying.
+
+**Limits.** Stop sends Claude Code an interrupt (then SIGINT, then ends the process). Subagents,
+delegation, fleet waves, campaigns and workflows need the built-in loop. GameDevWorkstation's
+compaction and context meter don't apply (Claude Code compacts by itself). Changes to the system
+prompt (mode notes, skills, `CLAUDE.md`) reach a resumed conversation only when it starts anew,
+because Claude Code keeps the first one. Messages of Claude Code's own subagents go to the turn's log
+in Background tasks, not the chat. Some wire details (the permission prompt's exact JSON, `claude
+auth status` when logged in) couldn't be checked on a logged-in machine yet and are read
+defensively; see Troubleshooting if a session misbehaves after a Claude Code update.
+
+**Anthropic's policy.** Anthropic's legal and compliance page for Claude Code allows an end user to
+sign in to the unmodified Claude Code binary with their own subscription, while products built for
+other people should use API keys, and developers "may not collect, store, or intermediate Claude.ai
+credentials or session tokens". Plan limits assume ordinary, individual use. GameDevWorkstation
+keeps to that: it is a personal app on your own Mac, it launches only your installed `claude`, it
+never touches your credentials, and you drive one turn at a time. Don't share these sessions with
+other people or use them for automated bulk work, and re-read that page
+(code.claude.com/docs/en/legal-and-compliance) before using it any other way.
 
 ## Keyboard shortcuts
 
@@ -1235,6 +1340,13 @@ The data and log folders are owner-only (0700) and the database, config, `runtim
 - **Microphone** — macOS asks the first time you press Record. To change it later, go to System
   Settings → Privacy & Security → Microphone.
 - **Codex CLI harness shows "not installed"** — run `npm i -g @openai/codex`, then restart the app.
+- **Claude Code (subscription) shows "not installed" or "Not logged in"** — Settings → Claude Code
+  shows which `claude` it found (set **CLI path** if it's somewhere else) and the result of
+  `claude auth status`. Log in with `claude auth login` in a terminal, then press **Retry** on the
+  card. If a session stops working after a Claude Code update, the turn's log in Background tasks
+  and the error card show the CLI's redacted message. Hook initialization failure ends the process
+  with an error, without silently falling back. The feature is experimental: not yet verified against
+  a live logged-in CLI.
 - **Trailer: "ffmpeg not found"** (exit code 3) — `brew install ffmpeg`, or set `TRAILER_FFMPEG` to the ffmpeg
   binary. `python3 skills/trailer-maker/scripts/trailer_edl.py doctor` shows what it found.
 - **Trailer: the Recorder never starts** — the Editor was in batchmode (use the GUI editor), the project has compile

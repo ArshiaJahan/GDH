@@ -49,10 +49,30 @@ Everything runs locally; the backend listens on `127.0.0.1` only.
 | **Fleet** | Parallel waves of subagents in their own worktrees, each with a claimed scope, scope-checked merges, a conflict circuit breaker and discoveries relayed to the next wave. |
 | **Progressive skill disclosure** | A compact skill index in the system prompt; full skill text is loaded only when used and survives compaction. |
 | **Task board** | A Kanban board (Tasks tab) you and the agent share: tasks with codes like `Task00001`, subtasks and checklists, comments, history and linked sessions, live updates. In chat: `/task new`, `/task <code>`, `/task move`, `/task done`, `/task list`, `/task link`; the agent uses `task_*` tools. Scheduled prompts live on the Schedule page. |
+| **Claude Code sessions** | Experimental: not yet verified against a live logged-in CLI. Run your own `claude` CLI and login, with GDW tools, approvals, Plan mode and `--resume`. Subscription estimates stay outside spend limits; API key logins record `billing='api'` and check spend limits before each turn. See [Claude Code sessions](docs/GUIDE.md#claude-code-sessions). |
 | **Cost control** | Daily and per-session spend limits, job budgets, approval for high effort, and a My usage page per model. |
 | **Trailer maker** | Brief → beat sheet → scripted Play Mode capture (Unity Recorder) → ffmpeg edit from a JSON edit list → ElevenLabs music cut to the beat sheet → three reviewers → Steam, YouTube and vertical exports. |
 | **ElevenLabs** | Speech, transcription, sound effects and music (including composition plans with exact section lengths), in chat and on their own page. |
 | **Native shell, local updates** | Tauri v2 app with a frozen FastAPI backend, keys in the macOS Keychain and in-app updates from a local folder. |
+
+### Claude Code sessions
+
+Experimental: not yet verified against a live logged-in CLI. Settings files default to
+**None (safe mode: your ~/.claude hooks, plugins and settings files are ignored)**, using
+`--safe-mode`. This disables custom CLAUDE.md, skills, installed plugins, hooks, MCP servers,
+commands, agents and output styles; admin policies still apply, and auth, model selection,
+built-in tools and plugins, and permissions work normally. Choosing `user,project,local` sources
+uses `--setting-sources=<list>` instead. Strict MCP config remains on unless you enable your MCP
+servers. GDW adds its own CLAUDE.md/skills context explicitly, with a 64 KB prompt cap.
+
+The CLI env allowlist keeps only shell/locale variables (`PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`,
+`LANG`, `LC_*`, `TERM`, `TMPDIR`, `TZ`), `SSH_AUTH_SOCK`, HTTP/HTTPS/NO/ALL proxy variables in any
+case, `XDG_*`, `__CF_USER_TEXT_ENCODING`, plus GDW's `MCP_TOOL_TIMEOUT`. Credentials and arbitrary
+secrets are excluded. Each process's MCP bearer token is revoked and its config file removed when
+the process ends. Hook registration failure ends the process with an error, without silent fallback.
+Plan mode blocks known file edits and commands; other non-GDW tools receive an approval card.
+Subscription logins record estimates outside spend limits; CLI API key logins record `billing='api'`
+and check normal spend limits before each turn. See the [guide](docs/GUIDE.md#claude-code-sessions).
 
 ## Built for Unity
 

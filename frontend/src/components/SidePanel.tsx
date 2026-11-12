@@ -9,6 +9,7 @@ import { GalleryCard } from "./cards/GalleryCard";
 import { ConnectorsCard, SharedToolsCard } from "./cards/ConnectorsCard";
 import { OutputsCard } from "./cards/OutputsCard";
 import { QualityCard } from "./cards/QualityCard";
+import { HarnessSelect, loginLabel } from "./ClaudeCode";
 import { pickFolder } from "../lib/native";
 import { EffortMeter, fmtDuration, fmtTokens, fmtUsd, isTier, modelLabel, modelName, providerLabel, providerOf, tiersOf, useModelCatalog } from "./ui";
 
@@ -53,7 +54,6 @@ export function SidePanel() {
 // ------------------------------------------------------------------ environment
 
 const MODES = [["ask", "Ask before edits"], ["accept_edits", "Accept edits"], ["plan", "Plan only"]];
-const HARNESS = [["builtin", "Built-in loop"], ["agent_sdk", "Claude Agent SDK"], ["codex_cli", "Codex CLI"]];
 const EFFORTS = ["none", "low", "medium", "high", "xhigh", "max"];
 const ACCOUNT_PROVIDERS = ["anthropic", "openai", "elevenlabs"].map((p) => [p, providerLabel(p)]);
 
@@ -158,12 +158,14 @@ function EnvironmentCard({ s }: { s: Session }) {
         </select>
       </Row>
       <Row label="Harness">
-        <select className="input py-0.5" value={s.harness} disabled={running || !!campaign} onChange={(e) => upd({ harness: e.target.value })} aria-label="Harness"
-          title={campaign ? `This session runs ${campaign}: campaigns and workflows use the built-in loop` : undefined}>
-          {HARNESS.map(([v, l]) => (
-            <option key={v} value={v} disabled={env && !env.harnesses[v]} title={harnessLabel(v, l, s, env, true)}>{harnessLabel(v, l, s, env)}{env && !env.harnesses[v] ? " (not installed)" : ""}</option>
-          ))}
-        </select>
+        <HarnessSelect value={s.harness} disabled={running || !!campaign} onChange={(v) => upd({ harness: v })} available={env?.harnesses}
+          title={campaign ? `This session runs ${campaign}: campaigns and workflows use the built-in loop` : undefined}
+          label={(v, l, full) => harnessLabel(v, l, s, env, full)} />
+        {s.harness === "claude_code" && env?.claude_code && (
+          <div className={`mt-1 text-[12px] ${env.claude_code.logged_in ? "text-faint" : "text-warn"}`} data-testid="claude-login-status">
+            {loginLabel(env.claude_code)}{env.claude_code.installed && !env.claude_code.logged_in ? ": run claude auth login in a terminal" : " · your Claude plan"}
+          </div>
+        )}
       </Row>
     </Card>
   );

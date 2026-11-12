@@ -3,6 +3,8 @@
 - builtin: GameDevWorkstation's own loop (agent/loop.py) — supports subagents, delegation, ElevenLabs, MCP.
 - agent_sdk: the Claude Agent SDK (Claude Code's loop and tools) in the session folder.
 - codex_cli: `codex exec` in the session folder, resumed across turns.
+- claude_code: the user's own `claude` CLI, logged in with their subscription, one long-lived
+  stream-json process per session (features/claude_code.py).
 
 Both keep the transcript in GameDevWorkstation's own format (tool calls paired with results), so a
 session can switch harness while idle.
@@ -15,7 +17,7 @@ import os
 import shutil
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, AsyncIterator
+from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable
 
 from fastapi import APIRouter, FastAPI
 
@@ -104,6 +106,69 @@ def _prompt_text(msg: Message) -> str:
     return "\n\n".join(parts)
 
 
+def make_gate(app: "AppState", session: Callable[[], dict], cwd: Path,
+              touched: list[Path]) -> Callable[[str, dict], Awaitable[str | None]]:
+    """GameDevWorkstation's decision for one Claude Code tool call (Agent SDK and claude_code harnesses):
+    the returned gate(name, input) is None to allow, else the reason it's refused.
+    Folder scope, data policy, Plan mode, git metadata, the before-write snapshot and the approval
+    cards all live here. `session()` gives the session as it is now (its mode can change mid-turn);
+    files about to be written are appended to `touched` (for changes.notify after the turn)."""
+    sid = session()["id"]
+    roots = [cwd.resolve(), app.worktrees_root(sid).resolve()]
+
+    def full_path(path_str: str) -> Path:
+        p = Path(path_str).expanduser()
+        return (p if p.is_absolute() else cwd / p).resolve()
+
+    def inside(path_str: str | None) -> bool:
+        if not path_str:
+            return True  # tools default to the working folder
+        full = full_path(path_str)
+        return any(full == r or r in full.parents for r in roots)
+
+    async def gate(name: str, inp: dict) -> str | None:
+        s = session()
+        target = inp.get("file_path") or inp.get("path") or inp.get("notebook_path")
+        if name in READ_ONLY_SDK_TOOLS | EDIT_SDK_TOOLS and not inside(target):
+            return f"{target} is outside the session folder."
+        if name in READ_ONLY_SDK_TOOLS:
+            if target and not app.policy.allows_path(full_path(target), "anthropic"):
+                return "That file is marked sensitive."
+            return None
+        if name in WEB_FETCH_SDK_TOOLS:
+            return await _web_fetch_refusal(str(inp.get("url") or ""))
+        if name in EDIT_SDK_TOOLS:
+            if s["mode"] == "plan":
+                return "Plan only mode: no edits."
+            full = full_path(target) if target else None
+            if full and (in_git_metadata(full) or in_git_metadata(target)):
+                return GIT_WRITE_REFUSED.format(path=target)
+            if not (s["mode"] == "accept_edits" or app.approvals.allowlisted("edit", str(full or ""))):
+                res = await app.approvals.ask(sid, "edit", {
+                    "subject": target or name, "path": target, "action": name.lower(),
+                    "old": str(inp.get("old_string", ""))[:500],
+                    "new": str(inp.get("new_string", inp.get("content", "")))[:500]})
+                if res["status"] != "approved":
+                    return "The user declined."
+            if full:
+                app.changes.snapshot(sid, full)  # for the Changes card's diff and revert
+                touched.append(full)
+            return None
+        if name == "Bash":
+            cmd = inp.get("command", "")
+            if s["mode"] == "plan":
+                return "Plan only mode: no commands."
+            if app.approvals.allowlisted("run_command", cmd):
+                return None
+            res = await app.approvals.ask(sid, "command", {"subject": cmd, "command": cmd, "cwd": str(cwd)})
+        else:
+            res = await app.approvals.ask(sid, "command", {"subject": name, "command": f"{name} {json.dumps(inp)[:300]}",
+                                                           "cwd": str(cwd)})
+        return None if res["status"] == "approved" else "The user declined."
+
+    return gate
+
+
 class Harnesses:
     def __init__(self, app: "AppState"):
         self.app = app
@@ -114,6 +179,8 @@ class Harnesses:
             await self._agent_sdk(session)
         elif h == "codex_cli":
             await self._codex_cli(session)
+        elif h == "claude_code" and (cc := self.app.extensions.get("claude_code")) is not None:
+            await cc.run_turn(session)  # type: ignore[attr-defined]  # features/claude_code.py
         else:
             raise ValueError(f"unknown harness {h}")
 
@@ -170,61 +237,8 @@ class Harnesses:
         resume = s["settings"].get("agent_sdk_session")
         prompt = self._prompt(sid, recap=not resume)  # a new SDK session hasn't seen the earlier turns
         cwd = _cwd(s)
-        roots = [cwd.resolve(), app.worktrees_root(sid).resolve()]
         touched: list[Path] = []
-
-        def full_path(path_str: str) -> Path:
-            p = Path(path_str).expanduser()
-            return (p if p.is_absolute() else cwd / p).resolve()
-
-        def inside(path_str: str | None) -> bool:
-            if not path_str:
-                return True  # tools default to the working folder
-            full = full_path(path_str)
-            return any(full == r or r in full.parents for r in roots)
-
-        async def gate(name: str, inp: dict) -> str | None:
-            """GameDevWorkstation's decision for one SDK tool call: None to allow, else the reason it's refused.
-            Folder scope, data policy, Plan mode, git metadata, the before-write snapshot and the
-            approval cards all live here; the PreToolUse hook calls it for every tool call (so
-            acceptEdits and the CLI's own auto-allow rules can't skip it) and can_use_tool repeats it."""
-            target = inp.get("file_path") or inp.get("path") or inp.get("notebook_path")
-            if name in READ_ONLY_SDK_TOOLS | EDIT_SDK_TOOLS and not inside(target):
-                return f"{target} is outside the session folder."
-            if name in READ_ONLY_SDK_TOOLS:
-                if target and not app.policy.allows_path(full_path(target), "anthropic"):
-                    return "That file is marked sensitive."
-                return None
-            if name in WEB_FETCH_SDK_TOOLS:
-                return await _web_fetch_refusal(str(inp.get("url") or ""))
-            if name in EDIT_SDK_TOOLS:
-                if s["mode"] == "plan":
-                    return "Plan only mode: no edits."
-                full = full_path(target) if target else None
-                if full and (in_git_metadata(full) or in_git_metadata(target)):
-                    return GIT_WRITE_REFUSED.format(path=target)
-                if not (s["mode"] == "accept_edits" or app.approvals.allowlisted("edit", str(full or ""))):
-                    res = await app.approvals.ask(sid, "edit", {
-                        "subject": target or name, "path": target, "action": name.lower(),
-                        "old": str(inp.get("old_string", ""))[:500],
-                        "new": str(inp.get("new_string", inp.get("content", "")))[:500]})
-                    if res["status"] != "approved":
-                        return "The user declined."
-                if full:
-                    app.changes.snapshot(sid, full)  # for the Changes card's diff and revert
-                    touched.append(full)
-                return None
-            if name == "Bash":
-                cmd = inp.get("command", "")
-                if s["mode"] == "plan":
-                    return "Plan only mode: no commands."
-                if app.approvals.allowlisted("run_command", cmd):
-                    return None
-                res = await app.approvals.ask(sid, "command", {"subject": cmd, "command": cmd, "cwd": str(cwd)})
-            else:
-                res = await app.approvals.ask(sid, "command", {"subject": name, "command": f"{name} {json.dumps(inp)[:300]}",
-                                                               "cwd": str(cwd)})
-            return None if res["status"] == "approved" else "The user declined."
+        gate = make_gate(app, lambda: s, cwd, touched)
 
         async def pre_tool_use(data: Any, _tool_use_id: str | None, _ctx: Any) -> dict:
             name = data.get("tool_name", "")

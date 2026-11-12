@@ -49,6 +49,9 @@ class AppState:
         # Short notes for the main agent's system prompt, each fn(session) -> str | None (e.g. the
         # task board's). They must depend only on the session, so the cached prompt stays the same.
         self.prompt_notes: list = []
+        # The port this backend listens on (set by __main__), for local callbacks such as the MCP
+        # server Claude Code sessions reach GameDevWorkstation's tools through (features/gdw_mcp.py).
+        self.listen_port: int | None = None
 
     def worktrees_root(self, session_id: str) -> Path:
         return data_dir() / "worktrees" / session_id

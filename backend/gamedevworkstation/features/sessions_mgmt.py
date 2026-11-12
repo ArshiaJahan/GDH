@@ -31,6 +31,8 @@ async def halt_session(app: "AppState", sid: str) -> None:
     if task and not task.done():
         await asyncio.wait([task], timeout=5)
     app.approvals.expire_session(sid)
+    if (cc := app.extensions.get("claude_code")) is not None:
+        await cc.close_session(sid)  # type: ignore[attr-defined]  # its claude process (the conversation stays resumable)
     for j in app.jobs.list(sid, limit=500):
         if j["status"] in ("running", "queued"):
             await app.jobs.cancel(j["id"])
@@ -42,6 +44,8 @@ async def purge_session(app: "AppState", sid: str) -> None:
     from .worktrees import cleanup_session
 
     await halt_session(app, sid)
+    if (cc := app.extensions.get("claude_code")) is not None:
+        await cc.purge_session(sid)
     app.store.delete(sid)
     # Its gate results go with it; campaigns survive, keeping the session in their history (ended).
     app.db.execute("DELETE FROM gate_runs WHERE session_id=?", [sid])
@@ -186,7 +190,13 @@ class TrashJanitor:
         from .worktrees import cleanup_session
 
         ids = self.run_once()
+        cc = self.app.extensions.get("claude_code")
         for sid in ids:
+            if cc is not None:
+                try:
+                    await cc.close_session(sid)  # type: ignore[attr-defined]  # any leftover claude process
+                except Exception:  # noqa: BLE001
+                    pass
             await cleanup_session(self.app, sid)
         return ids
 

@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from ..app import AppState
 
 EDITABLE = {"orchestrator", "tiers", "delegation", "limits", "elevenlabs", "modes", "data_policy", "appearance", "updates",
-            "skills", "hooks", "ladder", "campaigns", "fleet", "unity"}
+            "skills", "hooks", "ladder", "campaigns", "fleet", "unity", "claude_code"}
 BG_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".m4v", ".mov", ".webm"}
 
 
@@ -29,7 +29,7 @@ CHOICES = {("skills", "disclosure"): ("progressive", "full"), ("campaigns", "han
 
 # Sections that never change which keys, profiles or models the providers use: saving only
 # these keeps the provider clients (and their connection pools) as they are.
-NO_PROVIDER_RESET = {"appearance", "skills", "hooks", "ladder", "campaigns", "fleet", "unity"}
+NO_PROVIDER_RESET = {"appearance", "skills", "hooks", "ladder", "campaigns", "fleet", "unity", "claude_code"}
 
 
 def _apply(app: "AppState", new: Config, reset_providers: bool = True) -> None:
@@ -103,10 +103,17 @@ def register(app_: FastAPI, api: APIRouter, S: "AppState") -> None:
             v = (body.get(sec) or {}).get(key) if isinstance(body.get(sec), dict) else None
             if v is not None and v not in allowed:
                 raise HTTPException(400, f"{sec}.{key} must be one of: {', '.join(allowed)}")
+        if isinstance(cc := body.get("claude_code"), dict) and "setting_sources" in cc:
+            from .claude_code import valid_setting_sources
+
+            if not valid_setting_sources(cc["setting_sources"]):
+                raise HTTPException(400, "claude_code.setting_sources: empty, or a comma-separated list of user, project, local")
         if "orchestrator" in body and body["orchestrator"].get("effort") in ("xhigh", "max"):
             raise HTTPException(400, "The default orchestrator effort can be high at most; raise it per session instead.")
         get_config.cache_clear()
         _apply(S, save_config_patch(body), reset_providers=not set(body) <= NO_PROVIDER_RESET)
+        if "claude_code" in body and (cc_ext := S.extensions.get("claude_code")) is not None:
+            cc_ext.settings_changed()  # type: ignore[attr-defined]  # a new CLI path is probed again
         S.bus.publish("settings.updated", {"sections": list(body)})
         return await settings()
 

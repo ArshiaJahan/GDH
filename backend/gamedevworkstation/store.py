@@ -21,7 +21,8 @@ SESSION_FIELDS = ("title", "pinned", "folder", "model", "effort", "account", "mo
                   "group_id", "sort_order", "last_error")
 # Settings that belong to one session only: provider resume ids, the scheduled task that made it,
 # and where its title came from. Duplicates and forks don't copy them.
-NOT_COPIED = ("agent_sdk_session", "codex_thread", "scheduled_task", "title_source")
+NOT_COPIED = ("agent_sdk_session", "codex_thread", "claude_code_session", "claude_code_totals", "claude_code_since",
+              "claude_code_sent", "scheduled_task", "title_source")
 MAX_CLEARS = 100  # /clear times kept in settings.cleared_at (for forks from before a clear)
 GROUP_COLORS = ("gray", "blue", "teal", "green", "yellow", "orange", "red", "violet")
 VIEWS = {  # GET /api/sessions?view=
@@ -32,6 +33,20 @@ VIEWS = {  # GET /api/sessions?view=
 }
 ORDER = "pinned DESC, CASE WHEN pinned THEN sort_order ELSE 0 END, COALESCE(activity_at, created_at) DESC"
 SNIPPET_MARKS = ("\x02", "\x03")  # match start/end in search snippets (the UI highlights them; no HTML)
+
+
+def valid_claude_code_session(value: Any) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f-]{36}", value, re.I) is not None
+
+
+def _claude_settings(settings: dict) -> dict:
+    settings = dict(settings)
+    if settings.get("claude_code_session") is not None and not valid_claude_code_session(settings["claude_code_session"]):
+        settings.pop("claude_code_session")
+    totals = settings.get("claude_code_totals")
+    if isinstance(totals, dict) and totals.get("session_id") is not None and not valid_claude_code_session(totals["session_id"]):
+        settings.pop("claude_code_totals")
+    return settings
 
 
 def _session_row(r: dict) -> dict:
@@ -57,6 +72,16 @@ def fts_query(q: str) -> str | None:
     return " ".join(f'"{w}"' for w in words[:-1]) + (" " if len(words) > 1 else "") + f'"{words[-1]}"*'
 
 
+def remove_claude_code_folder(sid: str) -> None:
+    """Remove data_dir/claude_code/<sid>/, only if it resolves inside data_dir/claude_code."""
+    from .config import data_dir
+
+    root = (data_dir() / "claude_code").resolve()
+    folder = (root / sid).resolve()
+    if folder != root and folder.is_relative_to(root) and folder.is_dir():
+        shutil.rmtree(folder, ignore_errors=True)
+
+
 class SessionStore:
     def __init__(self, db: DB, bus: EventBus, config: Config):
         self.db, self.bus, self.config = db, bus, config
@@ -65,6 +90,7 @@ class SessionStore:
 
     def create(self, title: str = "New session", folder: str | None = None, model: str | None = None,
                effort: str | None = None, mode: str | None = None, **settings: Any) -> dict:
+        settings = _claude_settings(settings)
         o = self.config.orchestrator
         global_skills = self.db.kv_get("skills_global", ["delegation"])
         if "skill_mode" not in settings:  # a caller choosing the mode brings its own skill settings
@@ -123,7 +149,7 @@ class SessionStore:
         if upd.get("model"):
             upd["model"] = self.config.resolve(upd["model"])
         if "settings" in fields or "accounts" in fields or "account" in upd:
-            new = {**cur["settings"], **(fields.get("settings") or {})}
+            new = _claude_settings({**cur["settings"], **_claude_settings(fields.get("settings") or {})})
             # Profile choices per provider: merged, not replaced; `account` mirrors the Anthropic one.
             accounts = {**self.config.session_accounts(cur), **((fields.get("settings") or {}).get("accounts") or {}),
                         **(fields.get("accounts") or {})}
@@ -199,6 +225,7 @@ class SessionStore:
                 (jdir / f"{jid}.log").unlink(missing_ok=True)
         if Path(sid).name == sid and sid:
             shutil.rmtree(sessions_dir() / sid, ignore_errors=True)
+        remove_claude_code_folder(sid)
         self.bus.publish("session.deleted", {"id": sid}, sid)
 
     def _file_in_use(self, path: str) -> bool:

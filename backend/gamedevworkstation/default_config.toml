@@ -197,6 +197,22 @@ screenshot_tier = "claude.standard" # its model tier (Sonnet); any tier or model
 screenshot_max_turns = 12           # its turn budget
 screenshot_timeout_s = 900          # bounds the whole request, including the side agent and batch render
 
+[claude_code]
+# "Claude Code (subscription)" sessions: your own `claude` CLI, logged in with your own Claude
+# account (`claude auth login` in a terminal). GameDevWorkstation never reads your tokens and
+# passes no API key: usage counts against your Claude plan, not the API spend limits.
+cli_path = ""                       # "" = find it (PATH, ~/.local/bin, ~/.claude/local, /opt/homebrew/bin)
+# load_user_mcp: false = only GameDevWorkstation's own tools (task board, unity, items, ...) reach the
+#   session (--strict-mcp-config); true = also your ~/.claude MCP servers and the folder's .mcp.json.
+load_user_mcp = false
+# setting_sources: which Claude Code settings files load (--setting-sources). "" = none (safest: your
+#   ~/.claude hooks, allow rules and env, and a project's .claude/settings.json, don't apply), or a
+#   comma-separated list of user, project, local.
+setting_sources = ""
+pre_tool_hook = true                # every tool call also passes GameDevWorkstation's checks (PreToolUse hook)
+max_processes = 4                   # live claude processes; the least recently used idle one is closed first
+interrupt_wait_s = 5                # Stop: wait this long after the interrupt before SIGINT, then the same before a kill
+
 # ------------------------------------------------------------------ model catalog
 # Prices are USD per million tokens. `no_thinking` is how this model expresses the
 # "none" effort level: "disabled", "between_tools", or "" (can't turn thinking off;

@@ -19,7 +19,7 @@ def _feature_modules() -> list:
 
     names = [f"gamedevworkstation.features.{n}" for n in (
         "usage_routes", "session_routes", "subagents", "delegation", "terminal", "elevenlabs_feature",
-        "items_routes", "changes_routes", "worktrees", "web_tools", "mcp_feature", "skill_editor", "skill_assistant", "tasks_feature", "task_board", "harnesses", "settings_routes", "updates",
+        "items_routes", "changes_routes", "worktrees", "web_tools", "mcp_feature", "skill_editor", "skill_assistant", "tasks_feature", "task_board", "harnesses", "claude_code", "settings_routes", "updates",
         "storage",
         # Hooks & gates, quality ladder, campaigns, fleet: added by later work packages; a module
         # that doesn't exist yet is skipped below.

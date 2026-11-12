@@ -6,9 +6,10 @@ import { modelLabel, providerLabel, providerRank } from "../components/ui";
 import { fmtBuilt, Inline, installUpdate, Notes, updateHeadline, type UpdatesStatus } from "../components/Updates";
 import { revealInFinder } from "../lib/native";
 import { StorageSettings } from "../components/StorageSettings";
+import { ClaudeCodeSettings } from "../components/ClaudeCode";
 
 const SECTIONS = [["accounts", "Accounts"], ["models", "Models and effort"], ["delegation", "Delegation and budgets"], ["modes", "Modes and approvals"],
-  ["data", "Data policy"], ["elevenlabs", "ElevenLabs defaults"], ["unity", "Unity"], ["appearance", "Appearance"], ["storage", "Storage"], ["about", "About & updates"]];
+  ["data", "Data policy"], ["elevenlabs", "ElevenLabs defaults"], ["unity", "Unity"], ["claude_code", "Claude Code"], ["appearance", "Appearance"], ["storage", "Storage"], ["about", "About & updates"]];
 const PROVIDER_NAME: Record<string, string> = { anthropic: providerLabel("anthropic"), openai: providerLabel("openai"), elevenlabs: providerLabel("elevenlabs") };
 
 /** A provider's configured models by real name, each with the tiers routing to it:
@@ -64,6 +65,7 @@ export function SettingsPage() {
           {section === "data" && <DataPolicy st={st} save={save} />}
           {section === "elevenlabs" && <ElevenDefaults st={st} save={save} />}
           {section === "unity" && <UnitySettings st={st} save={save} />}
+          {section === "claude_code" && <ClaudeCodeSection st={st} save={save} />}
           {section === "appearance" && <Appearance st={st} save={save} reload={load} />}
           {section === "storage" && <StorageSettings />}
           {section === "about" && <About />}
@@ -413,6 +415,11 @@ function TextSetting({ value, onSave, label, placeholder }: { value: string; onS
   const commit = () => { if (v !== value) onSave(v); };
   return <input className="input flex-1 font-mono text-[12.5px]" value={v} aria-label={label} placeholder={placeholder} spellCheck={false}
     onChange={(e) => setV(e.target.value)} onBlur={commit} onKeyDown={(e) => e.key === "Enter" && commit()} />;
+}
+
+/** Settings → Claude Code (components/ClaudeCode.tsx) with this page's rows and text fields. */
+export function ClaudeCodeSection({ st, save }: { st: any; save: Save }) {
+  return <ClaudeCodeSettings st={st} save={save} Row={Row} TextSetting={TextSetting} />;
 }
 
 export function UnitySettings({ st, save }: { st: any; save: Save }) {

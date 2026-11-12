@@ -7,6 +7,9 @@ Limits:
   limit's worth of spend today.
 - `session_usd`: the same for one session's total spend; "Resume anyway" (`resume_session`) allows
   another limit's worth for that session.
+Only API-billed records count (billing = "api"). Claude Code sessions on the user's own Claude
+subscription record billing = "subscription": their cost is the CLI's estimate, shown on the Usage
+page as "Claude subscription (estimated)" and never counted against these limits.
 Pausing and resuming publish `limits.paused` / `limits.resumed` (session-scoped for session limits).
 """
 from __future__ import annotations
@@ -19,6 +22,11 @@ from .config import Config
 from .core.types import RateLimits, Usage
 from .db import DB
 from .events import EventBus
+
+
+BILLING = ("api", "subscription")
+# Spend that counts against the limits: API-billed records only (subscription rows are estimates).
+BILLED = "billing != 'subscription'"
 
 
 class BudgetExceeded(RuntimeError):
@@ -47,7 +55,10 @@ class UsageTracker:
                profile: str = "default", role: str = "main", run_id: str | None = None,
                effort: str | None = None, feature: str = "chat", voice: str | None = None,
                latency_ms: int = 0, ok: bool = True, error_kind: str | None = None,
-               context_fill: float | None = None, rate_limits: RateLimits | None = None) -> dict:
+               context_fill: float | None = None, rate_limits: RateLimits | None = None,
+               billing: str = "api") -> dict:
+        """billing: "api" (counts against the spend limits) or "subscription" (the user's own Claude
+        login through the claude_code harness: cost_usd is an estimate and never counts)."""
         row: dict[str, Any] = {
             "ts": time.time(), "session_id": session_id, "provider": provider, "profile": profile,
             "model": model, "role": role, "run_id": run_id, "effort": effort, "feature": feature, "voice": voice,
@@ -57,6 +68,7 @@ class UsageTracker:
             "cost_usd": usage.cost_usd, "latency_ms": latency_ms, "ok": int(ok), "error_kind": error_kind,
             "context_fill": context_fill,
             "rate_limits": json.dumps(rate_limits.model_dump(exclude_none=True)) if rate_limits else None,
+            "billing": billing if billing in BILLING else "api",
         }
         row["id"] = self.db.insert("usage_records", row)
         self.bus.publish("usage.recorded", row, session_id)
@@ -66,15 +78,15 @@ class UsageTracker:
     # ------------------------------------------------------------------ limits
 
     def spent_today(self) -> float:
-        r = self.db.one("SELECT COALESCE(SUM(cost_usd),0) AS c FROM usage_records WHERE ts >= ?", [_day_start()])
+        r = self.db.one(f"SELECT COALESCE(SUM(cost_usd),0) AS c FROM usage_records WHERE ts >= ? AND {BILLED}", [_day_start()])
         return r["c"]
 
     def spent_session(self, sid: str) -> float:
-        r = self.db.one("SELECT COALESCE(SUM(cost_usd),0) AS c FROM usage_records WHERE session_id=?", [sid])
+        r = self.db.one(f"SELECT COALESCE(SUM(cost_usd),0) AS c FROM usage_records WHERE session_id=? AND {BILLED}", [sid])
         return r["c"]
 
     def spent_run(self, run_id: str) -> float:
-        r = self.db.one("SELECT COALESCE(SUM(cost_usd),0) AS c FROM usage_records WHERE run_id=?", [run_id])
+        r = self.db.one(f"SELECT COALESCE(SUM(cost_usd),0) AS c FROM usage_records WHERE run_id=? AND {BILLED}", [run_id])
         return r["c"]
 
     def _roll_day(self) -> None:

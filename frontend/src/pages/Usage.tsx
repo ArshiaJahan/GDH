@@ -162,17 +162,18 @@ export function UsagePage() {
           </select>
         </div>
 
-        {savings && savings.actual > 0 && (
+        {savings && (savings.actual > 0 || savings.subscription_estimated > 0) && (
           <section className="rounded-md border border-line surface px-4 py-3 flex flex-wrap items-baseline gap-x-8 gap-y-1">
             <div><div className="label">Spent</div><div className="text-xl font-semibold">{fmtUsd(savings.actual)}</div></div>
             <div><div className="label">If {modelLabel(savings.orchestrator_model)} had done it all</div><div className="text-xl">{fmtUsd(savings.estimated_without_delegation)}</div></div>
             <div><div className="label">Delegation saved</div><div className="text-xl" style={{ color: savings.saved >= 0 ? "var(--ok)" : "var(--bad)" }}>{fmtUsd(savings.saved)}</div></div>
+            {savings.subscription_estimated > 0 && <div><div className="label">Claude subscription (estimated)</div><div className="text-xl text-muted">{fmtUsd(savings.subscription_estimated)}</div></div>}
             <div className="text-[12px] text-faint basis-full">Estimate: subagent tokens priced at the orchestrator's rates. A larger model at its own effort usually thinks more, so the real difference tends to be bigger.{savings.other_actual > 0 ? ` Compacting, the Skills assistant and tool calls (${fmtUsd(savings.other_actual)}) count the same on both sides.` : ""}</div>
           </section>
         )}
 
         <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(min(100%,460px),1fr))]">
-          {models.map((m) => <ModelCard key={m.model} m={m} />)}
+          {models.map((m) => <ModelCard key={m.key ?? m.model} m={m} />)}
           {eleven && (eleven.total_characters > 0 || eleven.quota) && <ElevenCard e={eleven} />}
         </div>
         {!models.length && <div className="text-muted text-[13px]">No model usage in this range yet.</div>}
@@ -231,7 +232,7 @@ function ModelCard({ m }: { m: any }) {
         <span className="ml-auto"><StatusBadge status={m.status.status} title={m.status.reason ?? undefined} /></span>
       </div>
       <div className="grid grid-cols-[repeat(auto-fill,minmax(112px,1fr))] gap-x-3 gap-y-2 px-3 pt-2.5 text-[13px]">
-        <Stat label="Cost" value={fmtUsd(m.cost)} />
+        <Stat label={m.billing === "subscription" ? "Est. cost (not billed)" : "Cost"} value={fmtUsd(m.cost)} />
         <Stat label="Requests" value={m.requests} />
         <Stat label="Latency p50/p95" hint="Median (p50) / 95th percentile (p95) response time" value={m.latency_p50 == null ? "—" : `${(m.latency_p50 / 1000).toFixed(1)}s / ${(m.latency_p95 / 1000).toFixed(1)}s`} />
         <Stat label="Errors / limited" hint="Share of requests that failed / were rate-limited" value={`${Math.round(m.error_rate * 100)}% / ${Math.round(m.rate_limit_rate * 100)}%`} />

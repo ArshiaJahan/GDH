@@ -38,6 +38,14 @@ def _day(ts: float) -> str:
 # summaries), "assistant" (Skills & MCP assistant), "tool" (web search, agent-run ElevenLabs).
 DELEGATED_ROLE = "subagent"
 CORE_ROLES = ("main", DELEGATED_ROLE)
+# Claude Code sessions on the user's own Claude login (usage_records.billing = "subscription"): the cost
+# is the CLI's estimate, not money spent, so it gets its own cards and stays out of "Spent".
+SUBSCRIPTION = "subscription"
+SUBSCRIPTION_LABEL = "Claude subscription (estimated)"
+
+
+def _sub(r: dict) -> bool:
+    return (r.get("billing") or "api") == SUBSCRIPTION
 
 
 def _visible_output(r: dict) -> int:
@@ -73,12 +81,12 @@ class UsageQueries:
 
     def models(self, f: dict[str, Any]) -> list[dict]:
         rows = [r for r in self.rows(f) if r["provider"] != "elevenlabs"]
-        by: dict[str, list[dict]] = defaultdict(list)
+        by: dict[tuple[str, bool], list[dict]] = defaultdict(list)
         for r in rows:
-            by[r["model"]].append(r)
+            by[(r["model"], _sub(r))].append(r)
         status = StatusChecker(self.app).model_status()
         out = []
-        for model, rs in by.items():
+        for (model, sub), rs in by.items():
             days: dict[str, dict] = defaultdict(lambda: {"input": 0, "output": 0, "cached": 0, "reasoning": 0,
                                                          "cache_write": 0, "cost": 0.0, "requests": 0})
             for r in rs:
@@ -103,8 +111,11 @@ class UsageQueries:
             latest_rl = next((json.loads(r["rate_limits"]) for r in reversed(rs) if r["rate_limits"]), None)
             main_cost = sum(r["cost_usd"] for r in rs if r["role"] == "main")
             total_cost = sum(r["cost_usd"] for r in rs)
+            name = self.app.config.display_name(model)
             out.append({
-                "model": model, "display_name": self.app.config.display_name(model), "provider": rs[0]["provider"],
+                "key": f"{model}|{SUBSCRIPTION}" if sub else model, "billing": SUBSCRIPTION if sub else "api",
+                "model": model, "display_name": f"{SUBSCRIPTION_LABEL} · {name}" if sub else name,
+                "provider": rs[0]["provider"],
                 "tier": self.app.config.tier_of(model),
                 "status": status.get(model, {"status": "unknown"}),
                 "series": [{"day": k, **v} for k, v in sorted(days.items())],
@@ -224,9 +235,12 @@ class UsageQueries:
         assistant, tool) would cost the same either way, so they count at actual cost on both
         sides and never move "saved"."""
         orch = self.app.config.model(self.app.config.orchestrator.get("model", "claude-opus-5-5"))
-        actual = estimated = delegated = other = 0.0
+        actual = estimated = delegated = other = subscription = 0.0
         for r in self.rows(f):
             if r["provider"] == "elevenlabs":
+                continue
+            if _sub(r):  # an estimate on the user's Claude plan, not money spent
+                subscription += r["cost_usd"]
                 continue
             actual += r["cost_usd"]
             if r["role"] == DELEGATED_ROLE:
@@ -239,7 +253,8 @@ class UsageQueries:
                 if r["role"] != "main":
                     other += r["cost_usd"]
         return {"actual": actual, "estimated_without_delegation": estimated, "saved": estimated - actual,
-                "delegated_actual": delegated, "other_actual": other, "orchestrator_model": orch.id}
+                "delegated_actual": delegated, "other_actual": other, "orchestrator_model": orch.id,
+                "subscription_estimated": subscription}
 
 
 def register(app: FastAPI, api: APIRouter, S: "AppState") -> None:
@@ -286,9 +301,11 @@ def register(app: FastAPI, api: APIRouter, S: "AppState") -> None:
         rows = q.rows({"session_id": sid})
         per: dict[str, dict] = {}
         for r in rows:
-            m = per.setdefault(r["model"], {"model": r["model"], "input": 0, "output": 0, "cached": 0,
-                                            "reasoning": 0, "characters": 0, "credits": 0.0, "cost": 0.0,
-                                            "requests": 0})
+            key = f"{r['model']}|{SUBSCRIPTION}" if _sub(r) else r["model"]
+            m = per.setdefault(key, {"model": r["model"], "billing": SUBSCRIPTION if _sub(r) else "api",
+                                     "input": 0, "output": 0, "cached": 0,
+                                     "reasoning": 0, "characters": 0, "credits": 0.0, "cost": 0.0,
+                                     "requests": 0})
             m["input"] += r["input_tokens"] + r["cache_write_tokens"]
             m["output"] += r["output_tokens"]
             m["cached"] += r["cache_read_tokens"]
@@ -297,7 +314,9 @@ def register(app: FastAPI, api: APIRouter, S: "AppState") -> None:
             m["credits"] += r["credits"] or 0
             m["cost"] += r["cost_usd"]
             m["requests"] += 1
-        return {"models": list(per.values()), "total_cost": sum(m["cost"] for m in per.values())}
+        return {"models": list(per.values()),
+                "total_cost": sum(m["cost"] for m in per.values() if m["billing"] != SUBSCRIPTION),
+                "subscription_estimated": sum(m["cost"] for m in per.values() if m["billing"] == SUBSCRIPTION)}
 
     @api.get("/usage/export.csv")
     async def export_csv(since: float | None = None, until: float | None = None, session_id: str | None = None,
@@ -307,7 +326,7 @@ def register(app: FastAPI, api: APIRouter, S: "AppState") -> None:
         cols = ["ts", "session_id", "session_title", "provider", "profile", "model", "role", "run_id", "effort",
                 "feature", "voice", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens",
                 "reasoning_tokens", "characters", "credits", "cost_usd", "latency_ms", "ok", "error_kind",
-                "context_fill"]
+                "context_fill", "billing"]
         w = csv.writer(buf)
         w.writerow(["time", *cols[1:]])
         for r in rows:

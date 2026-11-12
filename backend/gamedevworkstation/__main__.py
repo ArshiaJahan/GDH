@@ -104,6 +104,8 @@ def main() -> None:
     from .server import create_app
 
     app = create_app(token)
+    if (st := getattr(getattr(app, "state", None), "ws", None)) is not None:
+        st.listen_port = port  # Claude Code sessions call back to /mcp/gdw on this port
     from .perms import harden_app_dirs
 
     harden_app_dirs()  # after create_app: the database and config exist by now

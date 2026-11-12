@@ -294,7 +294,7 @@ class Campaigns:
         r = self.app.db.one(
             "SELECT COALESCE(SUM(u.cost_usd), 0) AS c FROM usage_records u JOIN campaign_sessions cs "
             "ON cs.session_id = u.session_id WHERE cs.campaign_id=? AND u.ts >= cs.started_at "
-            "AND (cs.ended_at IS NULL OR u.ts <= cs.ended_at)", [cid])
+            "AND (cs.ended_at IS NULL OR u.ts <= cs.ended_at) AND u.billing != 'subscription'", [cid])
         return float((r or {}).get("c") or 0.0)
 
     def session_count(self, cid: str) -> int:
@@ -1852,7 +1852,7 @@ class Campaigns:
 
     def _last_request_tokens(self, sid: str) -> int:
         r = self.app.db.one("SELECT input_tokens + cache_read_tokens + cache_write_tokens AS t FROM usage_records "
-                            "WHERE session_id=? AND role='main' AND ok=1 ORDER BY ts DESC LIMIT 1", [sid])
+                            "WHERE session_id=? AND role='main' AND ok=1 AND billing != 'subscription' ORDER BY ts DESC LIMIT 1", [sid])
         return int((r or {}).get("t") or 0)
 
     async def on_turn_end(self, ev: HookEvent) -> None:
