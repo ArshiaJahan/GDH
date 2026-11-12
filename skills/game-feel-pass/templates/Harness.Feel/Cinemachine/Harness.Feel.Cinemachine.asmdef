@@ -1,0 +1,25 @@
+{
+    "name": "Harness.Feel.Cinemachine",
+    "rootNamespace": "Harness.Feel",
+    "references": [
+        "Harness.Feel",
+        "Unity.Cinemachine"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "HARNESS_CINEMACHINE_3"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.unity.cinemachine",
+            "expression": "3.0.0",
+            "define": "HARNESS_CINEMACHINE_3"
+        }
+    ],
+    "noEngineReferences": false
+}

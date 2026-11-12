@@ -1,0 +1,18 @@
+{
+  "id": "resp_fixture1", "object": "response", "created_at": 1793900000, "status": "completed",
+  "model": "gpt-6.1-sol", "error": null, "incomplete_details": null, "instructions": "sys",
+  "max_output_tokens": 16000, "parallel_tool_calls": true, "temperature": 1.0, "top_p": 1.0,
+  "tool_choice": "auto", "tools": [], "store": false, "text": {"format": {"type": "text"}},
+  "reasoning": {"effort": "medium", "summary": "auto"}, "truncation": "disabled", "metadata": {},
+  "output": [
+    {"type": "reasoning", "id": "rs_1", "summary": [{"type": "summary_text", "text": "Need to run tests."}],
+     "encrypted_content": "ENC_abc", "status": "completed"},
+    {"type": "message", "id": "msg_1", "role": "assistant", "status": "completed",
+     "content": [{"type": "output_text", "text": "Running the tests now.",
+                  "annotations": [{"type": "url_citation", "url": "https://docs.pytest.org", "title": "pytest", "start_index": 0, "end_index": 5}]}]},
+    {"type": "function_call", "id": "fc_1", "call_id": "call_abc", "name": "run_command",
+     "arguments": "{\"command\": \"pytest -q\"}", "status": "completed"}
+  ],
+  "usage": {"input_tokens": 5000, "input_tokens_details": {"cached_tokens": 4000, "cache_write_tokens": 500},
+            "output_tokens": 800, "output_tokens_details": {"reasoning_tokens": 600}, "total_tokens": 5800}
+}

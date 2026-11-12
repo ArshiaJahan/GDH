@@ -1,0 +1,65 @@
+# Unity gates: the Unity pack's built-in hook set for Workspace (features/hooks.py).
+#
+# Off in every project until you turn it on: Workspace offers it once, the first time a Unity
+# skill is used in a folder with ProjectSettings/ProjectVersion.txt, and the Quality card has a
+# "Unity gates" toggle. Turning it on consents to exactly the MCP tools and command lines these
+# gates run, so they don't ask every turn. Format: see the docstring of features/hooks.py.
+version = 1
+
+[[hook]]
+id = "block-generated"
+event = "pre_tool"
+description = "Generated and cached files can't be edited (compile-fix-loop rule)."
+tools = ["write_file", "edit_file", "delete_file", "mcp__unity__create_script", "mcp__unity__script_apply_edits",
+         "mcp__unity__apply_text_edits", "mcp__unity__delete_script", "mcp__unity__manage_script"]
+paths = ["Library/**", "Temp/**", "obj/**", "*.csproj", "*.sln", "Packages/packages-lock.json"]
+action = "block"
+reason = "Generated or cached file (compile-fix-loop rule): Unity rewrites it. Change the source instead (the .cs, .asmdef or Packages/manifest.json)."
+
+[[hook]]
+id = "backlog-lint"
+event = "post_tool"
+description = "After BACKLOG.md is written, its lint errors are added to the tool result."
+tools = ["write_file", "edit_file"]
+paths = ["BACKLOG.md"]
+action = "builtin"
+name = "backlog.lint"
+
+[[hook]]
+id = "cs-compile"
+event = "pre_complete"
+description = "Before the agent finishes a turn that changed code: the project compiles with 0 errors."
+changed = ["Assets/**/*.cs", "Assets/**/*.asmdef", "Assets/**/*.asmref", "Packages/manifest.json"]
+action = "builtin"
+name = "unity.compile"
+level = "L1"
+max_retries = 2
+
+[[hook]]
+id = "merge-compile"
+event = "post_merge"
+description = "After a worktree merge that brought code: compile the project."
+changed = ["Assets/**/*.cs", "Assets/**/*.asmdef", "Assets/**/*.asmref", "Packages/manifest.json"]
+action = "builtin"
+name = "unity.compile"
+level = "L1"
+
+[[hook]]
+id = "verify-tests"
+event = "pre_complete"
+description = "In a campaign's verify phase: EditMode tests pass."
+changed = ["Assets/**/*.cs", "Assets/**/*.asmdef"]
+phases = ["verify"]
+action = "builtin"
+name = "unity.tests"
+level = "L2"
+options = { platform = "editmode" }
+
+[[hook]]
+id = "antipatterns"
+event = "pre_complete"
+description = "Advisory: new Unity performance anti-patterns in changed scripts (baseline ratchet)."
+changed = ["Assets/**/*.cs"]
+action = "builtin"
+name = "unity.antipatterns"
+options = { blocking = false }
