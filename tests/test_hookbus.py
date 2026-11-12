@@ -8,17 +8,17 @@ import time
 
 import pytest
 
-from workspace.agent import context as cx
-from workspace.agent.loop import BASE_SYSTEM
-from workspace.agent.tools import Tool, ToolContext, ToolOutput, ToolRegistry, obj
-from workspace.app import AppState
-from workspace.core.types import Message, ToolResultBlock, ToolSpec
-from workspace.db import DB, SCHEMA_VERSION
-from workspace.features.hookbus import (EVENTS, HookEvent, HookResult, TurnState, changed_files, glob_match,
+from gamedevworkstation.agent import context as cx
+from gamedevworkstation.agent.loop import BASE_SYSTEM
+from gamedevworkstation.agent.tools import Tool, ToolContext, ToolOutput, ToolRegistry, obj
+from gamedevworkstation.app import AppState
+from gamedevworkstation.core.types import Message, ToolResultBlock, ToolSpec
+from gamedevworkstation.db import DB, SCHEMA_VERSION
+from gamedevworkstation.features.hookbus import (EVENTS, HookEvent, HookResult, TurnState, changed_files, glob_match,
                                         hook_context)
-from workspace.features.subagents import SubagentManager, _register_tools
-from workspace.providers.fake import FakeProvider, text_response, tool_response
-from workspace.skills import skills_prompt, system_skill_segments
+from gamedevworkstation.features.subagents import SubagentManager, _register_tools
+from gamedevworkstation.providers.fake import FakeProvider, text_response, tool_response
+from gamedevworkstation.skills import skills_prompt, system_skill_segments
 
 from .conftest import untrusted
 from .test_subagents import SmartFake
@@ -280,7 +280,7 @@ async def test_pre_and_post_merge(subapp, repo):
     r = await subapp.tools.run(ctx, "merge_worktree", {"id": sub_id})
     assert not r.is_error and r.text.startswith("Merged w.") and r.text.endswith("\n\nL1: compile ok")
     assert (repo / "new.py").exists()
-    assert calls == [("pre", sub_id, f"workspace/{sub_id}"), ("post", sub_id, True)]
+    assert calls == [("pre", sub_id, f"gdw/{sub_id}"), ("post", sub_id, True)]
 
 
 # ---------------------------------------------------------------- pre_complete
@@ -303,7 +303,7 @@ async def test_failing_gate_retries_twice_then_exhausts(app, folder):
     assert gates[0].meta["gate"] == {"id": "unity.compile", "status": "fail", "attempt": 1, "max": 2,
                                      "hook": "unity.compile", "level": "L1"}
     head, wrapped = gates[0].content[0].text.split("\n\n", 1)
-    assert head == "[Workspace gate unity.compile] 3 compile errors."
+    assert head == "[GameDevWorkstation gate unity.compile] 3 compile errors."
     assert untrusted(wrapped) == ("gate:unity.compile", "Assets/A.cs(3,1): error CS1002: ; expected")
     assert m[-1].meta.get("notice") == "gate_exhausted" and "Needs you." in m[-1].content[0].text
     assert len(app.fake.calls) == 3 and runs == [{}, {"unity.compile": 1}, {"unity.compile": 2}]
@@ -312,7 +312,7 @@ async def test_failing_gate_retries_twice_then_exhausts(app, folder):
     assert events(app, s["id"], "gate.exhausted")[0]["data"]["gates"] == ["unity.compile"]
     assert len(events(app, s["id"], "gate.result")) == 3
     # The gate messages reach the model; the notice doesn't.
-    assert "[Workspace gate unity.compile]" in app.fake.calls[1].messages[-1].text()
+    assert "[GameDevWorkstation gate unity.compile]" in app.fake.calls[1].messages[-1].text()
 
 
 async def test_passing_gate_ends_normally_and_is_recorded(app, folder):
@@ -445,7 +445,7 @@ def test_glob_match():
 def test_changed_files(tmp_path, app):
     root = tmp_path / "unity"
     for rel in ("Assets/Game/Hit.cs", "Assets/Game/Logs/keep.cs", "Library/cache.bin", "Temp/x.cs", "README.md",
-                ".git/HEAD", "Assets/old.cs", ".workspace/tmp/t.json", "Packages/manifest.json"):
+                ".git/HEAD", "Assets/old.cs", ".gamedevworkstation/tmp/t.json", "Packages/manifest.json"):
         p = root / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text("x")
@@ -495,7 +495,7 @@ def test_config_sections(app, cfg):
     assert cfg.skills["mcp_on_invoke"]["unity-router"] == ["unity"]
     assert "*.unity" in cfg.ladder["visual_globs"] and cfg.campaigns["handoff"] == "per_phase"
     assert cfg.fleet["unit_timeout_min"] == {"build": 30, "research": 15}
-    from workspace.config import invalid_settings
+    from gamedevworkstation.config import invalid_settings
 
     assert invalid_settings({"hooks": {"gate_max_retries": "lots"}}) == ["hooks.gate_max_retries"]
     assert invalid_settings({"skills": {"mcp_on_invoke": {"x": "unity"}, "max_loaded": 2}}) == []
@@ -505,7 +505,7 @@ def test_config_sections(app, cfg):
 def test_settings_patch_new_sections(tmp_path):
     from fastapi.testclient import TestClient
 
-    from workspace.server import create_app
+    from gamedevworkstation.server import create_app
 
     st = AppState(db_path=tmp_path / "t.db")
     h = {"Authorization": "Bearer t"}

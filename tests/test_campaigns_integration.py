@@ -8,20 +8,20 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from workspace.agent.tools import ToolContext
-from workspace.app import AppState
-from workspace.config import data_dir
-from workspace.core.types import Message
-from workspace.db import DB, SCHEMA_VERSION
-from workspace.features import campaign_file as cf
-from workspace.features import campaigns as C
-from workspace.features import fleet as F
-from workspace.features import hooks as H
-from workspace.features import task_board as TB
-from workspace.features.subagents import SubagentManager, _register_tools
-from workspace.features.unity_bridge import FakeUnityBridge
-from workspace.providers.fake import FakeProvider, text_response, tool_response
-from workspace.server import create_app
+from gamedevworkstation.agent.tools import ToolContext
+from gamedevworkstation.app import AppState
+from gamedevworkstation.config import data_dir
+from gamedevworkstation.core.types import Message
+from gamedevworkstation.db import DB, SCHEMA_VERSION
+from gamedevworkstation.features import campaign_file as cf
+from gamedevworkstation.features import campaigns as C
+from gamedevworkstation.features import fleet as F
+from gamedevworkstation.features import hooks as H
+from gamedevworkstation.features import task_board as TB
+from gamedevworkstation.features.subagents import SubagentManager, _register_tools
+from gamedevworkstation.features.unity_bridge import FakeUnityBridge
+from gamedevworkstation.providers.fake import FakeProvider, text_response, tool_response
+from gamedevworkstation.server import create_app
 
 from .test_fleet import UnitFake, git, start, unit, units_of, wait
 

@@ -4,11 +4,11 @@ import re
 import pytest
 from fastapi.testclient import TestClient
 
-from workspace import config as config_mod
-from workspace.app import AppState
-from workspace.config import derive_display_name, load_config
-from workspace.providers.fake import FakeProvider
-from workspace.server import create_app
+from gamedevworkstation import config as config_mod
+from gamedevworkstation.app import AppState
+from gamedevworkstation.config import derive_display_name, load_config
+from gamedevworkstation.providers.fake import FakeProvider
+from gamedevworkstation.server import create_app
 
 H = {"Authorization": "Bearer t"}
 

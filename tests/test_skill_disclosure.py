@@ -6,15 +6,15 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from workspace import skills as sk
-from workspace.agent import context as cx
-from workspace.agent.tools import ToolContext
-from workspace.app import AppState
-from workspace.core.types import Message, TextBlock, ToolResultBlock, ToolUseBlock
-from workspace.features.hookbus import TurnState
-from workspace.features.session_routes import context_breakdown
-from workspace.providers.fake import FakeProvider, text_response, tool_response
-from workspace.server import create_app
+from gamedevworkstation import skills as sk
+from gamedevworkstation.agent import context as cx
+from gamedevworkstation.agent.tools import ToolContext
+from gamedevworkstation.app import AppState
+from gamedevworkstation.core.types import Message, TextBlock, ToolResultBlock, ToolUseBlock
+from gamedevworkstation.features.hookbus import TurnState
+from gamedevworkstation.features.session_routes import context_breakdown
+from gamedevworkstation.providers.fake import FakeProvider, text_response, tool_response
+from gamedevworkstation.server import create_app
 
 H = {"Authorization": "Bearer t"}
 PROGRESSIVE = {"skill_mode": "progressive", "pinned_skills": ["delegation"], "loaded_skills": []}

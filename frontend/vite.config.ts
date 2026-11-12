@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
-const backend = process.env.WORKSPACE_BACKEND ?? "http://127.0.0.1:8765";
+const backend = process.env.GDW_BACKEND ?? "http://127.0.0.1:8765";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],

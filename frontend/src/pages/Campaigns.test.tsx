@@ -4,16 +4,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const ROW = {
   id: "cmp_1", slug: "boss-rush", title: "Boss Rush", kind: "campaign", template: "milestone", template_title: "Milestone", folder: "/p/game",
-  file: ".workspace/campaigns/boss-rush.md", status: "awaiting_approval", phase: -1, autopilot: false, budget_usd: 10, spend_usd: 0.5, sessions: 1,
+  file: ".gamedevworkstation/campaigns/boss-rush.md", status: "awaiting_approval", phase: -1, autopilot: false, budget_usd: 10, spend_usd: 0.5, sessions: 1,
   max_sessions: 12, updated_at: 1, last_activity: 1, reason: "waiting for your approval of the plan",
   phases: [{ name: "Build", type: "build", skills: [], done_when: [{ type: "gate", level: "L1" }], status: "pending", retries: 3, retries_max: 3,
     checkpoint: null }],
 };
 const METRICS = { campaigns: 1, spend_usd: 0.5, stories: 0, cost_per_story_usd: null, wall_s_per_story: null, first_pass_gate_rate: 0.5,
   gate_retries_per_phase: null, escalations: 1, parks_by_reason: {} };
-const DETAIL = { ...ROW, next_action: "Waiting for you to approve the plan.", current_session: "s1", path: "/p/game/.workspace/campaigns/boss-rush.md",
+const DETAIL = { ...ROW, next_action: "Waiting for you to approve the plan.", current_session: "s1", path: "/p/game/.gamedevworkstation/campaigns/boss-rush.md",
   session_chain: [{ campaign_id: "cmp_1", session_id: "s1", phase: -1, started_at: 1, ended_at: null, end_reason: null, title: "Boss Rush · plan", exists: true }],
-  checkpoints: [{ phase: 1, name: "Build", ref: "refs/workspace/checkpoints/boss-rush/p1", sha: "abc", kind: "head", restore: "git restore --source=abc --staged --worktree -- .", ts: 1 }],
+  checkpoints: [{ phase: 1, name: "Build", ref: "refs/gamedevworkstation/checkpoints/boss-rush/p1", sha: "abc", kind: "head", restore: "git restore --source=abc --staged --worktree -- .", ts: 1 }],
   doc: { design_target: [{ done: false, text: "Boss Rush starts from Title" }], scope: { stories: ["M3-S04"], paths: [], out_of_scope: [] }, constraints: "",
     coverage: "", review: "- [ ] question: which bosses?", decisions: "", discoveries: "", active: "", continuation: "", completion: "" }, state: {} };
 

@@ -559,7 +559,7 @@ function About() {
       actions.toast(`Updates folder: ${u.dir} (path copied)`);
     }
   };
-  const rollback = () => u.previous && confirm(`Roll back to Workspace ${u.previous.version}? The app restarts, and ${cur.version} is kept so you can go forward again.`)
+  const rollback = () => u.previous && confirm(`Roll back to GameDevWorkstation ${u.previous.version}? The app restarts, and ${cur.version} is kept so you can go forward again.`)
     && installUpdate({ rollback: true });
   return (
     <div>

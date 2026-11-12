@@ -4,11 +4,11 @@ import subprocess
 
 import pytest
 
-from workspace.agent.tools import ToolContext
-from workspace.app import AppState
-from workspace.features import subagents as subs_mod
-from workspace.features.subagents import SubagentManager, _register_tools
-from workspace.providers.fake import FakeProvider, text_response
+from gamedevworkstation.agent.tools import ToolContext
+from gamedevworkstation.app import AppState
+from gamedevworkstation.features import subagents as subs_mod
+from gamedevworkstation.features.subagents import SubagentManager, _register_tools
+from gamedevworkstation.providers.fake import FakeProvider, text_response
 
 
 @pytest.fixture
@@ -84,7 +84,7 @@ async def test_get_rehydrates_evicted_finished_subagent(app, repo):
 
 
 async def test_prune_keeps_running_and_caps_finished(app, repo, monkeypatch):
-    import workspace.features.subagents as m
+    import gamedevworkstation.features.subagents as m
     monkeypatch.setattr(m, "KEEP_FINISHED", 2)
     ctx = ctx_for(app, repo)
     mgr = app.extensions["subagents"]

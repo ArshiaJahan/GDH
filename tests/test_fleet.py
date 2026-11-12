@@ -11,15 +11,15 @@ from pathlib import Path
 
 import pytest
 
-from workspace.agent.tools import ToolContext
-from workspace.app import AppState
-from workspace.core.types import ChatRequest, Message, Response, TextBlock, ToolResultBlock, ToolUseBlock, Usage, new_id
-from workspace.features import fleet as F
-from workspace.features import hooks as H
-from workspace.features import worktrees
-from workspace.features.subagents import SubagentManager, _register_tools
-from workspace.features.unity_bridge import BridgeResult, FakeUnityBridge
-from workspace.providers.fake import FakeProvider, text_response, tool_response
+from gamedevworkstation.agent.tools import ToolContext
+from gamedevworkstation.app import AppState
+from gamedevworkstation.core.types import ChatRequest, Message, Response, TextBlock, ToolResultBlock, ToolUseBlock, Usage, new_id
+from gamedevworkstation.features import fleet as F
+from gamedevworkstation.features import hooks as H
+from gamedevworkstation.features import worktrees
+from gamedevworkstation.features.subagents import SubagentManager, _register_tools
+from gamedevworkstation.features.unity_bridge import BridgeResult, FakeUnityBridge
+from gamedevworkstation.providers.fake import FakeProvider, text_response, tool_response
 
 from .conftest import untrusted
 
@@ -147,7 +147,7 @@ def two_units(**extra):
 
 
 def branch_exists(repo, sub_id):
-    return subprocess.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/workspace/{sub_id}"], cwd=repo,
+    return subprocess.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/gdw/{sub_id}"], cwd=repo,
                           capture_output=True).returncode == 0
 
 
@@ -189,8 +189,8 @@ def test_check_wave_rules(tmp_path):
     # read-only references may overlap claims
     assert chk(unit("a", ["Assets/Game/UI", "Assets/Game/Audio (read-only)"], "x"),
                unit("b", ["Assets/Game/Audio"], "y")) == []
-    # .workspace is coordinator-only; a whole-project claim reaches into it
-    assert any(".workspace/" in e for e in chk(unit("a", [".workspace/notes"], "x"), unit("b", ["Assets/B"], "y")))
+    # .gamedevworkstation is coordinator-only; a whole-project claim reaches into it
+    assert any(".gamedevworkstation/" in e for e in chk(unit("a", [".gamedevworkstation/notes"], "x"), unit("b", ["Assets/B"], "y")))
     assert any("the whole project" in e for e in chk(unit("a", ["**/*.cs"], "x"), unit("b", ["Assets/B"], "y")))
     assert any("leaves the project" in e for e in chk(unit("a", ["../Other"], "x"), unit("b", ["Assets/B"], "y")))
     assert any("relative to the project" in e for e in chk(unit("a", ["/abs/A"], "x"), unit("b", ["Assets/B"], "y")))
@@ -249,13 +249,13 @@ async def test_wave_over_max_units_is_refused(app, repo):
 
 async def test_subagent_write_outside_scope_is_denied(app, repo):
     ctx = ctx_for(app, repo)
-    wid = await start(app, ctx, two_units(hud="WRITE: Assets/Game/Audio/Steal.cs WRITE: .workspace/notes.md"))
+    wid = await start(app, ctx, two_units(hud="WRITE: Assets/Game/Audio/Steal.cs WRITE: .gamedevworkstation/notes.md"))
     await wait(app, ctx, wid)
     u = units_of(app, wid)
     assert u["hud"]["status"] == "done" and u["mixer"]["status"] == "done"
     wt = Path(u["hud"]["worktree"])
     assert (wt / "Assets/Game/UI/Hud.cs").exists()
-    assert not (wt / "Assets/Game/Audio/Steal.cs").exists() and not (wt / ".workspace/notes.md").exists()
+    assert not (wt / "Assets/Game/Audio/Steal.cs").exists() and not (wt / ".gamedevworkstation/notes.md").exists()
     mgr = app.extensions["subagents"]
     sub = mgr.get(u["hud"]["sub_id"])
     mgr._load_history(sub)
@@ -344,7 +344,7 @@ async def test_conflict_skip_merges_the_rest_and_close_refuses_unmerged(app, rep
     assert "hud: merge conflict in Assets/Game/UI/Hud.cs; skipped" in out.text and "Merged mixer." in out.text
     assert units_of(app, wid)["hud"]["status"] == "skipped" and F.get_fleet(app).wave(wid)["strikes"] == 1
     out = await app.tools.run(ctx, "close_wave", {"id": wid})
-    assert out.is_error and "hud (workspace/" in out.text and "mixer" not in out.text.split("\n", 1)[1]
+    assert out.is_error and "hud (gdw/" in out.text and "mixer" not in out.text.split("\n", 1)[1]
     # an explicit discard (what discard_worktree does after the user confirms) lets it close
     hud = units_of(app, wid)["hud"]["sub_id"]
     await worktrees.discard(app, sid, hud, force=True)
@@ -402,7 +402,7 @@ async def test_discoveries_relayed_into_next_wave_and_jsonl(app, repo):
     assert src == "fleet:discoveries"
     assert "wave 1 · hud (Assets/Game/UI)" in body and "HUD panels share one UIDocument" in body
     assert "Mixer groups live under Audio/Mixer" in body
-    files = list((repo / ".workspace/discoveries").glob("*.jsonl"))
+    files = list((repo / ".gamedevworkstation/discoveries").glob("*.jsonl"))
     assert len(files) == 1
     lines = [json.loads(x) for x in files[0].read_text().splitlines()]
     assert len(lines) == 4 and {x["schema"] for x in lines} == {1}
@@ -464,7 +464,7 @@ async def test_read_only_units_and_events(app, repo):
 def test_waves_route(tmp_path, repo):
     from fastapi.testclient import TestClient
 
-    from workspace.server import create_app
+    from gamedevworkstation.server import create_app
 
     st = AppState(db_path=tmp_path / "r.db")
     h = {"Authorization": "Bearer t"}

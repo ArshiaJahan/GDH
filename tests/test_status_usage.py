@@ -3,10 +3,10 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from workspace.app import AppState
-from workspace.core.types import Usage
-from workspace.providers.fake import FakeProvider
-from workspace.server import create_app
+from gamedevworkstation.app import AppState
+from gamedevworkstation.core.types import Usage
+from gamedevworkstation.providers.fake import FakeProvider
+from gamedevworkstation.server import create_app
 
 H = {"Authorization": "Bearer t"}
 
@@ -103,7 +103,7 @@ def test_elevenlabs_rows_report_characters_and_credits(client, state):
 def test_spend_limit_pauses_agents(state):
     state.config.limits["global_daily_usd"] = 0.01
     _rec(state, usage=Usage(cost_usd=0.02))
-    from workspace.usage import BudgetExceeded
+    from gamedevworkstation.usage import BudgetExceeded
 
     with pytest.raises(BudgetExceeded):
         state.usage.check()
@@ -149,7 +149,7 @@ def test_role_filters_comparison_and_savings_follow_filters(client, state):
 
     # Savings: only subagent rows are re-priced; compact/tool cost the same on both sides.
     orch = state.config.model("claude-opus-5-5")
-    from workspace.providers.base import compute_cost
+    from gamedevworkstation.providers.base import compute_cost
     sv = get("/api/usage/savings", session_id=a)
     assert sv["actual"] == pytest.approx(0.5 + 0.02 + 0.06 + 0.001)
     assert sv["other_actual"] == pytest.approx(0.061) and sv["delegated_actual"] == pytest.approx(0.02)

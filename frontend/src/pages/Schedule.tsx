@@ -33,7 +33,7 @@ export function SchedulePage() {
           <h1 className="text-lg font-semibold">Schedule</h1>
           <button className="btn btn-primary ml-auto" onClick={() => setEditing({ schedule: PRESETS[0][1], effort: "low", mode: "ask", enabled: true, model: "claude.standard" })}><Plus size={14} /> New schedule</button>
         </div>
-        <p className="text-[13px] text-muted mb-4">Each run starts a new session with the task's model, effort, folder and mode. Schedules only fire while Workspace is running; a run missed while it was closed is skipped.</p>
+        <p className="text-[13px] text-muted mb-4">Each run starts a new session with the task's model, effort, folder and mode. Schedules only fire while GameDevWorkstation is running; a run missed while it was closed is skipped.</p>
 
         {data?.tasks.length === 0 && <Empty>No scheduled prompts yet.</Empty>}
         <div className="space-y-2">

@@ -9,16 +9,16 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from workspace import events as ev_mod
-from workspace import server as server_mod
-from workspace.app import AppState
-from workspace.core.media import MAX_IMAGE_BYTES, image_payload
-from workspace.core.types import ImageBlock, Message
-from workspace.events import EventBus, Subscriber
-from workspace.providers.anthropic_provider import block_to_wire
-from workspace.providers.fake import FakeProvider, text_response
-from workspace.providers.openai_provider import user_part
-from workspace.server import create_app
+from gamedevworkstation import events as ev_mod
+from gamedevworkstation import server as server_mod
+from gamedevworkstation.app import AppState
+from gamedevworkstation.core.media import MAX_IMAGE_BYTES, image_payload
+from gamedevworkstation.core.types import ImageBlock, Message
+from gamedevworkstation.events import EventBus, Subscriber
+from gamedevworkstation.providers.anthropic_provider import block_to_wire
+from gamedevworkstation.providers.fake import FakeProvider, text_response
+from gamedevworkstation.providers.openai_provider import user_part
+from gamedevworkstation.server import create_app
 
 TOKEN = "t"
 H = {"Authorization": f"Bearer {TOKEN}"}
@@ -135,7 +135,7 @@ def test_missing_huge_or_odd_images_become_notes(tmp_path):
 
 
 async def test_a_deleted_attachment_doesnt_break_later_turns(state, tmp_path):
-    from workspace.providers.anthropic_provider import messages_to_wire
+    from gamedevworkstation.providers.anthropic_provider import messages_to_wire
 
     img = tmp_path / "photo.png"
     img.write_bytes(PNG)
@@ -172,7 +172,7 @@ def test_upload_converts_unsupported_images_and_keeps_the_original(client, state
 
 
 def test_request_media_is_capped_oldest_first():
-    from workspace.core.media import cap_media
+    from gamedevworkstation.core.media import cap_media
 
     img = lambda n: {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "A" * n}}  # noqa: E731
     wire = [{"role": "user", "content": [img(10), {"type": "text", "text": "x"}]},
@@ -186,7 +186,7 @@ def test_request_media_is_capped_oldest_first():
 
 
 def test_regex_guard_catches_catastrophic_shapes():
-    from workspace.agent.builtin_tools import _risky_regex
+    from gamedevworkstation.agent.builtin_tools import _risky_regex
 
     for bad in ("(a+)+", "((a+))+", "(a|aa)+$", "(.*a){10}", "(x*)*"):
         assert _risky_regex(bad), bad

@@ -11,13 +11,13 @@ from pathlib import Path
 
 import pytest
 
-from workspace.agent.tools import ToolContext, ToolOutput, obj, wrap_untrusted
-from workspace.app import AppState
-from workspace.core.types import Message, ToolResultBlock
-from workspace.features import ladder as L
-from workspace.features.hookbus import HookEvent, TurnState
-from workspace.providers.fake import FakeProvider, text_response, tool_response
-from workspace.skills import builtin_skills_dir
+from gamedevworkstation.agent.tools import ToolContext, ToolOutput, obj, wrap_untrusted
+from gamedevworkstation.app import AppState
+from gamedevworkstation.core.types import Message, ToolResultBlock
+from gamedevworkstation.features import ladder as L
+from gamedevworkstation.features.hookbus import HookEvent, TurnState
+from gamedevworkstation.providers.fake import FakeProvider, text_response, tool_response
+from gamedevworkstation.skills import builtin_skills_dir
 
 SKILLS = builtin_skills_dir()
 PARSE_LOG = SKILLS / "compile-fix-loop/scripts/parse_unity_log.py"
@@ -386,7 +386,7 @@ async def test_sed_flip_caught_at_turn_end(app, proj):
     m = app.store.messages(s["id"])
     gates = [x for x in m if x.meta.get("gate")]
     assert [g.meta["gate"]["id"] for g in gates] == ["ladder.story_done"] * 2
-    assert gates[0].content[0].text.startswith("[Workspace gate ladder.story_done] Story M1-S01 were marked done") or \
+    assert gates[0].content[0].text.startswith("[GameDevWorkstation gate ladder.story_done] Story M1-S01 were marked done") or \
         "M1-S01" in gates[0].content[0].text
     assert "set the status back to doing" in gates[0].content[0].text
     assert m[-1].meta.get("notice") == "gate_exhausted"
@@ -580,7 +580,7 @@ async def test_critique_behavioural_override(app, proj, monkeypatch):
 
 
 async def test_critique_spawns_three_cheap_reviewers(app, proj):
-    from workspace.features.subagents import SubagentManager
+    from gamedevworkstation.features.subagents import SubagentManager
 
     class Reviewer(FakeProvider):
         def _next(self, req):
@@ -609,7 +609,7 @@ def test_reviewer_briefs_from_skill(tmp_path, monkeypatch):
     ref.mkdir(parents=True)
     (ref / "reviewers.md").write_text("# Reviewers\n## Spec Auditor\nCheck ACs vs VERIFY.md.\n"
                                       "## User Advocate\nThreat readability.\n")
-    import workspace.skills as sk
+    import gamedevworkstation.skills as sk
 
     monkeypatch.setattr(sk, "builtin_skills_dir", lambda: tmp_path / "skills")
     b = {p: brief for _k, p, brief in L.reviewer_briefs()}
@@ -637,7 +637,7 @@ async def test_view_image_scoped_and_resized(app, proj, tmp_path):
     out = await app.tools.run(ctx, "view_image", {"path": "Logs/big.png"})
     assert not out.is_error
     if shutil.which("sips"):
-        from workspace.core.media import file_dims
+        from gamedevworkstation.core.media import file_dims
 
         sent = Path(out.images[0].path)
         assert sent != big and max(file_dims(sent)) <= 1024 and "resized from 2048×1536" in out.text
@@ -664,7 +664,7 @@ def test_tools_offered_only_when_relevant(app, proj, tmp_path):
 def test_rest_report_evidence_and_override(tmp_path, proj):
     from fastapi.testclient import TestClient
 
-    from workspace.server import create_app
+    from gamedevworkstation.server import create_app
 
     st = AppState(db_path=tmp_path / "t.db")
     h = {"Authorization": "Bearer t"}
@@ -778,7 +778,7 @@ def test_report_and_check_stories_api(app, proj):
 def test_rest_errors(tmp_path, proj):
     from fastapi.testclient import TestClient
 
-    from workspace.server import create_app
+    from gamedevworkstation.server import create_app
 
     st = AppState(db_path=tmp_path / "t.db")
     h = {"Authorization": "Bearer t"}

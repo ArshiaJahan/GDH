@@ -1,0 +1,274 @@
+# GameDevWorkstation configuration.
+# These are the defaults. ~/Library/Application Support/GameDevWorkstation/config.toml holds only
+# the values you change (Settings writes them there); everything else comes from here.
+# API keys are NEVER stored here: they live in the macOS Keychain (Settings → Accounts)
+# or, in development, in env vars (ANTHROPIC_API_KEY, OPENAI_API_KEY, ELEVENLABS_API_KEY,
+# or GDW_KEY_<PROVIDER>_<PROFILE> for extra profiles).
+# Model IDs and prices were checked against provider docs on 2026-11-05. Edit freely.
+
+[orchestrator]
+model = "claude-opus-5-5"
+effort = "medium"
+max_tokens = 32000
+show_thinking = true
+tool_output_chars = 30000            # longer tool results are cut; the rest is kept for read_output
+tool_output_images = 4               # images per tool result (each up to 5 MB); extras are saved as items
+
+[accounts]
+# Several key profiles per provider. The first listed is the default.
+anthropic = ["default"]
+openai = ["default"]
+elevenlabs = ["default"]
+
+[tiers]
+"claude.fast" = "claude-haiku-5-5"       # Haiku 5.5
+"claude.standard" = "claude-sonnet-5-5"  # Sonnet 5.5
+"claude.deep" = "claude-opus-5-5"        # Opus 5.5; or "claude-fable-5-1" (Fable 5.1) for the hardest work ($10/$50)
+# OpenAI retired its *-codex API models (gpt-5.3-codex is the last, off 2027-04-01);
+# Codex now runs on the GPT-6 family, so the "codex.*" tiers route there.
+"codex.fast" = "gpt-6.1-terra"           # GPT-6.1 Terra
+"codex.standard" = "gpt-6.1-sol"         # GPT-6.1 Sol
+"codex.cli" = "gpt-6.1-sol"              # GPT-6.1 Sol, passed to `codex exec` (Codex CLI's own default)
+
+[delegation]
+max_parallel = { claude_codex = 4, codex_cli = 2 }  # combined Claude+Codex API subagents; Codex CLI runs
+confirm_over_usd = 1.00
+job_budget_usd = 5.00
+subagent_max_turns = 30
+subagent_spend_cap_usd = 2.00
+default_subagent_effort = "low"
+
+[assistant]
+# The "Find or create" / "Find and add" boxes on the Skills & MCP page.
+model = "claude-haiku-5-5"
+effort = "high"                     # up to "high"; xhigh/max are refused (no one approves them there)
+max_turns = 20
+spend_cap_usd = 0.50                # per request
+
+[limits]
+global_daily_usd = 25.00
+session_usd = 10.00
+
+[elevenlabs]
+voice_id = ""                       # empty = first voice in your account
+model_id = "eleven_v4"
+output_format = "mp3_44100_128"
+stt_model_id = "scribe_v2"
+confirm_over_characters = 2000
+
+[modes]
+default = "ask"                     # ask | accept_edits | plan
+allowlist = []                      # e.g. ["run_command:git status", "run_command:ls*"]
+
+[data_policy]
+# Which providers may receive files you mark sensitive.
+sensitive_allowed = ["anthropic"]
+
+[appearance]
+theme = "system"                    # system | light | dark
+
+[sessions]
+auto_title = true                   # name sessions after the first reply (claude.fast, low effort, a fraction of a cent)
+trash_days = 30                     # sessions in Trash are deleted for good after this many days
+event_retention_days = 7            # the event log (replay for briefly disconnected windows) keeps this many days
+
+[updates]
+# `make release` builds new versions into this folder; the app checks it and offers
+# "Install & restart". Layout: <dir>/<version>/GameDevWorkstation.app + release.json, <dir>/latest.json.
+dir = "~/GameDevWorkstationUpdates"
+check_interval_s = 30               # how often the app looks at latest.json (one stat call)
+keep = 3                            # versions `make release` keeps; older ones are pruned
+
+[mcp.presets.unity]
+# Built-in MCP servers. Each is added to Skills & MCP once (off by default for sessions); a
+# server you delete is not added back, and "Reset to default" there restores this definition.
+# The command is looked up on your login shell's PATH (then /opt/homebrew/bin) when it starts.
+name = "unity"
+transport = "stdio"
+command = "uvx"
+args = ["--offline", "--from", "mcpforunityserver==10.3.0", "mcp-for-unity"]
+description = "MCP for Unity 10.3 — needs the com.coplaydev.unity-mcp package in your Unity project and the editor open"
+
+[skills]
+# How skills reach the model. "progressive": the system prompt carries pinned skills and an index
+# of the others; a skill is loaded into the conversation when invoked or read. "full": every
+# enabled skill's whole text is in the system prompt (the behaviour of sessions made before).
+disclosure = "progressive"          # progressive | full (new sessions; existing sessions keep full)
+max_loaded = 3                      # loaded (non-pinned) skills kept across compaction
+index_description_chars = 300       # each skill's description in the index is cut here
+
+[skills.mcp_on_invoke]
+# Invoking one of these skills (or ticking it in a session's Connectors card) turns these MCP
+# servers on for that session. Servers from other machines are never turned on this way.
+unity-router = ["unity"]
+compile-fix-loop = ["unity"]
+play-verify = ["unity"]
+headless-ops = ["unity"]
+scene-prefab-safety = ["unity"]
+gdd-to-backlog = ["unity"]
+project-memory = ["unity"]
+architecture-patterns = ["unity"]
+asset-pipeline = ["unity"]
+perf-pass = ["unity"]
+game-feel-pass = ["unity"]
+build-ship = ["unity"]
+vcs-hygiene = ["unity"]
+unity-mcp-orchestrator = ["unity"]
+
+[hooks]
+# Checks the app runs at fixed points of a turn (before/after tools, before the agent finishes,
+# around merges). Project and user hook files are ignored until you trust them.
+enabled = true                      # master switch for every hook and gate
+gate_max_retries = 2                # a failing gate asks the agent to fix it this often per turn, then you
+gate_timeout_s = 180                # a gate that takes longer is skipped (with a notice)
+fail_open_notice = true             # say so when a gate couldn't run (e.g. Unity unreachable)
+
+[ladder]
+# Quality ladder: L1 compile, L2 behaviour tests, L3 play evidence, L4 critique.
+# A story whose changed files match these needs a fresh screenshot before it's done.
+visual_globs = ["*.unity", "*.prefab", "*.uxml", "*.uss", "*.shader", "*.shadergraph", "*.mat", "*.anim",
+                "*.controller", "*.vfx", "*.png", "*.psd", "*.aseprite", "Assets/**/UI/**", "Assets/**/Art/**"]
+critique_tier = "claude.standard"   # the three L4 reviewers
+critique_rounds = 2                 # then an escalation card
+arbiter_tier = ""                   # e.g. "codex.standard" for one binding pass first; empty = ask you
+
+[campaigns]
+# Multi-session work with a plan, phases and checks (and one-session chains, `/workflow` in chat).
+# Workflow templates are skills/<skill>/chains/*.toml (the Unity pack ships 8); a template's
+# blocking_gates make those gates block in its sessions. Campaigns and chains run at effort high
+# or below, on the built-in loop.
+handoff = "per_phase"               # per_phase | on_cost: when a campaign moves to a new session
+rollover_input_tokens = 250000      # on_cost: a new session once a request is this large
+max_auto_turns = 8                  # autopilot turns per phase before it waits for you
+stall_turns = 2                     # turns without progress before autopilot pauses
+default_budget_usd = 10.0
+max_sessions = 12
+validator_tier = "claude.standard"  # checks a plan covers the request
+drift_tier = "claude.fast"          # the cheap re-check every 2 phases
+claim_stale_s = 7200                # a claim older than this (and not running) can be taken over
+
+[fleet]
+# Parallel waves of subagents in their own worktrees, each with a claimed scope.
+enabled = true
+max_units = 3                       # writing units per wave
+unit_timeout_min = { build = 30, research = 15 }
+relay_tokens = 500                  # discoveries passed on to the next wave
+
+# ------------------------------------------------------------------ model catalog
+# Prices are USD per million tokens. `no_thinking` is how this model expresses the
+# "none" effort level: "disabled", "between_tools", or "" (can't turn thinking off;
+# "none" then runs at low effort). `efforts` lists levels the model accepts.
+# `display_name` is how the app shows the model (with its tier, e.g. "GPT-6.1 Sol ·
+# codex.standard"); left out, it is derived from the ID.
+
+[models."claude-fable-5-1"]
+display_name = "Fable 5.1"
+provider = "anthropic"
+context_window = 1000000
+max_output = 128000
+input = 10.0
+output = 50.0
+cache_write = 12.5
+cache_read = 0.25
+efforts = ["low", "medium", "high", "xhigh", "max"]
+no_thinking = ""
+vision = true
+
+[models."claude-opus-5-5"]
+display_name = "Opus 5.5"
+provider = "anthropic"
+context_window = 1000000
+max_output = 128000
+input = 4.0
+output = 20.0
+cache_write = 5.0
+cache_read = 0.20
+efforts = ["low", "medium", "high", "xhigh", "max"]
+no_thinking = ""
+vision = true
+
+[models."claude-sonnet-5-5"]
+display_name = "Sonnet 5.5"
+provider = "anthropic"
+context_window = 1000000
+max_output = 128000
+input = 2.0
+output = 10.0
+cache_write = 2.5
+cache_read = 0.10
+efforts = ["low", "medium", "high", "xhigh", "max"]
+no_thinking = "between_tools"
+vision = true
+
+[models."claude-haiku-5-5"]
+display_name = "Haiku 5.5"
+provider = "anthropic"
+context_window = 1000000
+max_output = 128000
+input = 0.10
+output = 0.50
+cache_write = 0.125
+cache_read = 0.01
+efforts = ["low", "medium", "high", "xhigh", "max"]
+no_thinking = "disabled"
+vision = true
+# Prompts over 100k tokens are billed at these rates instead.
+long_context = { threshold = 100000, input = 0.50, output = 2.50, cache_write = 0.625, cache_read = 0.05 }
+
+# OpenAI (Responses API). Checked against developers.openai.com on 2026-11-05.
+# no_thinking for OpenAI = the lowest reasoning.effort the model accepts.
+[models."gpt-6-astra"]
+display_name = "GPT-6 Astra"
+provider = "openai"
+context_window = 1050000
+max_output = 128000
+input = 10.0
+output = 50.0
+cache_write = 12.5
+cache_read = 1.0
+efforts = ["low", "medium", "high", "xhigh", "max"]
+no_thinking = "low"
+vision = true
+long_context = { threshold = 272000, input = 20.0, output = 75.0, cache_write = 25.0, cache_read = 2.0 }
+
+[models."gpt-6.1-sol"]
+display_name = "GPT-6.1 Sol"
+provider = "openai"
+context_window = 1050000
+max_output = 128000
+input = 2.0
+output = 10.0
+cache_write = 2.5
+cache_read = 0.10
+efforts = ["low", "medium", "high", "xhigh", "max"]
+no_thinking = "low"
+vision = true
+long_context = { threshold = 272000, input = 4.0, output = 15.0, cache_write = 5.0, cache_read = 0.20 }
+
+[models."gpt-6.1-terra"]
+display_name = "GPT-6.1 Terra"
+provider = "openai"
+context_window = 1050000
+max_output = 128000
+input = 1.0
+output = 5.0
+cache_write = 1.25
+cache_read = 0.05
+efforts = ["low", "medium", "high", "xhigh", "max"]
+no_thinking = "none"
+vision = true
+long_context = { threshold = 272000, input = 2.0, output = 7.5, cache_write = 2.5, cache_read = 0.10 }
+
+[models."gpt-6-luna"]
+display_name = "GPT-6 Luna"
+provider = "openai"
+context_window = 1050000
+max_output = 128000
+input = 0.10
+output = 0.50
+cache_write = 0.125
+cache_read = 0.01
+efforts = ["low", "medium", "high", "xhigh", "max"]
+no_thinking = "none"
+vision = true
+long_context = { threshold = 272000, input = 0.20, output = 0.75, cache_write = 0.25, cache_read = 0.02 }

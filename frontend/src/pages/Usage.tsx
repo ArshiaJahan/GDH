@@ -98,7 +98,7 @@ export function UsagePage() {
     setRefreshing(true);
     try { setStatus(await post("/status/refresh")); } finally { setRefreshing(false); }
   };
-  const exportCsv = () => downloadFile(`/usage/export.csv?${qs}`, "workspace-usage.csv");
+  const exportCsv = () => downloadFile(`/usage/export.csv?${qs}`, "gamedevworkstation-usage.csv");
   const allModels = Object.keys(status?.models ?? {});
   const modelsOf = (p: string) => allModels.filter((m) => status.models[m].provider === p);
 

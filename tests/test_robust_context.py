@@ -4,12 +4,12 @@ import json
 
 import pytest
 
-from workspace.agent import context as cx
-from workspace.agent import loop as loop_mod
-from workspace.app import AppState
-from workspace.core.types import ChatRequest, Message, Response, TextBlock, ToolResultBlock, ToolUseBlock, Usage
-from workspace.providers.base import ProviderError
-from workspace.providers.fake import FakeProvider, text_response, tool_response
+from gamedevworkstation.agent import context as cx
+from gamedevworkstation.agent import loop as loop_mod
+from gamedevworkstation.app import AppState
+from gamedevworkstation.core.types import ChatRequest, Message, Response, TextBlock, ToolResultBlock, ToolUseBlock, Usage
+from gamedevworkstation.providers.base import ProviderError
+from gamedevworkstation.providers.fake import FakeProvider, text_response, tool_response
 
 
 class Fake(FakeProvider):
@@ -34,7 +34,7 @@ class Fake(FakeProvider):
 def app(tmp_path):
     from fastapi import APIRouter, FastAPI
 
-    from workspace.routes import register_routes
+    from gamedevworkstation.routes import register_routes
 
     a = AppState(db_path=tmp_path / "c.db")
     register_routes(FastAPI(), APIRouter(), a)
@@ -188,7 +188,7 @@ def test_stub_tool_results_shrinks_oldest_first():
 
 
 async def test_manual_compact_keeps_goal_head_and_tail(app, monkeypatch):
-    from workspace.features import session_routes
+    from gamedevworkstation.features import session_routes
 
     s = app.store.create(effort="low")
     monkeypatch.setattr(cx, "TRANSCRIPT_MAX", 2000)
@@ -205,7 +205,7 @@ async def test_manual_compact_keeps_goal_head_and_tail(app, monkeypatch):
 
 
 async def test_manual_compact_inside_one_long_turn(app):
-    from workspace.features import session_routes
+    from gamedevworkstation.features import session_routes
 
     s = app.store.create(effort="low")
     app.store.add_message(s["id"], Message.user("one long job"))
@@ -223,7 +223,7 @@ async def test_manual_compact_inside_one_long_turn(app):
 
 
 async def test_cut_off_tool_call_is_answered_before_the_next_user_turn(app):
-    from workspace.providers.anthropic_provider import messages_to_wire
+    from gamedevworkstation.providers.anthropic_provider import messages_to_wire
 
     s = app.store.create(effort="low")
     cut = Response(id="r", provider="anthropic", model="x", stop_reason="max_tokens",
@@ -241,7 +241,7 @@ async def test_cut_off_tool_call_is_answered_before_the_next_user_turn(app):
 
 
 def test_merged_user_turn_puts_tool_results_first():
-    from workspace.providers.anthropic_provider import messages_to_wire
+    from gamedevworkstation.providers.anthropic_provider import messages_to_wire
 
     msgs = [Message.user("go"), Message.assistant(ToolUseBlock(id="t1", name="x")), Message.user("continue"),
             Message(role="user", content=[ToolResultBlock.text("t1", "interrupted")], meta={"tool_results": True})]

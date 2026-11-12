@@ -4,11 +4,11 @@ import httpx
 import pytest
 import respx
 
-from workspace.agent.tools import ToolContext
-from workspace.app import AppState
-from workspace.features.elevenlabs_feature import ElevenLabsService, _register_tools
-from workspace.features.status import StatusChecker
-from workspace.providers.fake import FakeProvider
+from gamedevworkstation.agent.tools import ToolContext
+from gamedevworkstation.app import AppState
+from gamedevworkstation.features.elevenlabs_feature import ElevenLabsService, _register_tools
+from gamedevworkstation.features.status import StatusChecker
+from gamedevworkstation.providers.fake import FakeProvider
 
 EL = "https://api.elevenlabs.io"
 SUB = {"tier": "creator", "character_count": 1200, "character_limit": 100000, "next_character_count_reset_unix": 1795000000,
@@ -131,7 +131,7 @@ async def test_transcribe_records_credits_from_duration_or_header(app, tmp_path)
 
 @respx.mock
 async def test_quota_refreshed_after_generations_debounced(app, monkeypatch):
-    from workspace.features import elevenlabs_feature as ef
+    from gamedevworkstation.features import elevenlabs_feature as ef
 
     monkeypatch.setattr(ef, "QUOTA_REFRESH_DELAY_S", 0.01)
     app.db.insert("auth_status", {"provider": "elevenlabs", "profile": "default", "status": "online",
@@ -150,7 +150,7 @@ async def test_quota_refreshed_after_generations_debounced(app, monkeypatch):
 
     extra = _json.loads(el["extra"])
     assert extra["subscription"]["character_count"] == 1200 and extra["subscription_checked_at"] > 1.0
-    from workspace.features.usage_routes import UsageQueries
+    from gamedevworkstation.features.usage_routes import UsageQueries
 
     q = UsageQueries(app).elevenlabs({})
     assert q["quota_checked_at"] == extra["subscription_checked_at"]
@@ -158,7 +158,7 @@ async def test_quota_refreshed_after_generations_debounced(app, monkeypatch):
 
 
 def test_stt_credits_only_trusts_character_cost():
-    from workspace.features.elevenlabs_feature import stt_credits
+    from gamedevworkstation.features.elevenlabs_feature import stt_credits
 
     # x-character-count counts characters, not credits: a transcription falls back to its estimate.
     assert stt_credits({"x-character-count": "12"}, 60) == (pytest.approx(330), True)
@@ -188,7 +188,7 @@ async def test_refresh_quota_sets_only_subscription_keys(app, monkeypatch):
 
 
 def test_usage_quota_is_per_profile(app):
-    from workspace.features.usage_routes import UsageQueries
+    from gamedevworkstation.features.usage_routes import UsageQueries
 
     app.config.accounts = {"elevenlabs": ["default", "second"]}
     for prof, used, at in (("default", 10, 100.0), ("second", 20, 200.0)):
@@ -209,7 +209,7 @@ def test_routes_without_key_return_clean_400(tmp_path):
     """No key saved: the voice/model routes say so with a 400 (code no_key), not a 502."""
     from fastapi.testclient import TestClient
 
-    from workspace.server import create_app
+    from gamedevworkstation.server import create_app
 
     state = AppState(db_path=tmp_path / "nk.db")
     with TestClient(create_app("tok", state)) as c:
@@ -218,5 +218,5 @@ def test_routes_without_key_return_clean_400(tmp_path):
         for path in ("/api/elevenlabs/voices", "/api/elevenlabs/voices?shared=true", "/api/elevenlabs/models"):
             r = c.get(path, headers=h)
             assert r.status_code == 400, (path, r.status_code, r.text)
-            assert r.headers.get("X-Workspace-Error") == "no_key"
+            assert r.headers.get("X-GDW-Error") == "no_key"
             assert "No ElevenLabs key" in r.json()["detail"]

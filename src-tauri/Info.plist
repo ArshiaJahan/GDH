@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Workspace uses the microphone only when you press Record, to transcribe speech or change a voice with ElevenLabs.</string>
+  <string>GameDevWorkstation uses the microphone only when you press Record, to transcribe speech or change a voice with ElevenLabs.</string>
   <key>NSAppleEventsUsageDescription</key>
-  <string>Workspace asks itself to quit when you install an update, so it can restart into the new version.</string>
+  <string>GameDevWorkstation asks itself to quit when you install an update, so it can restart into the new version.</string>
   <key>LSMinimumSystemVersion</key>
   <string>13.0</string>
 </dict>

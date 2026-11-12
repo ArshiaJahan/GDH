@@ -75,7 +75,7 @@ export async function openLocalFile(path: string): Promise<void> {
     await invoke("open_file", { path });
   } catch (e) {
     if (errText(e) === "not_openable" && (await revealInFinder(path))) {
-      actions.toast("Shown in Finder: Workspace doesn't open this file type directly.");
+      actions.toast("Shown in Finder: GameDevWorkstation doesn't open this file type directly.");
       return;
     }
     actions.toast(`Couldn't open the file: ${errText(e)}`, "error");
@@ -90,7 +90,7 @@ export async function openExternal(url: string): Promise<void> {
       const u = new URL(url, location.href);
       const path = u.pathname === "/api/file" ? u.searchParams.get("path") : null;
       if (path) await openLocalFile(path);
-      else actions.toast("That link only works inside Workspace.", "error");
+      else actions.toast("That link only works inside GameDevWorkstation.", "error");
       return;
     }
     try {

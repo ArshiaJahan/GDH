@@ -63,7 +63,7 @@ Signals are words or situations in the task. Load in order, at most 3. "Skip" li
 | 16 | failure analysis, postmortem, exhausted gate, parked campaign, "that broke" | postmortem | implementation skills until the cause and prevention rule are recorded |
 
 ## Workflows and gates
-Chains are workflow templates run by the harness in one session; they are a harness feature, not additional skills. Campaigns span multiple sessions and keep their durable brief, design target and continuation state in `.workspace/campaigns/<slug>.md` at the project root. Use the matching template:
+Chains are workflow templates run by the harness in one session; they are a harness feature, not additional skills. Campaigns span multiple sessions and keep their durable brief, design target and continuation state in `.gamedevworkstation/campaigns/<slug>.md` at the project root. Use the matching template:
 
 | Template | Workflow |
 |---|---|

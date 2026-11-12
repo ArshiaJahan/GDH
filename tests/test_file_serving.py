@@ -2,9 +2,9 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from workspace.app import AppState
-from workspace.config import data_dir
-from workspace.server import create_app
+from gamedevworkstation.app import AppState
+from gamedevworkstation.config import data_dir
+from gamedevworkstation.server import create_app
 
 H = {"Authorization": "Bearer t"}
 

@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from workspace.features.tasks_feature import cron_trigger, cron_weekdays, make_trigger
+from gamedevworkstation.features.tasks_feature import cron_trigger, cron_weekdays, make_trigger
 
 TZ = ZoneInfo("Europe/Berlin")
 # Saturday 2026-11-07 12:00 local: a weekend start, so "weekdays" must skip to Monday.

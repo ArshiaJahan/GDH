@@ -1,6 +1,6 @@
 # Third-party notices
 
-Workspace adapts formats/ideas from [SethGammon/Citadel](https://github.com/SethGammon/Citadel), licensed under the MIT License: campaign file sections, exit-evidence table, discovery records, scope claims, lifecycle hook ideas, and postmortem format.
+GameDevWorkstation adapts formats/ideas from [SethGammon/Citadel](https://github.com/SethGammon/Citadel), licensed under the MIT License: campaign file sections, exit-evidence table, discovery records, scope claims, lifecycle hook ideas, and postmortem format.
 
 ## Citadel — MIT License
 

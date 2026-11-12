@@ -1,4 +1,4 @@
-"""Fixes from the UI smoke test: dev-safe key storage under WORKSPACE_NO_KEYCHAIN=1, the default
+"""Fixes from the UI smoke test: dev-safe key storage under GDW_NO_KEYCHAIN=1, the default
 skill set in /api/state, 404 for missing /assets/* chunks, the Stop notice and reusable storage."""
 import stat
 
@@ -6,9 +6,9 @@ import keyring
 import pytest
 from fastapi.testclient import TestClient
 
-from workspace import config as config_mod
-from workspace.app import AppState
-from workspace.server import create_app
+from gamedevworkstation import config as config_mod
+from gamedevworkstation.app import AppState
+from gamedevworkstation.server import create_app
 
 H = {"Authorization": "Bearer t"}
 
@@ -20,7 +20,7 @@ def no_keyring(monkeypatch):
 
     def boom(*a, **k):
         calls.append(a)
-        raise AssertionError("keyring must not be called with WORKSPACE_NO_KEYCHAIN=1")
+        raise AssertionError("keyring must not be called with GDW_NO_KEYCHAIN=1")
 
     for fn in ("set_password", "get_password", "delete_password"):
         monkeypatch.setattr(keyring, fn, boom)
@@ -41,7 +41,7 @@ def test_keys_round_trip_without_the_keychain(no_keyring):
 
 
 def test_saving_a_key_in_the_ui_sticks_in_dev(tmp_path, no_keyring, monkeypatch):
-    from workspace.features.status import StatusChecker
+    from gamedevworkstation.features.status import StatusChecker
 
     async def no_check(self, only=None):
         return []
@@ -68,7 +68,7 @@ def test_state_reports_the_default_skills(tmp_path):
 
 
 def test_missing_assets_are_404_not_the_app_page(tmp_path, monkeypatch):
-    from workspace import server
+    from gamedevworkstation import server
 
     dist = tmp_path / "dist"
     (dist / "assets").mkdir(parents=True)
@@ -103,7 +103,7 @@ async def test_stop_by_the_user_leaves_a_notice_the_model_never_sees(tmp_path):
 def test_storage_reports_reclaimable_space_including_the_wal(tmp_path):
     from fastapi import APIRouter, FastAPI
 
-    from workspace.routes import register_routes
+    from gamedevworkstation.routes import register_routes
 
     app = AppState(db_path=tmp_path / "r.db")
     register_routes(FastAPI(), APIRouter(), app)

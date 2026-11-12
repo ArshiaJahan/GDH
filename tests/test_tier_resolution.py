@@ -5,9 +5,9 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from workspace.app import AppState
-from workspace.providers.fake import FakeProvider, text_response
-from workspace.server import create_app
+from gamedevworkstation.app import AppState
+from gamedevworkstation.providers.fake import FakeProvider, text_response
+from gamedevworkstation.server import create_app
 
 from .test_harnesses import fake_codex  # noqa: F401  (fixture)
 

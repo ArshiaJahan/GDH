@@ -12,10 +12,10 @@ import pytest
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
-from workspace.agent.tools import ToolContext, in_git_metadata
-from workspace.app import AppState
-from workspace.features import worktrees as wt
-from workspace.server import create_app
+from gamedevworkstation.agent.tools import ToolContext, in_git_metadata
+from gamedevworkstation.app import AppState
+from gamedevworkstation.features import worktrees as wt
+from gamedevworkstation.server import create_app
 
 from .conftest import FIXTURES, untrusted
 
@@ -104,7 +104,7 @@ async def test_app_git_commands_skip_hooks_and_fsmonitor(tmp_path):
     r = await wt.merge(repo, root, "u1")  # merge: post-merge
     assert r["merged"] and (repo / "b.py").exists()
     (repo / "a.py").write_text("x = 3\n")
-    from workspace.features.changes_routes import _git_changes
+    from gamedevworkstation.features.changes_routes import _git_changes
 
     files = await _git_changes(repo, "folder")  # the Changes card: git diff, honours core.fsmonitor
     assert {f["path"] for f in files} == {"a.py"}
@@ -361,7 +361,7 @@ def test_codex_cli_asks_in_accept_edits(client, fake_codex, tmp_path):
 
 
 def test_mcp_policy_table():
-    from workspace.features.mcp_feature import hint_notes, mcp_policy
+    from gamedevworkstation.features.mcp_feature import hint_notes, mcp_policy
 
     ro = {"readOnlyHint": True}
     edit = {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False}
@@ -375,7 +375,7 @@ def test_mcp_policy_table():
 
 
 async def test_local_mcp_tools_follow_the_session_mode(tmp_path):
-    from workspace.features import mcp_feature
+    from gamedevworkstation.features import mcp_feature
 
     s = AppState(db_path=tmp_path / "m.db")
     mcp_feature.register(FastAPI(), APIRouter(), s)

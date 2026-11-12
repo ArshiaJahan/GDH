@@ -7,8 +7,8 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from workspace.app import AppState
-from workspace.server import create_app
+from gamedevworkstation.app import AppState
+from gamedevworkstation.server import create_app
 
 H = {"Authorization": "Bearer t"}
 
@@ -86,7 +86,7 @@ def test_codex_cli_harness(env, fake_codex, tmp_path):
 def test_codex_cli_subagent_unit(env, fake_codex, tmp_path):
     import asyncio
 
-    from workspace.agent.tools import ToolContext
+    from gamedevworkstation.agent.tools import ToolContext
 
     c, s = env
     repo = tmp_path / "repo"

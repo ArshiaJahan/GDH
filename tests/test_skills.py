@@ -5,11 +5,11 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from workspace import skills as sk
-from workspace.agent.tools import ToolContext
-from workspace.app import AppState
-from workspace.providers.fake import FakeProvider, text_response
-from workspace.server import create_app
+from gamedevworkstation import skills as sk
+from gamedevworkstation.agent.tools import ToolContext
+from gamedevworkstation.app import AppState
+from gamedevworkstation.providers.fake import FakeProvider, text_response
+from gamedevworkstation.server import create_app
 
 H = {"Authorization": "Bearer t"}
 

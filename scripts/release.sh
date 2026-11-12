@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the next version of the app into the updates folder (~/WorkspaceUpdates by default).
+# Builds the next version of the app into the updates folder (~/GameDevWorkstationUpdates by default).
 # The running app notices it within ~30 s and offers "Install & restart".
 #
 #   make release                     # patch bump: 0.1.0 -> 0.1.1
@@ -9,7 +9,7 @@
 #   KEEP_BUILD=1                     # keep the staging build in build/release-<version>
 #   FORCE=1                          # replace an existing <dir>/<version>
 #   RELEASE_BUILD=cmd                # build command (default scripts/build_mac.sh); it gets
-#                                    # WORKSPACE_DIST_DIR and must leave Workspace.app there
+#                                    # GDW_DIST_DIR and must leave GameDevWorkstation.app there
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
@@ -44,7 +44,7 @@ UPDATES_DIR="$("${PY[@]}" scripts/release_tool.py dir)"
 PREV_TAG="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
 
 # 2. Notes (before the version commit, so it isn't listed).
-NOTES_TMP="$(mktemp -t workspace-notes)"
+NOTES_TMP="$(mktemp -t gamedevworkstation-notes)"
 trap 'rm -f "$NOTES_TMP"' EXIT
 if [[ -n "${NOTES_FILE:-}" ]]; then
   cp "$NOTES_FILE" "$NOTES_TMP"
@@ -66,7 +66,7 @@ fi
 git rev-parse -q --verify "refs/tags/v$NEW" >/dev/null && die "tag v$NEW already exists; pick another version (VERSION=x.y.z)."
 [[ -e "$UPDATES_DIR/$NEW" && -z "${FORCE:-}" ]] && die "$UPDATES_DIR/$NEW already exists (FORCE=1 replaces it)."
 "${PY[@]}" scripts/version.py set "$NEW" >/dev/null
-echo "==> Workspace $CURRENT -> $NEW"
+echo "==> GameDevWorkstation $CURRENT -> $NEW"
 if [[ -n "$(git status --porcelain)" ]]; then
   git commit -q -a -m "Release v$NEW"
   echo "    committed: Release v$NEW"
@@ -76,13 +76,13 @@ fi
 STAGING="$ROOT/build/release-$NEW"
 rm_tree "$STAGING"
 mkdir -p "$STAGING"
-if ! WORKSPACE_DIST_DIR="$STAGING" WORKSPACE_SKIP_DMG=1 ${RELEASE_BUILD:-./scripts/build_mac.sh}; then
+if ! GDW_DIST_DIR="$STAGING" GDW_SKIP_DMG=1 ${RELEASE_BUILD:-./scripts/build_mac.sh}; then
   echo
   die "the build failed. The commit 'Release v$NEW' is in place but untagged; fix the build and run
          make release VERSION=$NEW
        (or drop the commit with: git reset --hard HEAD~1)."
 fi
-APP="$STAGING/Workspace.app"
+APP="$STAGING/GameDevWorkstation.app"
 
 # 5. Verify.
 echo "==> Verifying"
@@ -103,12 +103,12 @@ PRUNED="$("${PY[@]}" scripts/release_tool.py prune)"
 [[ -n "${KEEP_BUILD:-}" ]] || rm_tree "$STAGING" || echo "    note: couldn't remove $STAGING (delete it by hand)"
 
 echo
-echo "Released Workspace $NEW"
+echo "Released GameDevWorkstation $NEW"
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "  note: the build changed tracked files (commit or discard them before the next release):"
   git status --short | sed 's/^/    /'
 fi
-echo "  app:     $UPDATES_DIR/$NEW/Workspace.app"
+echo "  app:     $UPDATES_DIR/$NEW/GameDevWorkstation.app"
 echo "  tag:     v$NEW"
 echo "  folder:  $PRUNED"
 echo "  notes:"
@@ -116,4 +116,4 @@ sed 's/^/    /' "$NOTES_TMP"
 echo
 echo "The running app shows \"Update v$NEW ready\" within about 30 seconds (Settings -> About & updates -> Check now"
 echo "to look right away). First time, or if the installed app predates updates, install it once by hand:"
-echo "  make install APP=\"$UPDATES_DIR/$NEW/Workspace.app\""
+echo "  make install APP=\"$UPDATES_DIR/$NEW/GameDevWorkstation.app\""

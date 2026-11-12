@@ -90,7 +90,7 @@ export function SkillsPage() {
                     <span className="size-2 rounded-full" style={{ background: s.connected ? "var(--ok)" : s.error ? "var(--bad)" : "var(--faint)" }} aria-hidden />
                     <span className="font-medium">{s.name}</span>
                     <span className="chip">{s.transport}</span>
-                    {s.preset && <span className="chip whitespace-nowrap shrink-0" title="Comes with Workspace">Built-in{s.modified ? " · edited" : ""}</span>}
+                    {s.preset && <span className="chip whitespace-nowrap shrink-0" title="Comes with GameDevWorkstation">Built-in{s.modified ? " · edited" : ""}</span>}
                     {s.shared && <span className="chip">other machine</span>}
                     <span className="text-[12px] text-muted truncate min-w-0">{s.transport === "stdio" ? [s.command, ...s.args].join(" ") : s.url}</span>
                     <div className="ml-auto flex items-center gap-2 text-[13px] whitespace-nowrap shrink-0">

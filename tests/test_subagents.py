@@ -5,12 +5,12 @@ import time
 
 import pytest
 
-from workspace.agent.tools import ToolContext
-from workspace.app import AppState
-from workspace.core.effort import APPROVALS
-from workspace.core.types import ChatRequest, Response, TextBlock, ToolResultBlock, ToolUseBlock, Usage, new_id
-from workspace.features.subagents import SubagentManager, _register_tools
-from workspace.providers.fake import FakeProvider, text_response
+from gamedevworkstation.agent.tools import ToolContext
+from gamedevworkstation.app import AppState
+from gamedevworkstation.core.effort import APPROVALS
+from gamedevworkstation.core.types import ChatRequest, Response, TextBlock, ToolResultBlock, ToolUseBlock, Usage, new_id
+from gamedevworkstation.features.subagents import SubagentManager, _register_tools
+from gamedevworkstation.providers.fake import FakeProvider, text_response
 
 
 class SmartFake(FakeProvider):

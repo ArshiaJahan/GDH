@@ -3,7 +3,7 @@ import asyncio
 import sys
 from pathlib import Path
 
-from workspace.app import AppState
+from gamedevworkstation.app import AppState
 
 
 def make(tmp_path, monkeypatch):

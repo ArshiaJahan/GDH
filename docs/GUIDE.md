@@ -1,9 +1,9 @@
-# Workspace: the full guide
+# GameDevWorkstation: the full guide
 
-> The complete manual for GameDevWorkstation (the app is called Workspace). For the overview,
+> The complete manual for GameDevWorkstation. For the overview,
 > see the [README](../README.md).
 
-A personal agent workspace for your Mac. Claude is the main agent: it plans jobs and hands
+A personal agent workstation for your Mac. Claude is the main agent: it plans jobs and hands
 units of work to Claude and OpenAI (Codex) subagents in parallel, picking the model tier and
 thinking effort per unit to keep things fast and cheap. ElevenLabs handles speech,
 transcription, sound and music. Everything runs locally; the backend listens on 127.0.0.1 only.
@@ -22,6 +22,7 @@ transcription, sound and music. Everything runs locally; the backend listens on 
 - [How delegation works](#how-delegation-works)
 - [Building the app](#building-the-app)
 - [Versions & updates](#versions--updates)
+- [Upgrading from Workspace 0.4](#upgrading-from-workspace-04) <!-- rename:keep -->
 - [Testing](#testing)
 - [Where things live](#where-things-live)
 - [Notes and differences from the original spec](#notes-and-differences-from-the-original-spec)
@@ -44,20 +45,20 @@ transcription, sound and music. Everything runs locally; the backend listens on 
 
 ```bash
 make frontend          # build the UI once (frontend/dist)
-uv run workspace       # backend on 127.0.0.1:8765, opens the UI in your browser
+uv run gamedevworkstation       # backend on 127.0.0.1:8765, opens the UI in your browser
 ```
 
-`uv run workspace` prints a link with a one-time session token; the UI keeps the token out of
+`uv run gamedevworkstation` prints a link with a one-time session token; the UI keeps the token out of
 the address bar after it loads. For UI work with hot reload, run `make backend` in one terminal
 and `make ui` in another, then open the link printed by the backend but on port 5173.
 
-Without keys you can still click around: set `WORKSPACE_FAKE_PROVIDERS=1` to use an echo
+Without keys you can still click around: set `GDW_FAKE_PROVIDERS=1` to use an echo
 model that makes no API calls.
 
 ## Adding API keys
 
 Open **Settings → Accounts** and paste each key. Keys go to the macOS Keychain (service
-`Workspace`), never to the config file or logs; the UI only ever shows the last four
+`GameDevWorkstation`), never to the config file or logs; the UI only ever shows the last four
 characters. You can add several profiles per provider (for example `work` and `personal`).
 Each session picks one profile per provider in the **Environment** card (Accounts row), and
 everything the session runs uses it: the main agent, Claude and OpenAI subagents, Codex CLI
@@ -69,7 +70,7 @@ always keeps at least one profile, and sessions that used a deleted profile swit
 default. The ElevenLabs page has its own profile picker when there is more than one.
 
 In development you can use environment variables instead: `ANTHROPIC_API_KEY`,
-`OPENAI_API_KEY`, `ELEVENLABS_API_KEY`, or `WORKSPACE_KEY_<PROVIDER>_<PROFILE>` for other
+`OPENAI_API_KEY`, `ELEVENLABS_API_KEY`, or `GDW_KEY_<PROVIDER>_<PROFILE>` for other
 profiles.
 
 After saving or removing a key, **My usage** re-runs that provider's auth checks so you can see
@@ -78,7 +79,7 @@ its status at once.
 ## Configuration
 
 The defaults ship with the app ([`config.example.toml`](../config.example.toml) has them with
-comments). `~/Library/Application Support/Workspace/config.toml` holds only what you change, so
+comments). `~/Library/Application Support/GameDevWorkstation/config.toml` holds only what you change, so
 later changes to the defaults (tiers, prices, delegation) reach you; most of it is editable in
 Settings. Older versions copied every default into that file: the first start of this version keeps
 only the values that differ (the full copy stays as `config.toml.pre-overrides.bak`, which is
@@ -219,7 +220,7 @@ windows at least 1200 px wide and closed in narrower ones:
 6. **Changes** — changed files (git diff in a repo, including subagent worktrees; snapshots
    otherwise), +/− counts, side-by-side diff and per-file revert. Files over 5 MB aren't
    snapshotted: they're listed as "too large to snapshot", without diff or revert. Each subagent worktree has
-   **Discard worktree** (removes it and its `workspace/<unit>` branch; asks again, saying what
+   **Discard worktree** (removes it and its `gdw/<unit>` branch; asks again, saying what
    would be lost, when it holds work that isn't merged).
 7. **Background tasks** — subagents, commands, Codex CLI runs and ElevenLabs jobs with a log
    tail and cancel.
@@ -270,11 +271,11 @@ saves, and closing or reloading with unsaved changes asks first. The skill's oth
 precedence and can be edited. Add or edit
 MCP servers (stdio command or HTTP URL), test them, see their tools and set defaults. Env vars
 and headers whose names look secret (`*KEY*`, `*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*_PAT`,
-`*AUTH*` such as `Authorization`) are stored in the Keychain (service `Workspace`, account
+`*AUTH*` such as `Authorization`) are stored in the Keychain (service `GameDevWorkstation`, account
 `mcp:<server>:<NAME>`, headers `mcp:<server>:header:<Name>`), not in SQLite. The page shows them as
 `••••last4`; leave that as is when editing to keep the value, or type a new one. Removing a server
 deletes its entries, and rows saved by older versions are moved to the Keychain at startup. With
-`WORKSPACE_NO_KEYCHAIN=1` (development) they stay in SQLite and the log warns.
+`GDW_NO_KEYCHAIN=1` (development) they stay in SQLite and the log warns.
 
 Built-in servers (`[mcp.presets.*]` in config; today `unity`, MCP for Unity) are added once at
 startup, off by default for sessions, and carry a **Built-in** badge with a note on what they need.
@@ -417,13 +418,13 @@ never counts):
 - A **workflow** (a *chain*) runs in one session: its steps advance in place and its state lives
   in the database.
 - A **campaign** spans several sessions. Its state is also a Markdown file in the project,
-  `.workspace/campaigns/<slug>.md` (request, design target, scope, constraints, phases, coverage,
+  `.gamedevworkstation/campaigns/<slug>.md` (request, design target, scope, constraints, phases, coverage,
   feature ledger, decision log, discoveries, review queue, active context, continuation state,
   completion), which you can read and edit; the app owns the Phases, Coverage, Feature ledger and
   Continuation sections and keeps your own sections where they are.
 
 **Templates.** Both are built from workflow templates, TOML files in a skill's `chains/` folder
-(the format is in `backend/workspace/features/chains.py`). The Unity pack ships eight, offered in
+(the format is in `backend/gamedevworkstation/features/chains.py`). The Unity pack ships eight, offered in
 Unity projects:
 
 | Template | Runs as | Phases |
@@ -460,7 +461,7 @@ plan; gaps and "delta" targets go back to the agent (twice at most), then the **
 appears (Approve / Revise / Park, with notes). Each phase then runs in a new session in the
 campaign's sidebar group, starting with a brief the app assembles from the campaign file. At
 the start of every phase the app records a checkpoint ref
-(`refs/workspace/checkpoints/<slug>/p<N>`); it never resets your tree, and the page shows the
+(`refs/gamedevworkstation/checkpoints/<slug>/p<N>`); it never resets your tree, and the page shows the
 `git restore` command for you to run.
 
 **Autopilot** continues a running campaign or workflow after each turn while nothing waits for you,
@@ -484,7 +485,7 @@ session with autopilot off) or is done, a notice appears on whatever page you're
 **Fleet phases.** A phase marked `fleet = true` (Produce in Content batch) gets a Fleet section in
 its brief: when the work splits by folder, the agent runs it as a wave (`run_wave` with the
 campaign's id, then `wave_status`, `merge_wave`, `close_wave`). Each unit's discoveries go to the
-campaign file's Discoveries (marked `fleet:<unit>`) and to `.workspace/discoveries/<date>.jsonl`.
+campaign file's Discoveries (marked `fleet:<unit>`) and to `.gamedevworkstation/discoveries/<date>.jsonl`.
 Without a git repository, or with `[fleet] enabled = false`, the brief says so and the phase runs
 in the session.
 
@@ -658,10 +659,10 @@ Rules the backend enforces regardless of the skill:
 - **Depth.** Subagents are one level deep, with a max-turn limit and a spend cap. They get only
   the tools they were granted (read-only by default).
 - **Parallel code edits.** Code units that run in parallel always get their own git worktree on
-  branch `workspace/<unit>`. The orchestrator merges them back and reports any conflicts, or
+  branch `gdw/<unit>`. The orchestrator merges them back and reports any conflicts, or
   discards failed and abandoned ones (`discard_worktree` refuses unmerged work unless
   `force=true`, and always asks you). Deleting a session removes its worktrees: clean ones with
-  their branch; unmerged work is committed to its `workspace/<unit>` branch, which is kept. At
+  their branch; unmerged work is committed to its `gdw/<unit>` branch, which is kept. At
   startup, worktrees whose session is gone are removed, except ones with uncommitted changes,
   which are only listed in `backend.log`.
 - **Codex CLI units** (`codex.cli`) run `codex exec --json --sandbox workspace-write` in their
@@ -726,7 +727,7 @@ others turn on when you invoke them.
 | `unity-mcp-orchestrator` | MCP for Unity tool reference and workflows, used by the Unity pack |
 
 **Unity pack setup.** The Unity skills drive the editor through the MCP for Unity server, and
-Workspace sets that up for you: the built-in `unity` server (`uvx --offline --from
+GameDevWorkstation sets that up for you: the built-in `unity` server (`uvx --offline --from
 mcpforunityserver==10.3.0 mcp-for-unity`, `uvx` looked up on your login shell's PATH, then
 `/opt/homebrew/bin`) is on the Skills & MCP page from the first start, and invoking any Unity
 skill (or ticking one in the Connectors card) turns it on for that session, with a short notice.
@@ -760,16 +761,16 @@ The API takes the same thing: `POST /api/sessions/{id}/messages` with `{"text", 
 
 **Skills written for Claude Code.** Most skills were written for Claude Code, whose tools
 differ. When any of them is on, the system prompt gets one short note that maps Claude Code's
-tools to Workspace's: `Agent`/`Task` to `spawn_subagent` (opus is `claude.deep`, sonnet is
+tools to GameDevWorkstation's: `Agent`/`Task` to `spawn_subagent` (opus is `claude.deep`, sonnet is
 `claude.standard`, haiku is `claude.fast`), `Bash` to `run_command`, `Read`/`Glob`/`Grep` to
 `read_file`/`list_dir`/`search`, and so on. The `read_skill` tool reads a skill's
-own files (`references/`, `templates/`, `scripts/`). Skills written for Workspace say
-`runtime: workspace` in their frontmatter and get no note; `delegation` is native too.
+own files (`references/`, `templates/`, `scripts/`). Skills written for GameDevWorkstation say
+`runtime: gamedevworkstation` in their frontmatter and get no note; `delegation` is native too.
 
 ## Building the app
 
 ```bash
-make app        # → dist/Workspace.app and dist/Workspace.dmg (ad-hoc signed)
+make app        # → dist/GameDevWorkstation.app and dist/GameDevWorkstation.dmg (ad-hoc signed)
 make app-test   # builds, launches, checks health + providers + one claude.fast message, quits
 ```
 
@@ -798,7 +799,7 @@ process tree plus the groups those processes lead) before quitting and fails if 
 ## Versions & updates
 
 **One version number.** [`VERSION`](../VERSION) holds it (semver). `scripts/version.py` copies it into
-`pyproject.toml`, `uv.lock`, `backend/workspace/__init__.py`, `frontend/package.json` and its lock
+`pyproject.toml`, `uv.lock`, `backend/gamedevworkstation/__init__.py`, `frontend/package.json` and its lock
 file, `src-tauri/tauri.conf.json`, `Cargo.toml` and `Cargo.lock`:
 
 ```bash
@@ -807,11 +808,11 @@ uv run python scripts/version.py bump minor   # or patch / major / set 1.2.3 / c
 ```
 
 The running version, its git commit and its build time are in **Settings → About & updates**,
-in `/health` and in `/api/state`. App builds stamp them into `backend/workspace/_build_info.json`.
+in `/health` and in `/api/state`. App builds stamp them into `backend/gamedevworkstation/_build_info.json`.
 
 **See changes live.** `make live` opens the real desktop window from this checkout. The Vite dev
 server hot-reloads the UI, so UI edits appear in the window as you save. The shell starts the
-backend with `uv run workspace` from the repo, so backend edits apply after you restart
+backend with `uv run gamedevworkstation` from the repo, so backend edits apply after you restart
 `make live`. It needs Rust, and the first run compiles the shell, which takes a few minutes. In
 a browser, `make backend` + `make ui` still work too.
 
@@ -836,19 +837,19 @@ It refuses to run with uncommitted changes. Then it:
 If the build fails, the release commit stays untagged. Fix the build and run
 `make release VERSION=X.Y.Z` again.
 
-**The updates folder** is `~/WorkspaceUpdates`. Change it with `[updates] dir` in `config.toml`.
+**The updates folder** is `~/GameDevWorkstationUpdates`. Change it with `[updates] dir` in `config.toml`.
 
 ```
-~/WorkspaceUpdates/
+~/GameDevWorkstationUpdates/
   latest.json                 # newest release; written atomically, after the app is fully copied
-  0.1.1/Workspace.app
+  0.1.1/GameDevWorkstation.app
   0.1.1/release.json          # {version, built_at, git_commit, notes}
-  .previous/Workspace-0.1.0.app   # the version you replaced, for rollback
+  .previous/GameDevWorkstation-0.1.0.app   # the version you replaced, for rollback
   installed.json              # every app bundle that has run: {installs: {path: {version, at}}}
 ```
 
 `keep = 3` versions stay. Pruning never removes the newest version, or the version of any app
-bundle listed in `installed.json` that still exists (plus `/Applications/Workspace.app`). Each app
+bundle listed in `installed.json` that still exists (plus `/Applications/GameDevWorkstation.app`). Each app
 records its own path when it starts, so a test build launched from `dist/` can't hide the version
 in `/Applications`; entries whose bundle was deleted are ignored. Writes are atomic and use a
 short lock file, so two apps starting at once can't corrupt it. The old single-record format is
@@ -874,12 +875,12 @@ The banner also comes back after a reload or relaunch. **Settings → About & up
 2. It copies the bundle next to the running app.
 3. It starts a small helper outside the app's process group, then answers the UI, which shows
    "Restarting…".
-4. The helper asks Workspace to quit. If it's still running after 30 s, it stops it.
-5. The helper moves the current app to `~/WorkspaceUpdates/.previous/` and puts the new one in
+4. The helper asks GameDevWorkstation to quit. If it's still running after 30 s, it stops it.
+5. The helper moves the current app to `~/GameDevWorkstationUpdates/.previous/` and puts the new one in
    its place. Then it clears quarantine attributes and opens it.
 
 If the new version is missing or doesn't start, the helper puts the old app back and reopens
-it. The log is `~/Library/Logs/Workspace/update.log`.
+it. The log is `~/Library/Logs/GameDevWorkstation/update.log`.
 
 **Roll back to previous** (same page) swaps in the kept version the same way. Rolling back
 again goes forward. Install only works in the built app; when you run from source, the page
@@ -890,10 +891,51 @@ hand, then updates arrive in-app:
 
 ```bash
 make release
-make install APP=~/WorkspaceUpdates/<version>/Workspace.app   # quit Workspace first
+make install APP=~/GameDevWorkstationUpdates/<version>/GameDevWorkstation.app   # quit GameDevWorkstation first
 ```
 
-`make install` with no `APP` installs `dist/Workspace.app` from `make app`.
+`make install` with no `APP` installs `dist/GameDevWorkstation.app` from `make app`.
+
+<!-- rename:keep-start -->
+## Upgrading from Workspace 0.4
+
+GameDevWorkstation is the app that was called Workspace up to 0.4. It has a new name and bundle
+id (`dev.local.gamedevworkstation`), so it installs next to `Workspace.app` instead of replacing
+it, and the in-app updater of 0.4 can't offer it. Install it once by hand, with Workspace quit:
+
+```bash
+make app && make install      # dist/GameDevWorkstation.app -> /Applications
+```
+
+On its first start it brings everything over. Nothing of the old app is changed or deleted, so
+Workspace 0.4 keeps working with its own data:
+
+- **Data.** `~/Library/Application Support/Workspace/` is copied to
+  `~/Library/Application Support/GameDevWorkstation/` (settings, database, media, transcripts),
+  unless the new folder already holds a database. Paths into the old folder are updated in the
+  copy. Logs now go to `~/Library/Logs/GameDevWorkstation/`.
+- **API keys and MCP secrets.** Each is read from Keychain service `Workspace` the first time
+  it's needed and copied to service `GameDevWorkstation`. macOS may ask once per key whether
+  GameDevWorkstation may use it: choose **Always Allow**. A key you delete in the new app stays
+  deleted there.
+- **Projects.** A project's `.workspace/` folder is renamed to `.gamedevworkstation/` the first
+  time you use the project (the log says so). Hook trust carries over. If the folder is tracked in
+  git, commit the rename.
+- **Updates folder.** If `~/GameDevWorkstationUpdates` doesn't exist yet, the releases in
+  `~/WorkspaceUpdates` are copied there in the background. New releases go to the new folder.
+- **Subagent worktrees.** Worktrees still open in 0.4 aren't moved (a copied git worktree
+  breaks): they stay in the old data folder, and their `workspace/<unit>` branches stay in your
+  repositories. New units use `gdw/<unit>`. Merge or discard pending units in Workspace 0.4
+  before switching, or merge those branches by hand.
+- **For development.** Environment variables `WORKSPACE_*` are now `GDW_*` (for example
+  `GDW_FAKE_PROVIDERS`, `GDW_KEY_<PROVIDER>_<PROFILE>`, `GDW_HOME`), the Python package is
+  `gamedevworkstation`, and the dev command is `uv run gamedevworkstation` (or `uv run gdw`).
+  Skills marked `runtime: workspace` still count as native.
+
+When you are happy with GameDevWorkstation, remove `/Applications/Workspace.app` yourself. The
+old data folder, `~/WorkspaceUpdates` and the Keychain entries of service `Workspace` stay until
+you delete them.
+<!-- rename:keep-end -->
 
 ## Testing
 
@@ -934,16 +976,16 @@ parameters). They also cover:
 
 | What | Where |
 |---|---|
-| Config | `~/Library/Application Support/Workspace/config.toml` |
-| Database (SQLite + FTS5 for items and message text), media, subagent transcripts, worktrees | `~/Library/Application Support/Workspace/` |
-| Logs | `~/Library/Logs/Workspace/` (`backend.log`, `backend-stdout.log` + 3 previous, `update.log` for installs) |
-| App versions (`make release`) | `~/WorkspaceUpdates/` |
-| API keys | macOS Keychain, service `Workspace` |
-| Running backend's port/token (owner-only, removed on quit) | `~/Library/Application Support/Workspace/runtime.json` |
+| Config | `~/Library/Application Support/GameDevWorkstation/config.toml` |
+| Database (SQLite + FTS5 for items and message text), media, subagent transcripts, worktrees | `~/Library/Application Support/GameDevWorkstation/` |
+| Logs | `~/Library/Logs/GameDevWorkstation/` (`backend.log`, `backend-stdout.log` + 3 previous, `update.log` for installs) |
+| App versions (`make release`) | `~/GameDevWorkstationUpdates/` |
+| API keys | macOS Keychain, service `GameDevWorkstation` |
+| Running backend's port/token (owner-only, removed on quit) | `~/Library/Application Support/GameDevWorkstation/runtime.json` |
 
 The data and log folders are owner-only (0700) and the database, config, `runtime.json` and logs
 0600; the backend sets this at startup. The app passes the backend its token in the environment
-(`WORKSPACE_TOKEN`), not on the command line.
+(`GDW_TOKEN`), not on the command line.
 
 ## Notes and differences from the original spec
 
@@ -955,7 +997,7 @@ The data and log folders are owner-only (0700) and the database, config, `runtim
 - **No thinking.** The "lowest / no-thinking" effort level maps per model: Haiku 5.5 →
   `thinking: disabled`, Sonnet 5.5 → `between_tools`, Opus 5.5 → `low` (it can't turn thinking
   off), GPT-6.1 Sol → `low` (it rejects `none`), Terra/Luna → `none`.
-- **Codex CLI sandbox flag.** The CLI dropped `--full-auto`, so Workspace uses
+- **Codex CLI sandbox flag.** The CLI dropped `--full-auto`, so GameDevWorkstation uses
   `--sandbox workspace-write` (or `read-only` in Plan mode).
 - **ElevenLabs defaults** are `eleven_v4` for speech and `scribe_v2` for transcription
   (`scribe_v1` is deprecated). Sound effects use `eleven_text_to_sound_v3` and music uses
@@ -969,8 +1011,8 @@ The data and log folders are owner-only (0700) and the database, config, `runtim
 
 ## Troubleshooting
 
-- **"Workspace's engine stopped"** — the backend exited. The screen shows its exit code, the end
-  of `~/Library/Logs/Workspace/backend-stdout.log` and **Restart**. The app notices at once (at
+- **"GameDevWorkstation's engine stopped"** — the backend exited. The screen shows its exit code, the end
+  of `~/Library/Logs/GameDevWorkstation/backend-stdout.log` and **Restart**. The app notices at once (at
   startup and while running) instead of waiting or showing "Reconnecting…". That log starts fresh
   at every launch; the previous three are `backend-stdout.log.1` to `.3` (5 MB each at most).
 - **A CLI tool isn't found from the app** — GUI apps don't inherit your shell's PATH. The

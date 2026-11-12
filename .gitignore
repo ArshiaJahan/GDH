@@ -14,5 +14,5 @@ src-tauri/resources/backend/*
 !src-tauri/resources/backend/.keep
 src-tauri/app-icon.png
 .DS_Store
-backend/workspace/_build_info.json
+backend/gamedevworkstation/_build_info.json
 *.tsbuildinfo

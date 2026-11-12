@@ -9,8 +9,8 @@ import time
 
 from fastapi import APIRouter, FastAPI
 
-from workspace.app import AppState
-from workspace.children import CHILDREN, process_table
+from gamedevworkstation.app import AppState
+from gamedevworkstation.children import CHILDREN, process_table
 
 from .conftest import FIXTURES
 
@@ -36,7 +36,7 @@ async def wait_for(cond, timeout=15.0):
 async def test_shutdown_ends_commands_ptys_and_stdio_servers(tmp_path, monkeypatch):
     monkeypatch.setenv("SHELL", "/bin/sh")  # no login-shell startup files in the test
     s = AppState(db_path=tmp_path / "q.db")
-    from workspace.features import mcp_feature, terminal
+    from gamedevworkstation.features import mcp_feature, terminal
 
     mcp_feature.register(FastAPI(), APIRouter(), s)
     terminal.register(FastAPI(), APIRouter(), s)
@@ -114,8 +114,8 @@ def test_parent_watchdog_ends_children_when_shutdown_hangs(tmp_path):
     script = tmp_path / "hung_backend.py"
     script.write_text(textwrap.dedent("""
         import signal, subprocess, sys, time
-        import workspace.__main__ as m
-        from workspace.children import CHILDREN
+        import gamedevworkstation.__main__ as m
+        from gamedevworkstation.children import CHILDREN
 
         m.WATCHDOG_POLL_S = 0.1
         m.WATCHDOG_DEADLINE_S = 0.5
@@ -158,7 +158,7 @@ def _orphan_group() -> tuple[int, int]:
 def test_reused_group_number_with_its_leader_gone_is_left_alone():
     """Our group ended and its number came back as somebody else's group whose leader has exited too:
     the members aren't ours (they started after we saw our leader exit), so they're never signalled."""
-    from workspace.children import ChildProcesses, _Group, start_time
+    from gamedevworkstation.children import ChildProcesses, _Group, start_time
 
     pgid, member = _orphan_group()
     try:
@@ -188,7 +188,7 @@ def test_reused_group_number_with_its_leader_gone_is_left_alone():
 
 
 def test_live_leader_with_another_start_time_is_left_alone():
-    from workspace.children import ChildProcesses, start_time
+    from gamedevworkstation.children import ChildProcesses, start_time
 
     p = subprocess.Popen(["sleep", "300"], start_new_session=True, stdin=subprocess.DEVNULL,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -209,7 +209,7 @@ def test_live_leader_with_another_start_time_is_left_alone():
 
 
 def test_release_notes_the_leader_exit_and_prunes_ended_groups():
-    from workspace.children import ChildProcesses
+    from gamedevworkstation.children import ChildProcesses
 
     reg = ChildProcesses()
     a = subprocess.Popen(["sh", "-c", "sleep 300 > /dev/null 2>&1 &"], start_new_session=True,
@@ -234,7 +234,7 @@ def test_release_notes_the_leader_exit_and_prunes_ended_groups():
 def test_tracks_a_group_whose_leader_already_exited():
     """`server &` can exit before track() runs (macOS can't read a zombie's pgid): its group, with
     the server still in it, is registered all the same, and quitting ends it."""
-    from workspace.children import ChildProcesses
+    from gamedevworkstation.children import ChildProcesses
 
     reg = ChildProcesses()
     a = subprocess.Popen(["sh", "-c", "sleep 300 > /dev/null 2>&1 &"], start_new_session=True,

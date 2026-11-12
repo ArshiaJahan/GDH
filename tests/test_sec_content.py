@@ -11,13 +11,13 @@ import pytest
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
-from workspace.agent import loop
-from workspace.agent.tools import ToolContext, ToolOutput, finalize_output, obj, wrap_untrusted
-from workspace.app import AppState
-from workspace.core.types import ImageBlock
-from workspace.features import subagents as subs_mod
-from workspace.providers.fake import FakeProvider
-from workspace import safe_fetch as sf
+from gamedevworkstation.agent import loop
+from gamedevworkstation.agent.tools import ToolContext, ToolOutput, finalize_output, obj, wrap_untrusted
+from gamedevworkstation.app import AppState
+from gamedevworkstation.core.types import ImageBlock
+from gamedevworkstation.features import subagents as subs_mod
+from gamedevworkstation.providers.fake import FakeProvider
+from gamedevworkstation import safe_fetch as sf
 
 from .conftest import untrusted
 
@@ -28,7 +28,7 @@ H = {"Authorization": "Bearer t"}
 def app(tmp_path):
     a = AppState(db_path=tmp_path / "s.db")
     a.providers.override("anthropic", "default", FakeProvider("anthropic"))
-    from workspace.routes import register_routes
+    from gamedevworkstation.routes import register_routes
 
     register_routes(FastAPI(), APIRouter(), a)
     return a
@@ -128,7 +128,7 @@ async def test_web_fetch_and_subagent_results_are_marked(app, monkeypatch):
     async def fetch(url, **kw):
         return await real(url, transport=httpx.MockTransport(handler), **kw)
 
-    monkeypatch.setattr("workspace.features.web_tools.safe_fetch", fetch)
+    monkeypatch.setattr("gamedevworkstation.features.web_tools.safe_fetch", fetch)
     ctx = ToolContext(app=app, session=app.store.create(), run_id="main:x")
     out = await app.tools.run(ctx, "web_fetch", {"url": "https://example.org/p"})
     src, body = untrusted(out.text)
@@ -226,7 +226,7 @@ async def test_safe_fetch_size_cap(monkeypatch):
 
 
 async def test_skill_fetch_text_uses_safe_fetch(monkeypatch):
-    from workspace.features import skill_assistant
+    from gamedevworkstation.features import skill_assistant
 
     monkeypatch.setattr(sf, "_getaddrinfo", _resolver({"raw.example": ["127.0.0.1"]})[0])
     with pytest.raises(ValueError, match="local or private"):
@@ -239,7 +239,7 @@ async def test_skill_fetch_text_uses_safe_fetch(monkeypatch):
 
 
 def test_remote_image_proxy_only_returns_raster_images(tmp_path, monkeypatch):
-    from workspace.server import create_app
+    from gamedevworkstation.server import create_app
 
     s = AppState(db_path=tmp_path / "ri.db")
     bodies = {"https://img.example/a.png": (b"\x89PNG data", "image/png"),
@@ -253,7 +253,7 @@ def test_remote_image_proxy_only_returns_raster_images(tmp_path, monkeypatch):
         return sf.FetchResult(url=url, status=200, headers=httpx.Headers({"content-type": ctype}), content=body,
                               truncated=False)
 
-    monkeypatch.setattr("workspace.features.web_tools.safe_fetch", fake_fetch)
+    monkeypatch.setattr("gamedevworkstation.features.web_tools.safe_fetch", fake_fetch)
     with TestClient(create_app("t", s)) as c:
         assert c.post("/api/remote-image", json={"url": "https://img.example/a.png"}).status_code == 401
         r = c.post("/api/remote-image", json={"url": "https://img.example/a.png"}, headers=H)
@@ -269,12 +269,12 @@ def test_remote_image_proxy_only_returns_raster_images(tmp_path, monkeypatch):
 
 
 def test_harden_makes_app_data_owner_only(tmp_path):
-    from workspace.perms import harden
+    from gamedevworkstation.perms import harden
 
     d = tmp_path / "data"
     (d / "worktrees" / "s1").mkdir(parents=True)
     d.chmod(0o755)
-    files = {n: d / n for n in ("workspace.db", "workspace.db-wal", "config.toml", "runtime.json", "backend.log",
+    files = {n: d / n for n in ("gamedevworkstation.db", "gamedevworkstation.db-wal", "config.toml", "runtime.json", "backend.log",
                                 "backend.log.1")}
     for f in files.values():
         f.write_text("x")
@@ -293,8 +293,8 @@ def test_backend_takes_the_token_from_the_environment_and_drops_it(monkeypatch):
 
     import uvicorn
 
-    from workspace import __main__ as entry
-    from workspace import server, services
+    from gamedevworkstation import __main__ as entry
+    from gamedevworkstation import server, services
 
     seen = {}
 
@@ -303,18 +303,18 @@ def test_backend_takes_the_token_from_the_environment_and_drops_it(monkeypatch):
             pass
 
         async def serve(self):
-            seen["env_after"] = os.environ.get("WORKSPACE_TOKEN")
+            seen["env_after"] = os.environ.get("GDW_TOKEN")
 
     monkeypatch.setattr(services, "fix_path", lambda: None)
     monkeypatch.setattr(entry, "_setup_logging", lambda: None)
     monkeypatch.setattr(server, "create_app", lambda token: seen.setdefault("token", token))
     monkeypatch.setattr(uvicorn, "Server", FakeServer)
-    monkeypatch.setenv("WORKSPACE_TOKEN", "from-env-123")
-    monkeypatch.setattr(sys, "argv", ["workspace", "--port", "1", "--no-browser"])
+    monkeypatch.setenv("GDW_TOKEN", "from-env-123")
+    monkeypatch.setattr(sys, "argv", ["gamedevworkstation", "--port", "1", "--no-browser"])
     with pytest.raises(SystemExit):
         entry.main()
     assert seen == {"token": "from-env-123", "env_after": None}
-    monkeypatch.setattr(sys, "argv", ["workspace", "--port", "1", "--no-browser", "--token", "dev-flag"])
+    monkeypatch.setattr(sys, "argv", ["gamedevworkstation", "--port", "1", "--no-browser", "--token", "dev-flag"])
     seen.clear()
     with pytest.raises(SystemExit):
         entry.main()

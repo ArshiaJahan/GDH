@@ -3,9 +3,9 @@ import pytest
 from fastapi.testclient import TestClient
 from keyring.backend import KeyringBackend
 
-from workspace.app import AppState
-from workspace.providers.fake import FakeProvider
-from workspace.server import create_app
+from gamedevworkstation.app import AppState
+from gamedevworkstation.providers.fake import FakeProvider
+from gamedevworkstation.server import create_app
 
 H = {"Authorization": "Bearer t"}
 
@@ -30,7 +30,7 @@ class MemoryKeyring(KeyringBackend):
 def env(tmp_path, monkeypatch):
     kr = MemoryKeyring()
     keyring.set_keyring(kr)
-    monkeypatch.delenv("WORKSPACE_NO_KEYCHAIN")
+    monkeypatch.delenv("GDW_NO_KEYCHAIN")
     s = AppState(db_path=tmp_path / "s.db")
     s.providers.override("anthropic", "default", FakeProvider())
     with TestClient(create_app("t", s)) as c:
@@ -41,14 +41,14 @@ def test_keys_go_to_keychain_never_back_to_ui(env, tmp_path):
     c, s, kr = env
     r = c.post("/api/settings/keys", json={"provider": "anthropic", "profile": "work", "key": "sk-ant-secret-1234"}, headers=H)
     assert r.json() == {"ok": True, "hint": "…1234"}
-    assert kr.d[("Workspace", "anthropic:work")] == "sk-ant-secret-1234"
+    assert kr.d[("GameDevWorkstation", "anthropic:work")] == "sk-ant-secret-1234"
     st = c.get("/api/settings", headers=H).json()
     work = next(a for a in st["accounts"]["anthropic"] if a["profile"] == "work")
     assert work == {"profile": "work", "has_key": True, "hint": "…1234", "source": "keychain"}
     assert "sk-ant-secret" not in r.text + str(st)
     assert "secret" not in (tmp_path / "home" / "config.toml").read_text()
     c.delete("/api/settings/keys/anthropic/work", headers=H)
-    assert ("Workspace", "anthropic:work") not in kr.d
+    assert ("GameDevWorkstation", "anthropic:work") not in kr.d
 
 
 def test_patch_settings_applies_live(env):

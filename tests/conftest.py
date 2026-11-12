@@ -21,13 +21,13 @@ def untrusted(text: str) -> tuple[str, str] | None:
 @pytest.fixture(autouse=True)
 def _isolated_home(tmp_path, monkeypatch, request):
     """Every test gets its own data dir and no keychain / real keys."""
-    monkeypatch.setenv("WORKSPACE_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("WORKSPACE_NO_KEYCHAIN", "1")
-    monkeypatch.setenv("WORKSPACE_UPDATES_DIR", str(tmp_path / "updates"))  # never the real ~/WorkspaceUpdates
+    monkeypatch.setenv("GDW_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("GDW_NO_KEYCHAIN", "1")
+    monkeypatch.setenv("GDW_UPDATES_DIR", str(tmp_path / "updates"))  # never the real ~/GameDevWorkstationUpdates
     if "live" not in request.keywords:
         for k in REAL_KEYS:
             monkeypatch.delenv(k, raising=False)
-    from workspace import config
+    from gamedevworkstation import config
 
     config.get_config.cache_clear()
     yield
@@ -39,13 +39,13 @@ def _no_auto_title(request, monkeypatch):
     """Auto-titling makes one more provider call after a session's first reply, which would eat
     scripted FakeProvider responses meant for later turns. Tests opt in with @pytest.mark.auto_title."""
     if "auto_title" not in request.keywords:
-        from workspace.features import sessions_mgmt
+        from gamedevworkstation.features import sessions_mgmt
 
         monkeypatch.setattr(sessions_mgmt.Titler, "enabled", lambda self: False)
 
 
 @pytest.fixture
 def cfg():
-    from workspace.config import get_config
+    from gamedevworkstation.config import get_config
 
     return get_config()

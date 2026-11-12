@@ -1,7 +1,7 @@
 import asyncio
 
-from workspace.app import AppState
-from workspace.features.terminal import PtyManager
+from gamedevworkstation.app import AppState
+from gamedevworkstation.features.terminal import PtyManager
 
 
 async def test_pty_roundtrip(tmp_path):

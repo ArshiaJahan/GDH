@@ -21,7 +21,7 @@ type Hit = { session_id: string; title: string; archived: boolean; match: "title
 
 /** What is being dragged (dataTransfer can't be read during dragover, so it's kept here). */
 let drag: { kind: "sessions"; ids: string[] } | { kind: "group"; id: string } | null = null;
-const SESSION_MIME = "application/x-workspace-sessions";
+const SESSION_MIME = "application/x-gamedevworkstation-sessions";
 
 const FADE_MASK = "linear-gradient(to bottom, #000 calc(100% - 28px), transparent)";
 
@@ -397,7 +397,7 @@ export function Sidebar() {
     return (
       <div className="group/h flex items-center gap-0.5 pl-1 pr-1 pt-2 pb-0.5 rounded" style={{ boxShadow: line }}
         draggable={!!g && renamingGroupId !== g.id}
-        onDragStart={g ? (e) => { drag = { kind: "group", id: g.id }; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("application/x-workspace-group", g.id); } : undefined}
+        onDragStart={g ? (e) => { drag = { kind: "group", id: g.id }; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("application/x-gamedevworkstation-group", g.id); } : undefined}
         onDragEnd={() => { drag = null; setDrop(null); }}
         onContextMenu={g ? (e) => { e.preventDefault(); openMenu(e, groupItems(g)); } : undefined}>
         {g && renamingGroupId === g.id ? (
@@ -505,7 +505,7 @@ export function Sidebar() {
   return (
     <nav className="h-full flex flex-col surface border-r border-line select-none" aria-label="Sessions">
       <div className="px-3 pt-3 pb-2 flex items-center gap-1" data-tauri-drag-region>
-        <span className="font-semibold tracking-tight mr-auto">Workspace</span>
+        <span className="font-semibold tracking-tight mr-auto">GameDevWorkstation</span>
         <button className="btn btn-ghost px-1.5" onClick={(e) => openMenu(e.currentTarget, headerItems())} title="New group, group by, sort, archived and trash" aria-label="Session list options" aria-haspopup="menu"><ListFilter size={15} /></button>
         <button className="btn btn-ghost px-1.5" onClick={newSession} title="New session (⌘N)" aria-label="New session"><Plus size={16} /></button>
       </div>

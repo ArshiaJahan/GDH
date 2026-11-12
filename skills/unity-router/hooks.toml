@@ -1,6 +1,6 @@
-# Unity gates: the Unity pack's built-in hook set for Workspace (features/hooks.py).
+# Unity gates: the Unity pack's built-in hook set for GameDevWorkstation (features/hooks.py).
 #
-# Off in every project until you turn it on: Workspace offers it once, the first time a Unity
+# Off in every project until you turn it on: GameDevWorkstation offers it once, the first time a Unity
 # skill is used in a folder with ProjectSettings/ProjectVersion.txt, and the Quality card has a
 # "Unity gates" toggle. Turning it on consents to exactly the MCP tools and command lines these
 # gates run, so they don't ask every turn. Format: see the docstring of features/hooks.py.

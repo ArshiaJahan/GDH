@@ -9,13 +9,13 @@ import time
 
 import pytest
 
-from workspace.agent.tools import ToolContext, ToolOutput, wrap_untrusted
-from workspace.app import AppState
-from workspace.core.types import Message
-from workspace.features import hooks as H
-from workspace.features.unity_bridge import (BridgeResult, EditorState, FakeUnityBridge, UnityBridge,
+from gamedevworkstation.agent.tools import ToolContext, ToolOutput, wrap_untrusted
+from gamedevworkstation.app import AppState
+from gamedevworkstation.core.types import Message
+from gamedevworkstation.features import hooks as H
+from gamedevworkstation.features.unity_bridge import (BridgeResult, EditorState, FakeUnityBridge, UnityBridge,
                                              parse_compile_output)
-from workspace.providers.fake import FakeProvider, text_response, tool_response
+from gamedevworkstation.providers.fake import FakeProvider, text_response, tool_response
 
 from .conftest import untrusted
 
@@ -94,7 +94,7 @@ async def test_compile_failure_is_injected_untrusted_then_passes(app, proj):
     assert gates[0].meta["gate"] == {"id": "unity.compile", "status": "fail", "attempt": 1, "max": 2,
                                      "hook": "cs-compile", "level": "L1"}
     head, wrapped = gates[0].content[0].text.split("\n\n", 1)
-    assert head.startswith("[Workspace gate unity.compile] 1 compile error (1 root cause) after this turn's changes (mcp).")
+    assert head.startswith("[GameDevWorkstation gate unity.compile] 1 compile error (1 root cause) after this turn's changes (mcp).")
     assert untrusted(wrapped) == ("gate:unity.compile", CS_ERR)
     assert m[-1].role == "assistant" and m[-1].content[0].text == "fixed" and not m[-1].meta.get("notice")
     assert gate_rows(app) == [("fail", 1, "L1"), ("pass", 1, "L1")]
@@ -457,12 +457,12 @@ async def test_post_merge_compile_note(app, proj):
     enable(app, proj)
     fake(app, compile=[BridgeResult("fail", "1 compile error", "mcp", report=CS_ERR, errors=1)])
     s = session(app, proj)
-    from workspace.features.hookbus import HookEvent, TurnState
+    from gamedevworkstation.features.hookbus import HookEvent, TurnState
 
     (proj / "Assets/Game/New.cs").write_text("class N {}\n")
     ctx = ToolContext(app=app, session=s, run_id="main:x")
     ev = HookEvent("post_merge", ctx, turn=TurnState(s["id"], time.time() - 5, folder=proj.resolve()), unit="sub_1",
-                   extra={"branch": "workspace/sub_1", "worktree": "/w", "name": "w", "stat": "", "changes": True})
+                   extra={"branch": "gdw/sub_1", "worktree": "/w", "name": "w", "stat": "", "changes": True})
     res = await app.hooks.fire(ev)
     (r,) = [x for x in res if x.gate == "unity.compile"]
     assert r.action == "note" and r.note.startswith("[unity.compile] 1 compile error")

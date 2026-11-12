@@ -3,12 +3,12 @@ import json
 
 import pytest
 
-from workspace.core.effort import APPROVALS, EffortApprovalRequired
-from workspace.core.types import (
+from gamedevworkstation.core.effort import APPROVALS, EffortApprovalRequired
+from gamedevworkstation.core.types import (
     AudioBlock, ChatRequest, FileBlock, ImageBlock, Message, TextBlock, ThinkingBlock,
     ToolResultBlock, ToolSpec, ToolUseBlock,
 )
-from workspace.providers.anthropic_provider import AnthropicProvider, build_params, effort_params
+from gamedevworkstation.providers.anthropic_provider import AnthropicProvider, build_params, effort_params
 
 from .conftest import FIXTURES
 from .mockhttp import MockAPI, connect_error, jresp, sse
@@ -120,8 +120,8 @@ async def test_stream_events(cfg):
 
 
 def test_long_context_pricing(cfg):
-    from workspace.core.types import Usage
-    from workspace.providers.base import compute_cost
+    from gamedevworkstation.core.types import Usage
+    from gamedevworkstation.providers.base import compute_cost
 
     haiku = cfg.model("claude-haiku-5-5")
     assert compute_cost(haiku, Usage(input_tokens=1_000_000)) == pytest.approx(0.50)  # >100k → long-context rate

@@ -5,10 +5,10 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from workspace.app import AppState
-from workspace.config import data_dir, media_dir
-from workspace.core.types import ImageBlock, Message, TextBlock, ToolResultBlock, ToolUseBlock
-from workspace.server import create_app
+from gamedevworkstation.app import AppState
+from gamedevworkstation.config import data_dir, media_dir
+from gamedevworkstation.core.types import ImageBlock, Message, TextBlock, ToolResultBlock, ToolUseBlock
+from gamedevworkstation.server import create_app
 
 TOKEN = "test-token"
 H = {"Authorization": f"Bearer {TOKEN}"}
@@ -86,7 +86,7 @@ import base64  # noqa: E402
 import struct  # noqa: E402
 import zlib  # noqa: E402
 
-from workspace.core import media  # noqa: E402
+from gamedevworkstation.core import media  # noqa: E402
 
 needs_sips = pytest.mark.skipif(media._sips() is None, reason="needs macOS sips")
 
@@ -134,7 +134,7 @@ def test_images_over_the_pixel_limit_are_resized_at_attach_time(tmp_path):
 
 @needs_sips
 def test_oversized_images_in_tool_results_are_shrunk_per_request(tmp_path):
-    from workspace.providers.anthropic_provider import messages_to_wire
+    from gamedevworkstation.providers.anthropic_provider import messages_to_wire
 
     data = base64.b64encode(png(2600, 30)).decode()
     msgs = [Message(role="user", content=[TextBlock(text="hi")]),
@@ -179,9 +179,9 @@ def test_stub_rejected_images_leaves_out_only_the_offending_ones(tmp_path):
 async def test_image_rejection_retries_without_the_image(tmp_path):
     from fastapi import APIRouter, FastAPI
 
-    from workspace.providers.base import ProviderError
-    from workspace.providers.fake import FakeProvider, text_response
-    from workspace.routes import register_routes
+    from gamedevworkstation.providers.base import ProviderError
+    from gamedevworkstation.providers.fake import FakeProvider, text_response
+    from gamedevworkstation.routes import register_routes
 
     app = AppState(db_path=tmp_path / "c.db")
     register_routes(FastAPI(), APIRouter(), app)
@@ -213,7 +213,7 @@ async def test_image_rejection_retries_without_the_image(tmp_path):
 def app(tmp_path):
     from fastapi import APIRouter, FastAPI
 
-    from workspace.routes import register_routes
+    from gamedevworkstation.routes import register_routes
 
     a = AppState(db_path=tmp_path / "n.db")
     register_routes(FastAPI(), APIRouter(), a)
@@ -236,12 +236,12 @@ def test_harness_recap_leaves_out_notices(app):
 
 @pytest.mark.auto_title
 async def test_title_generation_ignores_notices(app):
-    from workspace.providers.fake import FakeProvider, text_response
+    from gamedevworkstation.providers.fake import FakeProvider, text_response
 
     s = app.store.create()
     app.store.add_message(s["id"], Message.user("plan a trip"))
     app.store.add_message(s["id"], notice("NOTICE-TEXT paused after 60 model calls"))
-    from workspace.features.sessions_mgmt import Titler
+    from gamedevworkstation.features.sessions_mgmt import Titler
 
     titler = Titler(app)
     assert not titler.wants_title(s["id"])  # a notice isn't a reply
@@ -254,8 +254,8 @@ async def test_title_generation_ignores_notices(app):
 
 
 async def test_compaction_hides_notices_before_the_cut(app):
-    from workspace.agent import context as cx
-    from workspace.providers.fake import FakeProvider, text_response
+    from gamedevworkstation.agent import context as cx
+    from gamedevworkstation.providers.fake import FakeProvider, text_response
 
     s = app.store.create()
     sid = s["id"]
@@ -281,7 +281,7 @@ async def test_compaction_hides_notices_before_the_cut(app):
 
 import tomllib  # noqa: E402
 
-from workspace import config as config_mod  # noqa: E402
+from gamedevworkstation import config as config_mod  # noqa: E402
 
 
 def test_pre_migration_backup_is_kept_apart_from_save_backups(tmp_path, monkeypatch):

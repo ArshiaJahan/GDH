@@ -3,11 +3,11 @@ import json
 
 import pytest
 
-from workspace.core.effort import APPROVALS, EffortApprovalRequired
-from workspace.core.types import (
+from gamedevworkstation.core.effort import APPROVALS, EffortApprovalRequired
+from gamedevworkstation.core.types import (
     AudioBlock, ChatRequest, FileBlock, ImageBlock, Message, ThinkingBlock, ToolResultBlock, ToolSpec, ToolUseBlock,
 )
-from workspace.providers.openai_provider import OpenAIProvider, build_params, reasoning_params
+from gamedevworkstation.providers.openai_provider import OpenAIProvider, build_params, reasoning_params
 
 from .conftest import FIXTURES
 from .mockhttp import MockAPI, connect_error, jresp, sse

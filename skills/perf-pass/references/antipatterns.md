@@ -5,7 +5,7 @@ same reproducible scenario. Python 3.9+ and the standard library are sufficient:
 
 ```sh
 python3 <skills>/perf-pass/scripts/unity_antipatterns.py --project <game>
-python3 <skills>/perf-pass/scripts/unity_antipatterns.py --project <game> --changed Assets/Scripts/Enemy.cs --baseline <game>/.workspace/antipatterns-baseline.json
+python3 <skills>/perf-pass/scripts/unity_antipatterns.py --project <game> --changed Assets/Scripts/Enemy.cs --baseline <game>/.gamedevworkstation/antipatterns-baseline.json
 ```
 
 `--project` defaults to `.` and scans `Assets/**/*.cs`. A standalone folder with

@@ -5,7 +5,7 @@ import { gateSummary, splitGateText } from "./GateRow";
 
 describe("splitGateText", () => {
   it("drops the gate prefix and the untrusted markers", () => {
-    const text = "[Workspace gate unity.compile] 3 compile errors after this turn's changes (mcp). Fix them.\n\n"
+    const text = "[GameDevWorkstation gate unity.compile] 3 compile errors after this turn's changes (mcp). Fix them.\n\n"
       + '<untrusted-1a2b source="unity:unity.compile">\nAssets/A.cs(3,1): error CS0103\n</untrusted-1a2b>';
     const { reason, evidence } = splitGateText(text, "unity.compile");
     expect(reason).toBe("3 compile errors after this turn's changes (mcp). Fix them.");
@@ -13,7 +13,12 @@ describe("splitGateText", () => {
   });
 
   it("keeps plain text as the reason", () => {
-    expect(splitGateText("[Workspace gate x] it failed", "x")).toEqual({ reason: "it failed", evidence: "" });
+    expect(splitGateText("[GameDevWorkstation gate x] it failed", "x")).toEqual({ reason: "it failed", evidence: "" });
+  });
+
+  it("drops the prefix of messages saved under the app's previous name, only for this gate", () => {
+    expect(splitGateText("[Oldname gate x] it failed", "x")).toEqual({ reason: "it failed", evidence: "" });
+    expect(splitGateText("[Oldname gate y] it failed", "x").reason).toBe("[Oldname gate y] it failed");
   });
 });
 

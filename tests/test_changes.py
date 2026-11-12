@@ -3,8 +3,8 @@ import subprocess
 import pytest
 from fastapi.testclient import TestClient
 
-from workspace.app import AppState
-from workspace.server import create_app
+from gamedevworkstation.app import AppState
+from gamedevworkstation.server import create_app
 
 H = {"Authorization": "Bearer t"}
 

@@ -10,13 +10,13 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from workspace import config as config_mod
-from workspace.app import AppState
-from workspace.config import data_dir, load_config, media_dir, save_config_patch, sessions_dir
-from workspace.core.types import ImageBlock, Message, TextBlock
-from workspace.db import DB, SCHEMA, SCHEMA_VERSION
-from workspace.items import extract_text
-from workspace.server import create_app
+from gamedevworkstation import config as config_mod
+from gamedevworkstation.app import AppState
+from gamedevworkstation.config import data_dir, load_config, media_dir, save_config_patch, sessions_dir
+from gamedevworkstation.core.types import ImageBlock, Message, TextBlock
+from gamedevworkstation.db import DB, SCHEMA, SCHEMA_VERSION
+from gamedevworkstation.items import extract_text
+from gamedevworkstation.server import create_app
 
 TOKEN = "test-token"
 H = {"Authorization": f"Bearer {TOKEN}"}
@@ -157,7 +157,7 @@ def test_purge_removes_everything_the_session_owns(client, state):
 
 
 def test_snapshot_size_cap(client, state, monkeypatch, tmp_path):
-    from workspace import services
+    from gamedevworkstation import services
 
     monkeypatch.setattr(services, "SNAPSHOT_MAX_BYTES", 10)
     folder = tmp_path / "proj"
@@ -337,7 +337,7 @@ def test_ooxml_text_extraction(tmp_path):
 
 
 def test_ooxml_skips_oversized_parts(tmp_path, monkeypatch):
-    from workspace import items
+    from gamedevworkstation import items
 
     monkeypatch.setattr(items, "OOXML_MAX_PART", 50)
     docx = _zip(tmp_path / "big.docx", {"word/document.xml": f'<w:document {W}><w:body><w:p><w:r><w:t>{"x" * 100}'

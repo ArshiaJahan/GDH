@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Builds dist/Workspace.app and dist/Workspace.dmg for Apple Silicon, ad-hoc signed.
+# Builds dist/GameDevWorkstation.app and dist/GameDevWorkstation.dmg for Apple Silicon, ad-hoc signed.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 # Output folder (default dist/). scripts/release.sh builds into a staging folder instead and
-# sets WORKSPACE_SKIP_DMG=1.
-DIST="${WORKSPACE_DIST_DIR:-$ROOT/dist}"
+# sets GDW_SKIP_DMG=1.
+DIST="${GDW_DIST_DIR:-$ROOT/dist}"
 TARGET=aarch64-apple-darwin
 
 # rm -rf that survives Finder writing .DS_Store into a folder while it is being deleted.
@@ -51,7 +51,7 @@ echo "==> Backend (PyInstaller, arm64, onedir)"
 uv sync --group dev --extra agent-sdk
 uv run python scripts/version.py build-info >/dev/null  # version, commit, build time for About
 rm_tree build/pyinstaller/backend  # PyInstaller's own clean-up fails if Finder touches the folder
-uv run pyinstaller packaging/workspace.spec --noconfirm --distpath build/pyinstaller --workpath build/pyi-work --log-level WARN
+uv run pyinstaller packaging/gamedevworkstation.spec --noconfirm --distpath build/pyinstaller --workpath build/pyi-work --log-level WARN
 rm_tree src-tauri/resources/backend
 mkdir -p src-tauri/resources
 cp -R build/pyinstaller/backend src-tauri/resources/backend
@@ -61,24 +61,24 @@ echo "==> Desktop shell (Tauri)"
 ( cd "$ROOT" && npx --prefix frontend tauri build --target "$TARGET" --bundles app )
 
 BUNDLE="src-tauri/target/$TARGET/release/bundle"
-rm_tree "$DIST/Workspace.app" "$DIST/Workspace.dmg"
+rm_tree "$DIST/GameDevWorkstation.app" "$DIST/GameDevWorkstation.dmg"
 mkdir -p "$DIST"
-cp -R "$BUNDLE/macos/Workspace.app" "$DIST/Workspace.app"
+cp -R "$BUNDLE/macos/GameDevWorkstation.app" "$DIST/GameDevWorkstation.app"
 
 echo "==> Signing (ad-hoc)"
-xattr -cr "$DIST/Workspace.app"
-codesign --force --deep --sign - "$DIST/Workspace.app"
-codesign --verify --deep --strict "$DIST/Workspace.app" && echo "    signature OK"
+xattr -cr "$DIST/GameDevWorkstation.app"
+codesign --force --deep --sign - "$DIST/GameDevWorkstation.app"
+codesign --verify --deep --strict "$DIST/GameDevWorkstation.app" && echo "    signature OK"
 
-if [[ -n "${WORKSPACE_SKIP_DMG:-}" ]]; then echo; echo "Built: $DIST/Workspace.app"; exit 0; fi
+if [[ -n "${GDW_SKIP_DMG:-}" ]]; then echo; echo "Built: $DIST/GameDevWorkstation.app"; exit 0; fi
 
 echo "==> Disk image (from the signed app)"
 STAGE="$(mktemp -d)"
-cp -R "$DIST/Workspace.app" "$STAGE/"
+cp -R "$DIST/GameDevWorkstation.app" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
-hdiutil create -volname Workspace -srcfolder "$STAGE" -ov -format UDZO "$DIST/Workspace.dmg" >/dev/null
+hdiutil create -volname GameDevWorkstation -srcfolder "$STAGE" -ov -format UDZO "$DIST/GameDevWorkstation.dmg" >/dev/null
 rm -rf "$STAGE"
 
 echo
-echo "Built: $DIST/Workspace.app"
-echo "       $DIST/Workspace.dmg"
+echo "Built: $DIST/GameDevWorkstation.app"
+echo "       $DIST/GameDevWorkstation.dmg"

@@ -28,7 +28,7 @@ describe("generic approval card", () => {
   });
 
   it("falls back to Approve / Decline without buttons", async () => {
-    render(<ApprovalCard a={{ id: "apr_2", kind: "hook_trust", status: "pending", session_id: "s", payload: { subject: ".workspace/hooks.toml", markdown: "x" } }} />);
+    render(<ApprovalCard a={{ id: "apr_2", kind: "hook_trust", status: "pending", session_id: "s", payload: { subject: ".gamedevworkstation/hooks.toml", markdown: "x" } }} />);
     expect(screen.getByText("Trust this hook file?")).toBeTruthy();
     await act(async () => { fireEvent.click(screen.getByText("Approve")); });
     expect(post).toHaveBeenCalledWith("/approvals/apr_2", { decision: "approve", choice: undefined, note: undefined });

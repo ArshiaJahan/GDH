@@ -1,4 +1,4 @@
-//! Workspace desktop shell.
+//! GameDevWorkstation desktop shell.
 //!
 //! Starts the bundled Python backend on a random free 127.0.0.1 port with a random
 //! session token, hands both to the UI (`backend_info`, which waits for /health so the
@@ -50,19 +50,19 @@ fn home() -> PathBuf {
 }
 
 fn data_dir() -> PathBuf {
-    if let Ok(p) = std::env::var("WORKSPACE_HOME") {
+    if let Ok(p) = std::env::var("GDW_HOME") {
         return PathBuf::from(p);
     }
     if cfg!(target_os = "macos") {
-        home().join("Library/Application Support/Workspace")
+        home().join("Library/Application Support/GameDevWorkstation")
     } else {
-        home().join(".local/share/workspace")
+        home().join(".local/share/gamedevworkstation")
     }
 }
 
 fn logs_dir() -> PathBuf {
     if cfg!(target_os = "macos") {
-        home().join("Library/Logs/Workspace")
+        home().join("Library/Logs/GameDevWorkstation")
     } else {
         data_dir().join("logs")
     }
@@ -114,9 +114,9 @@ fn spawn_backend(app: &AppHandle, port: u16, token: &str) -> std::io::Result<Chi
         std::process::id().to_string(),
     ];
     // Development (`cargo tauri dev`): run the backend from the repo with uv.
-    let mut cmd = if let Ok(repo) = std::env::var("WORKSPACE_DEV_BACKEND") {
+    let mut cmd = if let Ok(repo) = std::env::var("GDW_DEV_BACKEND") {
         let mut c = Command::new("uv");
-        c.current_dir(repo).args(["run", "workspace"]).args(&args);
+        c.current_dir(repo).args(["run", "gamedevworkstation"]).args(&args);
         c
     } else {
         let exe = app
@@ -124,12 +124,12 @@ fn spawn_backend(app: &AppHandle, port: u16, token: &str) -> std::io::Result<Chi
             .resource_dir()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e.to_string()))?
             .join("backend")
-            .join("workspace-backend");
+            .join("gamedevworkstation-backend");
         let mut c = Command::new(exe);
         c.args(&args);
         c
     };
-    cmd.env("WORKSPACE_TOKEN", token);
+    cmd.env("GDW_TOKEN", token);
     cmd.stdin(Stdio::null()).stdout(log.try_clone()?).stderr(log);
     #[cfg(unix)]
     {
@@ -269,7 +269,7 @@ fn poll_exit(app: &AppHandle) -> Option<BackendExit> {
             }
         }
     };
-    let exit = BackendExit::new("exited", format!("Workspace's engine stopped ({how})."), status.code());
+    let exit = BackendExit::new("exited", format!("GameDevWorkstation's engine stopped ({how})."), status.code());
     *health.exited.lock().unwrap() = Some(exit.clone());
     Some(exit)
 }
@@ -458,7 +458,7 @@ async fn open_file(app: AppHandle, state: tauri::State<'_, Backend>, path: Strin
             .set("Authorization", &auth)
             .call()
             .map_err(|e| match e {
-                ureq::Error::Status(404, _) => "Workspace doesn't serve that file.".to_string(),
+                ureq::Error::Status(404, _) => "GameDevWorkstation doesn't serve that file.".to_string(),
                 ureq::Error::Status(code, _) => format!("The backend answered {code}."),
                 other => format!("Couldn't reach the backend: {other}"),
             })?;
@@ -492,10 +492,10 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let trash_session = MenuItem::with_id(app, "trash_session", "Move Session to Trash", true, None::<&str>)?;
     let app_menu = Submenu::with_items(
         app,
-        "Workspace",
+        "GameDevWorkstation",
         true,
         &[
-            &PredefinedMenuItem::about(app, Some("About Workspace"), Some(AboutMetadata::default()))?,
+            &PredefinedMenuItem::about(app, Some("About GameDevWorkstation"), Some(AboutMetadata::default()))?,
             &PredefinedMenuItem::separator(app)?,
             &new_session,
             &settings,
@@ -593,7 +593,7 @@ pub fn run() {
             let _ = app.emit("menu", event.id().as_ref().to_string());
         })
         .build(tauri::generate_context!())
-        .expect("error while building Workspace");
+        .expect("error while building GameDevWorkstation");
 
     app.run(|handle, event| match event {
         RunEvent::ExitRequested { .. } | RunEvent::Exit => stop_backend(handle),

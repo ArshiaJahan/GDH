@@ -32,7 +32,7 @@ export async function connect(): Promise<Conn> {
   } else {
     token = sessionStorage.getItem("ws-token");
   }
-  if (!token) throw new Error("Missing session token. Open the link printed by `uv run workspace`.");
+  if (!token) throw new Error("Missing session token. Open the link printed by `uv run gamedevworkstation`.");
   conn = { base: "", token };
   return conn;
 }

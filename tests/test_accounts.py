@@ -13,13 +13,13 @@ import pytest
 import respx
 from fastapi.testclient import TestClient
 
-from workspace.agent.tools import ToolContext
-from workspace.app import AppState
-from workspace.config import Config, save_config_patch
-from workspace.features.elevenlabs_feature import ElevenLabsService, _register_tools
-from workspace.features.status import StatusChecker
-from workspace.providers.fake import FakeProvider
-from workspace.server import create_app
+from gamedevworkstation.agent.tools import ToolContext
+from gamedevworkstation.app import AppState
+from gamedevworkstation.config import Config, save_config_patch
+from gamedevworkstation.features.elevenlabs_feature import ElevenLabsService, _register_tools
+from gamedevworkstation.features.status import StatusChecker
+from gamedevworkstation.providers.fake import FakeProvider
+from gamedevworkstation.server import create_app
 
 from .test_settings import MemoryKeyring
 
@@ -77,7 +77,7 @@ def fake_codex(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
     monkeypatch.setenv("FAKE_CODEX_LOG", str(log))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-default-dummy")
-    monkeypatch.setenv("WORKSPACE_KEY_OPENAI_WORK", "sk-openai-work-dummy")
+    monkeypatch.setenv("GDW_KEY_OPENAI_WORK", "sk-openai-work-dummy")
     return log
 
 
@@ -189,7 +189,7 @@ def test_codex_cli_unit_and_harness_get_session_openai_key(two, fake_codex, tmp_
 @respx.mock
 async def test_elevenlabs_uses_session_profile(tmp_path, monkeypatch):
     monkeypatch.setenv("ELEVENLABS_API_KEY", "el-default-dummy")
-    monkeypatch.setenv("WORKSPACE_KEY_ELEVENLABS_SECOND", "el-second-dummy")
+    monkeypatch.setenv("GDW_KEY_ELEVENLABS_SECOND", "el-second-dummy")
     a = AppState(db_path=tmp_path / "e.db")
     a.config.accounts = {k: list(v) for k, v in TWO.items()}
     svc = ElevenLabsService(a)
@@ -217,7 +217,7 @@ def test_delete_profile_and_remove_key(two, monkeypatch):
     c, s, _, checks = two
     kr = MemoryKeyring()
     keyring.set_keyring(kr)
-    monkeypatch.delenv("WORKSPACE_NO_KEYCHAIN")
+    monkeypatch.delenv("GDW_NO_KEYCHAIN")
     el = s.extensions["elevenlabs"]
     reset_calls = []
     monkeypatch.setattr(s.providers, "reset", lambda: reset_calls.append(1))
@@ -231,7 +231,7 @@ def test_delete_profile_and_remove_key(two, monkeypatch):
     checks.clear()
     reset_calls.clear()
     assert c.delete("/api/settings/keys/elevenlabs/second", headers=H).json() == {"ok": True}
-    assert ("Workspace", "elevenlabs:second") not in kr.d
+    assert ("GameDevWorkstation", "elevenlabs:second") not in kr.d
     assert checks == ["elevenlabs"] and reset_calls and el.clients == {}
 
     # Deleting a profile deletes its key, re-checks, and sessions on it fall back to the default.
@@ -241,7 +241,7 @@ def test_delete_profile_and_remove_key(two, monkeypatch):
     checks.clear()
     st = c.delete("/api/settings/accounts/openai/work", headers=H).json()
     assert [p["profile"] for p in st["accounts"]["openai"]] == ["default"]
-    assert ("Workspace", "openai:work") not in kr.d and s.config.profiles("openai") == ["default"]
+    assert ("GameDevWorkstation", "openai:work") not in kr.d and s.config.profiles("openai") == ["default"]
     assert not s.db.one("SELECT 1 FROM auth_status WHERE provider='openai' AND profile='work'")
     assert checks == ["openai"]
     assert s.config.profile_for(s.store.get(sid), "openai") == "default"

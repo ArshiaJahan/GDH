@@ -26,7 +26,7 @@ export function useBackendExit(onExit: (e: BackendExit) => void) {
   }, []);
 }
 
-/** Full-window screen when Workspace's engine (the backend) stopped: why, its log and Restart. */
+/** Full-window screen when GameDevWorkstation's engine (the backend) stopped: why, its log and Restart. */
 export function EngineStopped({ exit }: { exit: BackendExit }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -58,7 +58,7 @@ export function EngineStopped({ exit }: { exit: BackendExit }) {
       aria-labelledby="engine-stopped-title" aria-describedby="engine-stopped-desc">
       <div className="max-w-2xl w-full">
         <h1 id="engine-stopped-title" ref={heading} tabIndex={-1} className="text-lg font-semibold mb-1 flex items-center gap-2 outline-none">
-          <AlertTriangle size={18} className="text-bad" /> {stopped ? "Workspace's engine stopped" : "Workspace's engine didn't start"}
+          <AlertTriangle size={18} className="text-bad" /> {stopped ? "GameDevWorkstation's engine stopped" : "GameDevWorkstation's engine didn't start"}
         </h1>
         <p id="engine-stopped-desc" className="text-muted mb-3">
           {exit.message} Your sessions are saved. Restart the engine to continue; if it keeps stopping, the log below says why.

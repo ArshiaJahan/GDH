@@ -1,15 +1,15 @@
 ---
 name: campaign
-description: How to work inside a Workspace campaign or workflow chain - read the brief, work only on the current phase, log decisions, finish each phase with a HANDOFF block and campaign_phase_done (chain_step_done in a chain), ask through campaign_pause. Pinned in campaign and chain sessions.
-runtime: workspace
+description: How to work inside a GameDevWorkstation campaign or workflow chain - read the brief, work only on the current phase, log decisions, finish each phase with a HANDOFF block and campaign_phase_done (chain_step_done in a chain), ask through campaign_pause. Pinned in campaign and chain sessions.
+runtime: gamedevworkstation
 ---
 
 # Working in a campaign or chain
 
-This session belongs to a **campaign** (several sessions, a campaign file in the project) or a **chain** (one session, steps from a workflow template). Workspace runs the phases, checks them and hands the work from session to session. You do the work of the current phase.
+This session belongs to a **campaign** (several sessions, a campaign file in the project) or a **chain** (one session, steps from a workflow template). GameDevWorkstation runs the phases, checks them and hands the work from session to session. You do the work of the current phase.
 
 ## Start of a session
-1. Read the first message (the campaign brief) and, for a campaign, the campaign file it names (`.workspace/campaigns/<slug>.md`). Call `campaign_status` whenever you need the phase, its checks or the next action.
+1. Read the first message (the campaign brief) and, for a campaign, the campaign file it names (`.gamedevworkstation/campaigns/<slug>.md`). Call `campaign_status` whenever you need the phase, its checks or the next action.
 2. Read PROJECT.md (conventions, ADRs, gotchas) and BACKLOG.md when they exist and the phase touches them.
 
 ## Planning (status planning)

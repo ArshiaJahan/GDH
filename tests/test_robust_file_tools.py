@@ -3,10 +3,10 @@ import time
 
 import pytest
 
-from workspace.agent import builtin_tools as bt
-from workspace.agent.tools import ToolContext
-from workspace.app import AppState
-from workspace.providers.fake import FakeProvider
+from gamedevworkstation.agent import builtin_tools as bt
+from gamedevworkstation.agent.tools import ToolContext
+from gamedevworkstation.app import AppState
+from gamedevworkstation.providers.fake import FakeProvider
 
 
 @pytest.fixture
@@ -40,7 +40,7 @@ async def test_read_offset_limit_on_large_file(env, monkeypatch):
     tail = await run("read_file", {"path": "big.txt", "offset": 49_999})
     assert tail.text == "49999\tline49999\n50000\tline50000"
     # limit is clamped to 5000 (lift the central tool-output cap so the whole result comes back)
-    monkeypatch.setattr("workspace.agent.tools.output_limits", lambda ctx: (10_000_000, 4))
+    monkeypatch.setattr("gamedevworkstation.agent.tools.output_limits", lambda ctx: (10_000_000, 4))
     assert (await run("read_file", {"path": "big.txt", "limit": 999_999})).text.count("\n") == 5000  # 5000 lines + note
 
 

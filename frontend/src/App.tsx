@@ -147,8 +147,8 @@ export default function App() {
   }, [terminalOpen, ready]);
 
   if (engineExit) return <EngineStopped exit={engineExit} />;
-  if (error) return <div className="h-full flex items-center justify-center p-8 text-center"><div><p className="font-medium mb-2">Can't reach the Workspace backend</p><p className="text-muted">{error}</p></div></div>;
-  if (!ready) return <div className="h-full flex items-center justify-center text-muted">Starting Workspace…</div>;
+  if (error) return <div className="h-full flex items-center justify-center p-8 text-center"><div><p className="font-medium mb-2">Can't reach the GameDevWorkstation backend</p><p className="text-muted">{error}</p></div></div>;
+  if (!ready) return <div className="h-full flex items-center justify-center text-muted">Starting GameDevWorkstation…</div>;
 
   const main = page === "chat" ? <Chat /> : page === "artifacts" ? <ArtifactsPage /> : page === "elevenlabs" ? <ElevenLabsPage />
     : page === "board" ? <BoardPage /> : page === "schedule" ? <SchedulePage /> : page === "campaigns" ? <CampaignsPage /> : page === "skills" ? <SkillsPage /> : page === "usage" ? <UsagePage /> : <SettingsPage />;

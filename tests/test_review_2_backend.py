@@ -11,19 +11,19 @@ import pytest
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
-from workspace import db as db_mod
-from workspace.agent.tools import ToolContext
-from workspace.app import AppState
-from workspace.config import save_config_patch
-from workspace.core.types import ChatRequest, Message, Response, Usage
-from workspace.db import DB, now
-from workspace.features import sessions_mgmt, skill_assistant
-from workspace.features.harnesses import Harnesses
-from workspace.features.status import StatusChecker
-from workspace.providers.base import ProviderError
-from workspace.providers.fake import FakeProvider, text_response
-from workspace.server import create_app
-from workspace.usage import BudgetExceeded
+from gamedevworkstation import db as db_mod
+from gamedevworkstation.agent.tools import ToolContext
+from gamedevworkstation.app import AppState
+from gamedevworkstation.config import save_config_patch
+from gamedevworkstation.core.types import ChatRequest, Message, Response, Usage
+from gamedevworkstation.db import DB, now
+from gamedevworkstation.features import sessions_mgmt, skill_assistant
+from gamedevworkstation.features.harnesses import Harnesses
+from gamedevworkstation.features.status import StatusChecker
+from gamedevworkstation.providers.base import ProviderError
+from gamedevworkstation.providers.fake import FakeProvider, text_response
+from gamedevworkstation.server import create_app
+from gamedevworkstation.usage import BudgetExceeded
 
 from .test_settings import MemoryKeyring
 
@@ -36,7 +36,7 @@ def app(tmp_path):
     a = AppState(db_path=tmp_path / "r2.db")
     a.providers.override("anthropic", "default", FakeProvider("anthropic"))
     a.providers.override("openai", "default", FakeProvider("openai"))
-    from workspace.routes import register_routes
+    from gamedevworkstation.routes import register_routes
 
     register_routes(FastAPI(), APIRouter(), a)
     return a
@@ -215,7 +215,7 @@ async def test_skill_assistant_records_the_profile_it_used(tmp_path):
 def test_posting_a_stale_profile_list_never_deletes_keys(tmp_path, monkeypatch):
     kr = MemoryKeyring()
     keyring.set_keyring(kr)
-    monkeypatch.delenv("WORKSPACE_NO_KEYCHAIN")
+    monkeypatch.delenv("GDW_NO_KEYCHAIN")
 
     async def no_check(self, only=None):
         return []
@@ -227,12 +227,12 @@ def test_posting_a_stale_profile_list_never_deletes_keys(tmp_path, monkeypatch):
                headers=H)
         st = c.post("/api/settings/accounts/openai", json={"profiles": ["default"]}, headers=H).json()  # stale page
         assert [p["profile"] for p in st["accounts"]["openai"]] == ["default", "work"]
-        assert ("Workspace", "openai:work") in kr.d
+        assert ("GameDevWorkstation", "openai:work") in kr.d
         st = c.post("/api/settings/accounts/openai", json={"profiles": ["work"]}, headers=H).json()  # star
         assert [p["profile"] for p in st["accounts"]["openai"]] == ["work", "default"]
         st = c.post("/api/settings/accounts/openai", json={"profiles": ["work", "default", "new"]}, headers=H).json()
         assert [p["profile"] for p in st["accounts"]["openai"]] == ["work", "default", "new"]  # Add profile
-        assert ("Workspace", "openai:work") in kr.d
+        assert ("GameDevWorkstation", "openai:work") in kr.d
 
 
 # ---------------------------------------------------------- A6 codex turn cancel
@@ -473,7 +473,7 @@ def test_backfill_survives_non_object_elements_and_old_triggers_are_replaced(tmp
 
 def test_fts_creation_failure_is_logged(tmp_path, monkeypatch, caplog):
     monkeypatch.setattr(db_mod, "MESSAGES_FTS", ["CREATE VIRTUAL TABLE messages_fts USING no_such_module(x)"])
-    with caplog.at_level(logging.WARNING, logger="workspace.db"):
+    with caplog.at_level(logging.WARNING, logger="gamedevworkstation.db"):
         DB(tmp_path / "w.db")
     assert any("search index not created" in r.getMessage() for r in caplog.records)
 

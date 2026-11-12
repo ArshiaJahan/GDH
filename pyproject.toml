@@ -1,7 +1,7 @@
 [project]
-name = "workspace"
+name = "gamedevworkstation"
 version = "0.4.0"
-description = "Personal agent workspace: Claude orchestrator + Codex + ElevenLabs"
+description = "Personal agent workstation: Claude orchestrator + Codex + ElevenLabs"
 requires-python = ">=3.11"
 dependencies = [
   "anthropic>=0.70",
@@ -21,7 +21,8 @@ dependencies = [
 ]
 
 [project.scripts]
-workspace = "workspace.__main__:main"
+gamedevworkstation = "gamedevworkstation.__main__:main"
+gdw = "gamedevworkstation.__main__:main"
 
 [project.optional-dependencies]
 agent-sdk = [
@@ -36,7 +37,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["backend/workspace"]
+packages = ["backend/gamedevworkstation"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

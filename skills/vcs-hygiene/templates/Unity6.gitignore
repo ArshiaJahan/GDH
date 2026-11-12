@@ -32,7 +32,7 @@
 # IDE caches and generated solution/project files
 .vs/
 .gradle/
-# harness: Rider/IntelliJ workspace; drop .vscode/ if the team shares its settings
+# harness: Rider/IntelliJ project settings; drop .vscode/ if the team shares its settings
 # (gitignore has no trailing comments: keep comments on their own lines)
 .idea/
 .vscode/

@@ -99,7 +99,7 @@ export function UpdateModal() {
         </p>
       )}
       {supported && (
-        <p className="text-[12px] text-faint mb-3">Workspace quits, swaps in the new version and reopens. The current version is kept, so you can roll back from Settings → About & updates.</p>
+        <p className="text-[12px] text-faint mb-3">GameDevWorkstation quits, swaps in the new version and reopens. The current version is kept, so you can roll back from Settings → About & updates.</p>
       )}
       <ModalFooter>
         {supported || !status ? (
@@ -133,7 +133,7 @@ export function RestartingOverlay() {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" role="alertdialog" aria-label="Restarting">
       <div className="surface-raised border border-line rounded-lg shadow-xl px-6 py-5 w-[420px] max-w-[92vw] text-center">
         <Loader2 size={22} className="animate-spin text-action mx-auto mb-3" />
-        <div className="font-medium">{r.rollback ? `Rolling back to Workspace ${r.version}…` : `Restarting into Workspace ${r.version}…`}</div>
+        <div className="font-medium">{r.rollback ? `Rolling back to GameDevWorkstation ${r.version}…` : `Restarting into GameDevWorkstation ${r.version}…`}</div>
         <p className="text-[13px] text-muted mt-1">The app quits, swaps versions and reopens in a few seconds.</p>
         {slow && (
           <div className="mt-4 text-[12.5px] text-muted">

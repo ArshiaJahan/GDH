@@ -69,8 +69,8 @@ describe("Modal", () => {
 });
 
 describe("EngineStopped", () => {
-  const exit = { kind: "exited" as const, message: "Workspace's engine stopped (exit code 1).", code: 1,
-    log_path: "/Users/me/Library/Logs/Workspace/backend-stdout.log", last_lines: "Traceback: boom" };
+  const exit = { kind: "exited" as const, message: "GameDevWorkstation's engine stopped (exit code 1).", code: 1,
+    log_path: "/Users/me/Library/Logs/GameDevWorkstation/backend-stdout.log", last_lines: "Traceback: boom" };
 
   it("recognises the shell's error and shows why, the log and Restart", async () => {
     expect(isBackendExit(exit)).toBe(true);
@@ -78,7 +78,7 @@ describe("EngineStopped", () => {
     const reload = vi.fn();
     vi.stubGlobal("location", { ...window.location, reload });
     render(<EngineStopped exit={exit} />);
-    expect(screen.getByRole("alertdialog").textContent).toContain("Workspace's engine stopped");
+    expect(screen.getByRole("alertdialog").textContent).toContain("GameDevWorkstation's engine stopped");
     expect(screen.getByText(exit.log_path)).toBeTruthy();
     expect(screen.getByText("Traceback: boom")).toBeTruthy();
     await act(async () => fireEvent.click(screen.getByText("Restart")));

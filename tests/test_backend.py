@@ -4,9 +4,9 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from workspace.app import AppState
-from workspace.providers.fake import FakeProvider, text_response, tool_response
-from workspace.server import create_app
+from gamedevworkstation.app import AppState
+from gamedevworkstation.providers.fake import FakeProvider, text_response, tool_response
+from gamedevworkstation.server import create_app
 
 TOKEN = "test-token"
 H = {"Authorization": f"Bearer {TOKEN}"}
@@ -175,7 +175,7 @@ def test_relaunch_restores_state(tmp_path):
     db = tmp_path / "persist.db"
     s1 = AppState(db_path=db)
     sid = s1.store.create(title="Keep me")["id"]
-    from workspace.core.types import Message
+    from gamedevworkstation.core.types import Message
 
     s1.store.add_message(sid, Message.user("remember"))
     s1.db.close()
@@ -186,7 +186,7 @@ def test_relaunch_restores_state(tmp_path):
 
 
 def test_interrupted_tool_calls_are_repaired(tmp_path):
-    from workspace.core.types import Message, ToolUseBlock
+    from gamedevworkstation.core.types import Message, ToolUseBlock
 
     s = AppState(db_path=tmp_path / "r.db")
     sid = s.store.create()["id"]

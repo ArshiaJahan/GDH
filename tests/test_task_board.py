@@ -8,12 +8,12 @@ import threading
 import pytest
 from fastapi.testclient import TestClient
 
-from workspace.agent.tools import ToolContext
-from workspace.app import AppState
-from workspace.db import DB, SCHEMA_VERSION
-from workspace.features import task_board as TB
-from workspace.providers.fake import FakeProvider
-from workspace.server import create_app
+from gamedevworkstation.agent.tools import ToolContext
+from gamedevworkstation.app import AppState
+from gamedevworkstation.db import DB, SCHEMA_VERSION
+from gamedevworkstation.features import task_board as TB
+from gamedevworkstation.providers.fake import FakeProvider
+from gamedevworkstation.server import create_app
 
 H = {"Authorization": "Bearer t"}
 WRITE_TOOLS = {"task_create", "task_update", "task_comment", "task_archive", "task_restore"}
@@ -469,7 +469,7 @@ def test_attach_refused_while_running(env):
 
 async def test_agent_turn_uses_the_board(tmp_path):
     """A whole main-agent turn: the model calls task_create and the board shows the task."""
-    from workspace.providers.fake import text_response, tool_response
+    from gamedevworkstation.providers.fake import text_response, tool_response
 
     app = AppState(db_path=tmp_path / "turn.db")
     TB.install(app)
@@ -477,7 +477,7 @@ async def test_agent_turn_uses_the_board(tmp_path):
     fake.script = [tool_response("task_create", {"title": "Write the GDD", "column": "To do"}), text_response("Added Task00001.")]
     app.providers.override("anthropic", "default", fake)
     s = app.store.create(title="Plan the game")
-    from workspace.core.types import Message
+    from gamedevworkstation.core.types import Message
 
     app.store.add_message(s["id"], Message.user("Put 'Write the GDD' on the board"))
     await app.runner.start(s["id"])

@@ -2,10 +2,10 @@
 
 # Development: backend on :8765 serving the built UI, opened in your browser.
 dev: frontend
-	uv run workspace
+	uv run gamedevworkstation
 
 backend:
-	uv run workspace --no-browser
+	uv run gamedevworkstation --no-browser
 
 # Hot-reloading UI on :5173 (run `make backend` in another terminal).
 ui:
@@ -25,29 +25,29 @@ test:
 test-live:
 	uv run pytest -q -m live
 
-# macOS app: dist/Workspace.app + dist/Workspace.dmg
+# macOS app: dist/GameDevWorkstation.app + dist/GameDevWorkstation.dmg
 app:
 	./scripts/build_mac.sh
 
 app-test: app
 	uv run python scripts/app_test.py
 
-# Next version into the updates folder (~/WorkspaceUpdates); the running app offers it.
+# Next version into the updates folder (~/GameDevWorkstationUpdates); the running app offers it.
 # make release [BUMP=patch|minor|major | VERSION=x.y.z] [NOTES="…" | NOTES_FILE=path]
 release:
 	./scripts/release.sh
 
-# Copy a built app to /Applications (quit Workspace first). APP=path picks another build.
-APP ?= dist/Workspace.app
+# Copy a built app to /Applications (quit GameDevWorkstation first). APP=path picks another build.
+APP ?= dist/GameDevWorkstation.app
 install:
 	@test -d "$(APP)" || { echo "No app at $(APP). Run make app (or make release) first."; exit 1; }
-	@if pgrep -f "/Applications/[W]orkspace.app/Contents/MacOS/" >/dev/null; then echo "Quit Workspace first."; exit 1; fi
-	rm -rf /Applications/.Workspace.app.installing
-	ditto "$(APP)" /Applications/.Workspace.app.installing
-	rm -rf /Applications/Workspace.app
-	mv /Applications/.Workspace.app.installing /Applications/Workspace.app
-	xattr -cr /Applications/Workspace.app
-	@echo "Installed $$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' /Applications/Workspace.app/Contents/Info.plist) to /Applications/Workspace.app"
+	@if pgrep -f "/Applications/[G]ameDevWorkstation.app/Contents/MacOS/" >/dev/null; then echo "Quit GameDevWorkstation first."; exit 1; fi
+	rm -rf /Applications/.GameDevWorkstation.app.installing
+	ditto "$(APP)" /Applications/.GameDevWorkstation.app.installing
+	rm -rf /Applications/GameDevWorkstation.app
+	mv /Applications/.GameDevWorkstation.app.installing /Applications/GameDevWorkstation.app
+	xattr -cr /Applications/GameDevWorkstation.app
+	@echo "Installed $$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' /Applications/GameDevWorkstation.app/Contents/Info.plist) to /Applications/GameDevWorkstation.app"
 
 version:
 	@python3 scripts/version.py show

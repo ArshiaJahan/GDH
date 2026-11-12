@@ -41,11 +41,11 @@ export type AssistRun = {
 export type Paging = { hasMore: boolean; compacted: number; showCompacted: boolean; loading: boolean };
 export type Streaming = { id: string; text: string; thinking: string; model?: string; effort?: string; tools: { id: string; name: string }[] };
 
-/** A newer build in the updates folder (see backend/workspace/features/updates.py). */
+/** A newer build in the updates folder (see backend/gamedevworkstation/features/updates.py). */
 export type UpdateInfo = { current: string; latest: string; notes: string; built_at: string | null; git_commit: string | null; install_supported?: boolean };
 export type Restarting = { version: string; from: string; rollback?: boolean; at: number; log?: string };
 
-/** A spend-limit pause (backend/workspace/usage.py global_info / session_info). */
+/** A spend-limit pause (backend/gamedevworkstation/usage.py global_info / session_info). */
 export type LimitPause = { scope: "global" | "session"; session_id?: string; limit_usd: number; spent_usd: number; allowed_usd: number | null; resumed: boolean; reason: string };
 export type Limits = { global: LimitPause | null; sessions: Record<string, LimitPause> };
 /** A transient status line under the chat (e.g. "Rate limited, retrying in 8s"). */

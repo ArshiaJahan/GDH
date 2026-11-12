@@ -7,12 +7,12 @@ import time
 
 import pytest
 
-from workspace.agent.tools import ToolContext
-from workspace.app import AppState
-from workspace.core.types import Message, ToolResultBlock
-from workspace.features import hooks as H
-from workspace.features.hookbus import HookEvent, HookResult, TurnState
-from workspace.providers.fake import FakeProvider, text_response, tool_response
+from gamedevworkstation.agent.tools import ToolContext
+from gamedevworkstation.app import AppState
+from gamedevworkstation.core.types import Message, ToolResultBlock
+from gamedevworkstation.features import hooks as H
+from gamedevworkstation.features.hookbus import HookEvent, HookResult, TurnState
+from gamedevworkstation.providers.fake import FakeProvider, text_response, tool_response
 
 from .conftest import untrusted
 
@@ -29,7 +29,7 @@ def app(tmp_path):
 @pytest.fixture
 def folder(tmp_path):
     d = tmp_path / "proj"
-    (d / ".workspace").mkdir(parents=True)
+    (d / ".gamedevworkstation").mkdir(parents=True)
     (d / "a.txt").write_text("alpha\n")
     return d
 
@@ -163,7 +163,7 @@ def test_helpers():
 
 
 async def test_untrusted_file_is_ignored_and_raises_a_card(app, folder):
-    (folder / ".workspace/hooks.toml").write_text(BLOCK_SECRET)
+    (folder / ".gamedevworkstation/hooks.toml").write_text(BLOCK_SECRET)
     s = session(app, folder)
     app.fake.script = [tool_response("write_file", {"path": "secret/a.txt", "content": "x"}), text_response("ok")]
     await turn(app, s["id"])
@@ -189,7 +189,7 @@ async def test_untrusted_file_is_ignored_and_raises_a_card(app, folder):
     assert results(app, s["id"])[-1].content[0].text == "Blocked by no-secrets: secret/ is off limits."
 
     # A changed file (the agent may write it) is a new, untrusted version: ignored, card again.
-    (folder / ".workspace/hooks.toml").write_text(BLOCK_SECRET.replace("off limits", "private"))
+    (folder / ".gamedevworkstation/hooks.toml").write_text(BLOCK_SECRET.replace("off limits", "private"))
     src = next(x for x in eng(app).sources(s) if x.kind == "project")
     assert src.state == "changed" and not src.active
     app.fake.script = [tool_response("write_file", {"path": "secret/a.txt", "content": "x"}), text_response("ok")]
@@ -207,7 +207,7 @@ async def test_untrusted_file_is_ignored_and_raises_a_card(app, folder):
 
 
 async def test_card_left_open_by_a_stopped_run_is_asked_again(app, folder):
-    (folder / ".workspace/hooks.toml").write_text(BLOCK_SECRET)
+    (folder / ".gamedevworkstation/hooks.toml").write_text(BLOCK_SECRET)
     s = session(app, folder)
     await turn(app, s["id"])
     aid = app.approvals.pending(s["id"])[0]["id"]
@@ -222,7 +222,7 @@ async def test_card_left_open_by_a_stopped_run_is_asked_again(app, folder):
 
 
 def trust_file(app, folder, text, mode="trust_all"):
-    (folder / ".workspace/hooks.toml").write_text(text)
+    (folder / ".gamedevworkstation/hooks.toml").write_text(text)
     e = eng(app)
     src = next(x for x in e.sources(project=folder.resolve()) if x.kind == "project")
     e.trust(src, folder.resolve(), mode)
@@ -242,7 +242,7 @@ ok_exit = [0]
 
 def post_tool_event(app, s, path="notes.md"):
     ctx = ToolContext(app=app, session=app.store.get(s["id"]), run_id="main:x", role="main")
-    from workspace.agent.tools import ToolOutput
+    from gamedevworkstation.agent.tools import ToolOutput
 
     return HookEvent("post_tool", ctx, tool="write_file", args={"path": path, "content": "x"},
                      output=ToolOutput("Wrote notes.md"), turn=TurnState(s["id"], time.time(), folder=ctx.folder))
@@ -314,7 +314,7 @@ name = "test.guard"
     errs = [e["data"] for e in app.bus.replay(0, s["id"]) if e["type"] == "hooks.error"]
     assert errs and errs[0]["hook"] == "guard" and errs[0]["fail"] == "closed"
     # fail = "open": the same crash lets the call through (and still reports it).
-    trust_file(app, folder, (folder / ".workspace/hooks.toml").read_text() + 'fail = "open"\n')
+    trust_file(app, folder, (folder / ".gamedevworkstation/hooks.toml").read_text() + 'fail = "open"\n')
     app.fake.script = [tool_response("write_file", {"path": "b.txt", "content": "x"}), text_response("ok")]
     await turn(app, s["id"], "again")
     assert (folder / "b.txt").exists()
@@ -328,7 +328,7 @@ async def test_mcp_action_uses_consent(app, folder):
             return name == "mcp__lint__check"
 
         async def call(self, ctx, name, args):
-            from workspace.agent.tools import ToolOutput, wrap_untrusted
+            from gamedevworkstation.agent.tools import ToolOutput, wrap_untrusted
 
             calls.append((name, args, ctx.role, ctx.consented("mcp", "lint__check")))
             return ToolOutput(wrap_untrusted("2 problems", "mcp:lint.check"), is_error=True)
@@ -443,10 +443,10 @@ async def test_backlog_lint_note_after_write(app, folder):
 def test_routes(tmp_path, folder):
     from fastapi.testclient import TestClient
 
-    from workspace.server import create_app
+    from gamedevworkstation.server import create_app
 
     unity_project(folder)
-    (folder / ".workspace/hooks.toml").write_text(BLOCK_SECRET)
+    (folder / ".gamedevworkstation/hooks.toml").write_text(BLOCK_SECRET)
     st = AppState(db_path=tmp_path / "t.db")
     h = {"Authorization": "Bearer t"}
     with TestClient(create_app("t", st)) as c:

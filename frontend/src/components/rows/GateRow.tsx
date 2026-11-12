@@ -3,12 +3,13 @@ import type { GateMeta } from "../../lib/api";
 import type { Msg } from "../../lib/store";
 import { RowShell, msgText } from "./RowShell";
 
-/** Split a gate message ("[Workspace gate <id>] <reason>\n\n<untrusted-…>evidence</untrusted-…>")
+/** Split a gate message ("[GameDevWorkstation gate <id>] <reason>\n\n<untrusted-…>evidence</untrusted-…>")
  *  into the reason and the quoted evidence (the untrusted markers are for the model, not people). */
 export function splitGateText(text: string, id: string): { reason: string; evidence: string } {
   let t = text.trim();
-  const head = `[Workspace gate ${id}]`;
-  if (t.startsWith(head)) t = t.slice(head.length).trim();
+  // "[<app name> gate <id>]": older messages carry the app's previous name
+  const head = t.match(/^\[[A-Za-z]+ gate ([^\]]+)\]/);
+  if (head && head[1] === id) t = t.slice(head[0].length).trim();
   const m = t.match(/<untrusted-[0-9a-f]+ source="[^"]*">\n?([\s\S]*?)\n?<\/untrusted-[0-9a-f]+>/);
   if (!m || m.index == null) return { reason: t, evidence: "" };
   return { reason: t.slice(0, m.index).trim(), evidence: m[1].trim() };

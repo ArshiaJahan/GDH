@@ -1,5 +1,5 @@
 // Task schedules in words. Weekdays follow standard cron (0 and 7 = Sunday), the same reading
-// the backend gives them (backend/workspace/features/tasks_feature.py, cron_weekdays).
+// the backend gives them (backend/gamedevworkstation/features/tasks_feature.py, cron_weekdays).
 
 export const PRESETS: [string, string][] = [
   ["Every weekday at 8:30", "30 8 * * 1-5"],

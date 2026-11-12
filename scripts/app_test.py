@@ -14,9 +14,9 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-APP = ROOT / "dist" / "Workspace.app"
-RUNTIME = Path.home() / "Library" / "Application Support" / "Workspace" / "runtime.json"
-BACKEND_MARK = "Workspace.app/Contents/Resources/backend/workspace-backend"
+APP = ROOT / "dist" / "GameDevWorkstation.app"
+RUNTIME = Path.home() / "Library" / "Application Support" / "GameDevWorkstation" / "runtime.json"
+BACKEND_MARK = "GameDevWorkstation.app/Contents/Resources/backend/gamedevworkstation-backend"
 results: list[tuple[str, bool, str]] = []
 
 
@@ -77,11 +77,11 @@ def still_running(snapshot: dict[int, str]) -> list[str]:
 
 
 def main() -> int:
-    print("Workspace smoke test")
+    print("GameDevWorkstation smoke test")
     if not step("app bundle exists", APP.exists(), str(APP)):
         return summary()
     if backend_pids():
-        subprocess.run(["osascript", "-e", 'tell application "Workspace" to quit'], capture_output=True)
+        subprocess.run(["osascript", "-e", 'tell application "GameDevWorkstation" to quit'], capture_output=True)
         time.sleep(3)
     RUNTIME.unlink(missing_ok=True)
     subprocess.run(["open", str(APP)], check=True)
@@ -145,7 +145,7 @@ def main() -> int:
 
 def finish() -> int:
     children = backend_children([int(p) for p in backend_pids()])  # recorded before quitting
-    subprocess.run(["osascript", "-e", 'tell application "Workspace" to quit'], capture_output=True)
+    subprocess.run(["osascript", "-e", 'tell application "GameDevWorkstation" to quit'], capture_output=True)
     t = time.time()
     while time.time() - t < 15 and backend_pids():
         time.sleep(0.5)

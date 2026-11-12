@@ -1,9 +1,9 @@
-# Workspace configuration.
-# These are the defaults. ~/Library/Application Support/Workspace/config.toml holds only
+# GameDevWorkstation configuration.
+# These are the defaults. ~/Library/Application Support/GameDevWorkstation/config.toml holds only
 # the values you change (Settings writes them there); everything else comes from here.
 # API keys are NEVER stored here: they live in the macOS Keychain (Settings → Accounts)
 # or, in development, in env vars (ANTHROPIC_API_KEY, OPENAI_API_KEY, ELEVENLABS_API_KEY,
-# or WORKSPACE_KEY_<PROVIDER>_<PROFILE> for extra profiles).
+# or GDW_KEY_<PROVIDER>_<PROFILE> for extra profiles).
 # Model IDs and prices were checked against provider docs on 2026-11-05. Edit freely.
 
 [orchestrator]
@@ -74,8 +74,8 @@ event_retention_days = 7            # the event log (replay for briefly disconne
 
 [updates]
 # `make release` builds new versions into this folder; the app checks it and offers
-# "Install & restart". Layout: <dir>/<version>/Workspace.app + release.json, <dir>/latest.json.
-dir = "~/WorkspaceUpdates"
+# "Install & restart". Layout: <dir>/<version>/GameDevWorkstation.app + release.json, <dir>/latest.json.
+dir = "~/GameDevWorkstationUpdates"
 check_interval_s = 30               # how often the app looks at latest.json (one stat call)
 keep = 3                            # versions `make release` keeps; older ones are pruned
 

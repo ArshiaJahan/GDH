@@ -22,7 +22,7 @@ export function fmtBytes(n?: number | null): string {
   return `${(n / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
-/** Settings → Storage: what Workspace keeps on disk, and Compact now (prune old events + VACUUM). */
+/** Settings → Storage: what GameDevWorkstation keeps on disk, and Compact now (prune old events + VACUUM). */
 export function StorageSettings() {
   const [u, setU] = useState<Usage | null>(null);
   const [busy, setBusy] = useState(false);
@@ -53,7 +53,7 @@ export function StorageSettings() {
     <section>
       <h2 className="font-semibold text-[15px] mb-1">Storage</h2>
       <p className="text-muted text-[13px] mb-3">
-        Every day Workspace removes events older than {u?.events.retention_days ?? 7} days and gives free space back. Deleting a session
+        Every day GameDevWorkstation removes events older than {u?.events.retention_days ?? 7} days and gives free space back. Deleting a session
         for good removes its messages, snapshots, transcripts and the files it stored. Compact rewrites the database at its smallest.
       </p>
       {!u ? <div className="text-muted text-[13px]">Measuring…</div> : (

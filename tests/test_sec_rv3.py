@@ -14,14 +14,14 @@ import pytest
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
-from workspace import safe_fetch as sf
-from workspace.agent import loop
-from workspace.agent.tools import ToolContext, ToolDenied, wrap_untrusted
-from workspace.app import AppState
-from workspace.core.types import Message, TextBlock
-from workspace.features import skill_assistant
-from workspace.features import subagents as subs_mod
-from workspace.providers.fake import FakeProvider, text_response, tool_response
+from gamedevworkstation import safe_fetch as sf
+from gamedevworkstation.agent import loop
+from gamedevworkstation.agent.tools import ToolContext, ToolDenied, wrap_untrusted
+from gamedevworkstation.app import AppState
+from gamedevworkstation.core.types import Message, TextBlock
+from gamedevworkstation.features import skill_assistant
+from gamedevworkstation.features import subagents as subs_mod
+from gamedevworkstation.providers.fake import FakeProvider, text_response, tool_response
 
 from .conftest import FIXTURES, untrusted
 from .test_sec_exec import _decide, _run_sdk
@@ -33,7 +33,7 @@ H = {"Authorization": "Bearer t"}
 def app(tmp_path):
     a = AppState(db_path=tmp_path / "s.db")
     a.providers.override("anthropic", "default", FakeProvider("anthropic"))
-    from workspace.routes import register_routes
+    from gamedevworkstation.routes import register_routes
 
     register_routes(FastAPI(), APIRouter(), a)
     return a
@@ -124,14 +124,14 @@ async def test_plan_mode_wins_over_allowlist_rules(app, tmp_path):
     ctx = ToolContext(app=app, session=sess, run_id="main:x")
     out = await app.tools.run(ctx, "write_file", {"path": "a.txt", "content": "x"})
     assert out.is_error and "Plan only" in out.text and not (folder / "a.txt").exists()
-    for kind, subject in (("edit", "merge workspace/sub_1"), ("delete", "discard worktree workspace/sub_1"),
+    for kind, subject in (("edit", "merge gdw/sub_1"), ("delete", "discard worktree gdw/sub_1"),
                           ("run_command", "ls")):
         with pytest.raises(ToolDenied, match="Plan only"):
             await ctx.approve(kind, subject, {})
     assert app.approvals.pending(sess["id"]) == []
     # Outside Plan the rule still skips the card.
     ctx.session = app.store.update(sess["id"], mode="ask")
-    await ctx.approve("edit", "merge workspace/sub_1", {})
+    await ctx.approve("edit", "merge gdw/sub_1", {})
     assert not (await app.tools.run(ctx, "write_file", {"path": "a.txt", "content": "x"})).is_error
 
 
@@ -251,7 +251,7 @@ async def test_codex_cli_units_refused_in_plan_and_read_only_after_a_switch(app,
 @pytest.fixture
 def client(tmp_path):
     s = AppState(db_path=tmp_path / "h.db")
-    from workspace.server import create_app
+    from gamedevworkstation.server import create_app
 
     with TestClient(create_app("t", s)) as c:
         yield c, s
@@ -302,7 +302,7 @@ def test_empty_allowlist_patterns_cover_nothing(app):
 
 
 def test_spa_index_has_a_csp(tmp_path, monkeypatch):
-    from workspace import server
+    from gamedevworkstation import server
 
     dist = tmp_path / "dist"
     (dist / "assets").mkdir(parents=True)

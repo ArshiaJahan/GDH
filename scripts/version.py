@@ -9,7 +9,7 @@ that carries the version in step with it:
     python scripts/version.py set 1.2.3
     python scripts/version.py next patch     # print what bump would give, change nothing
     python scripts/version.py check          # exit 1 if any file disagrees with VERSION
-    python scripts/version.py build-info     # write backend/workspace/_build_info.json
+    python scripts/version.py build-info     # write backend/gamedevworkstation/_build_info.json
 
 `--root DIR` runs it against another checkout (the tests use a temp copy).
 Standard library only, so it runs with any Python 3.11+.
@@ -109,13 +109,13 @@ def _read_init_py(text: str) -> str | None:
     return m.group(1) if m else None
 
 
-_uv_upd, _uv_read = _lock_entry("workspace")
-_cargo_upd, _cargo_read = _lock_entry("workspace-app")
+_uv_upd, _uv_read = _lock_entry("gamedevworkstation")
+_cargo_upd, _cargo_read = _lock_entry("gamedevworkstation-app")
 
 TARGETS = [
     ("pyproject.toml", True, _pyproject, _read_pyproject),
     ("uv.lock", False, _uv_upd, _uv_read),
-    ("backend/workspace/__init__.py", True, _init_py, _read_init_py),
+    ("backend/gamedevworkstation/__init__.py", True, _init_py, _read_init_py),
     ("frontend/package.json", True, lambda t, v: _json_first(t, v, "frontend/package.json"), _read_json_version),
     ("frontend/package-lock.json", False, _package_lock, _read_package_lock),
     ("src-tauri/tauri.conf.json", True, lambda t, v: _json_first(t, v, "src-tauri/tauri.conf.json"), _read_json_version),
@@ -191,7 +191,7 @@ def build_info(root: Path) -> dict:
         "git_dirty": bool(_git(root, "status", "--porcelain")),
         "built_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(),
     }
-    out = root / "backend" / "workspace" / "_build_info.json"
+    out = root / "backend" / "gamedevworkstation" / "_build_info.json"
     out.write_text(json.dumps(info, indent=2) + "\n")
     return info
 

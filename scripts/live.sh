@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # `make live`: the real desktop window, running straight from this checkout.
 #   - Vite dev server on :5173: UI edits appear in the window instantly (hot reload)
-#   - the Tauri shell in dev mode, which starts the backend with `uv run workspace`
-#     from this repo (WORKSPACE_DEV_BACKEND); backend edits apply when you restart `make live`
+#   - the Tauri shell in dev mode, which starts the backend with `uv run gamedevworkstation`
+#     from this repo (GDW_DEV_BACKEND); backend edits apply when you restart `make live`
 # Quit the window or press Ctrl-C to stop everything.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -22,7 +22,7 @@ fi
 VITE_PID=$!
 trap 'kill "$VITE_PID" 2>/dev/null || true' EXIT INT TERM
 
-export WORKSPACE_DEV_BACKEND="$ROOT"
+export GDW_DEV_BACKEND="$ROOT"
 # The dev window loads the UI from the Vite server (http://localhost:5173), which needs its
 # own websocket and inline scripts for hot reload, so the app's CSP is dropped in dev only
 # (a JSON merge patch: null removes the key). Release builds keep the CSP.

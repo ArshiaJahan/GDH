@@ -9,9 +9,9 @@ const WAVE = {
   units: [
     { wave_id: "wave_0123456789abcdef", sub_id: "sub_a", name: "grunt", scope: ["Assets/Game/Enemies/Grunt"], read_only: false,
       status: "conflict", merged: false, discoveries: "built: grunt", conflicts: ["Assets/Game/Enemies/Grunt/Grunt.prefab"],
-      branch: "workspace/sub_a", handoff: { built: "grunt prefab", discoveries: "Enemies share one HitFlash material" } },
+      branch: "gdw/sub_a", handoff: { built: "grunt prefab", discoveries: "Enemies share one HitFlash material" } },
     { wave_id: "wave_0123456789abcdef", sub_id: "sub_b", name: "bat", scope: ["Assets/Game/Enemies/Bat"], read_only: false,
-      status: "done", merged: false, discoveries: null, branch: "workspace/sub_b", handoff: null },
+      status: "done", merged: false, discoveries: null, branch: "gdw/sub_b", handoff: null },
     { wave_id: "wave_0123456789abcdef", sub_id: "sub_c", name: "survey", scope: ["Assets/Game (read-only)"], read_only: true,
       status: "dead", merged: false, discoveries: null, reason: "finished without a HANDOFF block", handoff: null },
   ],

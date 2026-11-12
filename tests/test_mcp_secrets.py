@@ -7,9 +7,9 @@ import pytest
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
-from workspace.agent.tools import ToolContext
-from workspace.app import AppState
-from workspace.server import create_app
+from gamedevworkstation.agent.tools import ToolContext
+from gamedevworkstation.app import AppState
+from gamedevworkstation.server import create_app
 
 from .conftest import FIXTURES, untrusted
 
@@ -24,7 +24,7 @@ def keychain(monkeypatch):
     import keyring
 
     store: dict[tuple[str, str], str] = {}
-    monkeypatch.setenv("WORKSPACE_NO_KEYCHAIN", "0")
+    monkeypatch.setenv("GDW_NO_KEYCHAIN", "0")
     monkeypatch.setattr(keyring, "set_password", lambda s, a, v: store.__setitem__((s, a), v))
     monkeypatch.setattr(keyring, "get_password", lambda s, a: store.get((s, a)))
 
@@ -53,7 +53,7 @@ def _raw(s, name):
 
 async def test_shared_tool_allowlist(tmp_path):
     s = AppState(db_path=tmp_path / "a.db")
-    from workspace.features import mcp_feature
+    from gamedevworkstation.features import mcp_feature
 
     mcp_feature.register(FastAPI(), APIRouter(), s)
     s.db.insert("mcp_servers", {"name": "demo", "transport": "stdio", "command": sys.executable, "args": DEMO,
@@ -104,7 +104,7 @@ def test_env_secret_goes_to_keychain_and_resolves_at_connect(env, keychain):
     raw = _raw(s, "envy")
     assert "s3cret" not in raw["env"]
     assert json.loads(raw["env"])["API_TOKEN"]["keychain"] == "mcp:envy:API_TOKEN"
-    assert keychain[("Workspace", "mcp:envy:API_TOKEN")] == "s3cret-value-1234"
+    assert keychain[("GameDevWorkstation", "mcp:envy:API_TOKEN")] == "s3cret-value-1234"
     assert "s3cret" not in c.get("/api/mcp/servers", headers=H).text
 
     # Resolved when the server starts.
@@ -119,16 +119,16 @@ def test_env_secret_goes_to_keychain_and_resolves_at_connect(env, keychain):
     # Editing with the masked value keeps the secret; a new value replaces it.
     assert c.post("/api/mcp/servers", json={**body, "env": {"API_TOKEN": "••••1234", "MODE": "m"}},
                   headers=H).status_code == 200
-    assert keychain[("Workspace", "mcp:envy:API_TOKEN")] == "s3cret-value-1234"
+    assert keychain[("GameDevWorkstation", "mcp:envy:API_TOKEN")] == "s3cret-value-1234"
     c.post("/api/mcp/servers", json={**body, "env": {"API_TOKEN": "brand-new-value-9999"}}, headers=H)
-    assert keychain[("Workspace", "mcp:envy:API_TOKEN")] == "brand-new-value-9999"
+    assert keychain[("GameDevWorkstation", "mcp:envy:API_TOKEN")] == "brand-new-value-9999"
     assert untrusted(c.portal.call(check)) == ("mcp:envy.getenv", "brand-new-value-9999")
     # A masked value with nothing stored behind it is refused.
     assert c.post("/api/mcp/servers", json={**body, "env": {"OTHER_KEY": "••••abcd"}}, headers=H).status_code == 400
     # Dropping the variable deletes its Keychain entry; so does removing the server.
     c.post("/api/mcp/servers", json={**body, "env": {"GITHUB_PAT": "ghp_abcdefgh5678"}}, headers=H)
-    assert ("Workspace", "mcp:envy:API_TOKEN") not in keychain
-    assert keychain[("Workspace", "mcp:envy:GITHUB_PAT")] == "ghp_abcdefgh5678"
+    assert ("GameDevWorkstation", "mcp:envy:API_TOKEN") not in keychain
+    assert keychain[("GameDevWorkstation", "mcp:envy:GITHUB_PAT")] == "ghp_abcdefgh5678"
     assert c.delete("/api/mcp/servers/envy", headers=H).status_code == 200
     assert not keychain
 
@@ -140,10 +140,10 @@ def test_header_secret_and_missing_entry(env, keychain):
                headers=H)
     assert r.json()["headers"] == {"Authorization": "••••1234", "Accept-Language": "en"}
     assert "abcdefgh" not in _raw(s, "remote")["headers"]
-    assert keychain[("Workspace", "mcp:remote:header:Authorization")] == "Bearer abcdefgh1234"
+    assert keychain[("GameDevWorkstation", "mcp:remote:header:Authorization")] == "Bearer abcdefgh1234"
     # A Keychain entry deleted behind our back: a clear error, never a crash or an empty header.
     keychain.clear()
-    from workspace.features.mcp_feature import resolve_secrets
+    from gamedevworkstation.features.mcp_feature import resolve_secrets
 
     with pytest.raises(RuntimeError, match="missing from the Keychain"):
         resolve_secrets(json.loads(_raw(s, "remote")["headers"]))
@@ -159,12 +159,12 @@ def test_migrates_plaintext_rows_on_startup(tmp_path, keychain):
                                                                           "PATH_EXTRA": "/opt/bin"}
     raw = json.loads(_raw(s, "old")["env"])
     assert raw["PATH_EXTRA"] == "/opt/bin" and raw["OPENAI_API_KEY"]["keychain"] == "mcp:old:OPENAI_API_KEY"
-    assert keychain[("Workspace", "mcp:old:OPENAI_API_KEY")] == "sk-plaintext-0000"
+    assert keychain[("GameDevWorkstation", "mcp:old:OPENAI_API_KEY")] == "sk-plaintext-0000"
     assert s.mcp.migrate_secrets() == 0  # idempotent
 
 
 def test_without_keychain_falls_back_to_sqlite(env, caplog):
-    c, s = env  # conftest sets WORKSPACE_NO_KEYCHAIN=1
+    c, s = env  # conftest sets GDW_NO_KEYCHAIN=1
     r = c.post("/api/mcp/servers", json={"name": "dev", "transport": "stdio", "command": "x",
                                          "env": {"SOME_SECRET": "dev-only-secret-4321"}}, headers=H)
     assert r.json()["env"] == {"SOME_SECRET": "••••4321"}  # still masked in the API
@@ -185,8 +185,8 @@ def test_rejected_edit_keeps_the_stored_secrets(env, keychain):
     # env drops API_TOKEN, but the headers are invalid: nothing may change, the Keychain included.
     bad = {**body, "env": {}, "headers": {"X-Other-Token": "••••abcd"}}
     assert c.post("/api/mcp/servers", json=bad, headers=H).status_code == 400
-    assert keychain[("Workspace", "mcp:keep:API_TOKEN")] == "s3cret-value-1234"
-    assert keychain[("Workspace", "mcp:keep:header:Authorization")] == "Bearer abcdefgh1234"
+    assert keychain[("GameDevWorkstation", "mcp:keep:API_TOKEN")] == "s3cret-value-1234"
+    assert keychain[("GameDevWorkstation", "mcp:keep:header:Authorization")] == "Bearer abcdefgh1234"
     assert _raw(s, "keep") == before
     # A valid edit drops the unused entries once the row is saved.
     assert c.post("/api/mcp/servers", json={**body, "env": {}, "headers": {}}, headers=H).status_code == 200
@@ -196,14 +196,14 @@ def test_rejected_edit_keeps_the_stored_secrets(env, keychain):
 def test_secret_helpers_never_touch_the_keychain_when_disabled(monkeypatch):
     import keyring
 
-    from workspace import config
+    from gamedevworkstation import config
 
     def boom(*a):
         raise AssertionError("the real Keychain was touched")
 
     for fn in ("get_password", "set_password", "delete_password"):
         monkeypatch.setattr(keyring, fn, boom)
-    monkeypatch.setenv("WORKSPACE_NO_KEYCHAIN", "1")
+    monkeypatch.setenv("GDW_NO_KEYCHAIN", "1")
     assert config.get_secret("mcp:x:API_TOKEN") is None
     config.delete_secret("mcp:x:API_TOKEN")
     with pytest.raises(RuntimeError, match="disabled"):

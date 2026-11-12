@@ -7,12 +7,12 @@ import pytest
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
-from workspace.app import AppState
-from workspace.core.effort import EffortApprovalRequired, check_effort
-from workspace.features import mcp_feature, skill_assistant
-from workspace.providers.fake import FakeProvider, text_response, tool_response
-from workspace.server import create_app
-from workspace.skills import get_skill, parse_skill, save_skill
+from gamedevworkstation.app import AppState
+from gamedevworkstation.core.effort import EffortApprovalRequired, check_effort
+from gamedevworkstation.features import mcp_feature, skill_assistant
+from gamedevworkstation.providers.fake import FakeProvider, text_response, tool_response
+from gamedevworkstation.server import create_app
+from gamedevworkstation.skills import get_skill, parse_skill, save_skill
 
 from .conftest import FIXTURES
 
@@ -289,7 +289,7 @@ async def test_install_from_url_fetches_linked_files(tmp_path, monkeypatch):
 
 
 async def test_install_from_url_asks_first_and_deny_saves_nothing(tmp_path, monkeypatch):
-    from workspace.skills import user_skills_dir
+    from gamedevworkstation.skills import user_skills_dir
 
     base = "https://raw.githubusercontent.com/acme/skills/main/pdf/"
     body = "\n".join(f"Step {i}." for i in range(300))
@@ -389,7 +389,7 @@ async def test_install_never_overwrites_skill_md_through_a_linked_case_variant(t
 
 
 async def test_install_rolls_back_when_the_saved_name_doesnt_match(tmp_path, monkeypatch):
-    from workspace.skills import user_skills_dir
+    from gamedevworkstation.skills import user_skills_dir
 
     base = "https://raw.githubusercontent.com/acme/skills/main/pdf/"
     _serve(monkeypatch, {base + "SKILL.md": "---\nname: pdf\ndescription: Work with PDFs.\n---\n\nBody.\n"})
@@ -478,7 +478,7 @@ async def test_mcp_loader_and_registry_env_refused(tmp_path):
 async def test_mcp_secrets_in_args_and_urls_refused_and_never_persisted(tmp_path):
     import json
 
-    from workspace.config import data_dir
+    from gamedevworkstation.config import data_dir
 
     key, tok, pat = "sk-ant-api03-SECRETSECRETSECRET123", "q1w2e3r4t5y6", "ghpat_value_123"
     s, fake, asst = _app(tmp_path, [

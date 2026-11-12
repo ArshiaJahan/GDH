@@ -7,15 +7,15 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from workspace import usage as usage_mod
-from workspace.agent.tools import ToolContext
-from workspace.app import AppState
-from workspace.core.types import ChatRequest, Message, Response, Usage
-from workspace.providers import base as pb
-from workspace.providers.base import ProviderError, backoff_wait, retry_after_from
-from workspace.providers.fake import FakeProvider, text_response
-from workspace.server import create_app
-from workspace.usage import BudgetExceeded
+from gamedevworkstation import usage as usage_mod
+from gamedevworkstation.agent.tools import ToolContext
+from gamedevworkstation.app import AppState
+from gamedevworkstation.core.types import ChatRequest, Message, Response, Usage
+from gamedevworkstation.providers import base as pb
+from gamedevworkstation.providers.base import ProviderError, backoff_wait, retry_after_from
+from gamedevworkstation.providers.fake import FakeProvider, text_response
+from gamedevworkstation.server import create_app
+from gamedevworkstation.usage import BudgetExceeded
 
 H = {"Authorization": "Bearer t"}
 
@@ -26,7 +26,7 @@ def app(tmp_path):
     a.providers.override("anthropic", "default", FakeProvider("anthropic"))
     a.providers.override("openai", "default", FakeProvider("openai"))
     from fastapi import APIRouter, FastAPI
-    from workspace.routes import register_routes
+    from gamedevworkstation.routes import register_routes
 
     register_routes(FastAPI(), APIRouter(), a)
     return a

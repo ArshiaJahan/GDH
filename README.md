@@ -28,7 +28,7 @@
 ---
 
 Coding agents are good at writing C#; they are bad at knowing when a game change is actually
-*done*. GameDevWorkstation is a desktop app (called **Workspace** in the code) that puts Claude
+*done*. GameDevWorkstation is a desktop app that puts Claude
 in charge as the orchestrator, hands units of work to Claude and OpenAI (Codex) subagents in
 parallel, and drives the Unity Editor through MCP. The harness, not the model, decides
 when a turn may end: it enforces compile and test gates, asks for fresh evidence before a story
@@ -117,7 +117,7 @@ commands it runs:
 - **antipatterns**: a scan of changed scripts; advisory, but blocking in the Performance pass and Release workflows.
 - **backlog-lint**: lint errors after `BACKLOG.md` is written.
 
-Your own hook files (`.workspace/hooks.toml`) are ignored until you trust them by hash. A
+Your own hook files (`.gamedevworkstation/hooks.toml`) are ignored until you trust them by hash. A
 tool-failure breaker stops a turn that keeps hitting the same error.
 
 ### Anti-pattern ratchet
@@ -126,7 +126,7 @@ tool-failure breaker stops a turn that keeps hitting the same error.
 traces hot methods (`Update`, `FixedUpdate`, `On*Stay*` and what they call) and flags
 `GetComponent`, `Find*`, `Camera.main`, LINQ, string and collection allocations, `Debug.Log`,
 missing event unsubscribes and more, with a weighted score. A baseline in
-`.workspace/antipatterns-baseline.json` means only *new* findings count.
+`.gamedevworkstation/antipatterns-baseline.json` means only *new* findings count.
 
 ### Taste, critique and postmortems
 
@@ -139,7 +139,7 @@ missing event unsubscribes and more, with a weighted score. A baseline in
 A **workflow** (chain) runs a fixed sequence of phases in one session: type
 `/workflow <id> <what to do>` in the composer, or pick one under **Workflows** in the skills
 menu. A **campaign** spreads a larger goal over several sessions: a planning session writes the
-design target and scope into `.workspace/campaigns/<slug>.md`, a validator checks the plan covers
+design target and scope into `.gamedevworkstation/campaigns/<slug>.md`, a validator checks the plan covers
 your request, you approve it, and each phase then runs in a fresh session with a brief built from
 the campaign file. Either way the agent declares a phase done with a handoff and the **app**
 checks the phase's conditions (files, scripts, gates, quality-ladder levels, fresh screenshots,
@@ -183,8 +183,8 @@ flowchart LR
 The Tauri shell starts the frozen backend on a random port with a random token and shows the UI.
 The backend runs the agent loop, subagents, MCP servers and gates; every change is published on
 an event bus and streamed to the window over a WebSocket, which replays what it missed after a
-reconnect. Config and data live under `~/Library/Application Support/Workspace/`, logs under
-`~/Library/Logs/Workspace/`.
+reconnect. Config and data live under `~/Library/Application Support/GameDevWorkstation/`, logs under
+`~/Library/Logs/GameDevWorkstation/`.
 
 ## Security model
 
@@ -212,14 +212,14 @@ make dev        # build the UI, start the backend on 127.0.0.1:8765, open it in 
 ```
 
 Add keys in **Settings → Accounts** (Anthropic required; OpenAI and ElevenLabs optional). To
-click around without keys, run with `WORKSPACE_FAKE_PROVIDERS=1`.
+click around without keys, run with `GDW_FAKE_PROVIDERS=1`.
 
 | Command | What it does |
 |---|---|
 | `make dev` | Build the UI and run the backend in your browser |
 | `make backend` + `make ui` | Backend plus hot-reloading UI on :5173 |
 | `make live` | The desktop window from this checkout, with UI hot reload |
-| `make app` | Build `dist/Workspace.app` and `dist/Workspace.dmg` (ad-hoc signed) |
+| `make app` | Build `dist/GameDevWorkstation.app` and `dist/GameDevWorkstation.dmg` (ad-hoc signed) |
 | `make install` | Copy the built app to `/Applications` |
 | `make release` | Bump the version and publish to the local updates folder |
 | `make test` | Backend tests, UI type check and UI tests |
@@ -235,22 +235,39 @@ comments. Your `config.toml` holds only what you change, and most of it is edita
 model tiers, delegation budgets, spend limits, modes and allowlist, `[skills]`, `[hooks]`,
 `[ladder]`, `[campaigns]` and `[fleet]`. See the [guide](docs/GUIDE.md#configuration).
 
+<!-- rename:keep-start -->
+### Upgrading from Workspace 0.4
+
+GameDevWorkstation is the app that was called Workspace up to 0.4. It has a new name and bundle
+id, so it installs next to the old app instead of updating it in place. Install it once by hand
+(quit Workspace first):
+
+```bash
+make app && make install
+```
+
+On its first start your data, settings, sessions and API keys come over automatically; the old
+app's files are never changed or deleted. When you are happy with GameDevWorkstation, remove
+`/Applications/Workspace.app` yourself. Details in the
+[guide](docs/GUIDE.md#upgrading-from-workspace-04).
+<!-- rename:keep-end -->
+
 <details>
 <summary><b>Project layout</b></summary>
 
 ```
-backend/workspace/      FastAPI backend
-  agent/                agent loop and context
-  providers/            Anthropic, OpenAI and ElevenLabs adapters
-  features/             subagents, worktrees, MCP, hooks, ladder, unity_bridge, updates, ...
-frontend/src/           React UI (Vite)
-src-tauri/              Tauri v2 desktop shell
-skills/                 built-in skills (Unity pack, delegation, design tools)
-scripts/                build, release, version and dev scripts
-packaging/              PyInstaller packaging
-tests/                  backend tests (pytest)
-docs/GUIDE.md           the full manual
-config.example.toml     default configuration with comments
+backend/gamedevworkstation/   FastAPI backend
+  agent/                      agent loop and context
+  providers/                  Anthropic, OpenAI and ElevenLabs adapters
+  features/                   subagents, worktrees, MCP, hooks, ladder, unity_bridge, updates, ...
+frontend/src/                 React UI (Vite)
+src-tauri/                    Tauri v2 desktop shell
+skills/                       built-in skills (Unity pack, delegation, design tools)
+scripts/                      build, release, version and dev scripts
+packaging/                    PyInstaller packaging
+tests/                        backend tests (pytest)
+docs/GUIDE.md                 the full manual
+config.example.toml           default configuration with comments
 ```
 
 </details>

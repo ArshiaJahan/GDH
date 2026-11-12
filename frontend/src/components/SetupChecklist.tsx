@@ -70,7 +70,7 @@ export function NoKeyNotice({ m }: { m: Msg }) {
       <KeyRound size={15} className="text-warn mt-0.5 shrink-0" aria-hidden />
       <div className="flex-1 min-w-0">
         <div className="font-medium">Add your {name} key to start chatting</div>
-        <div className="text-muted">Workspace needs your own {name} API key. It's saved in the macOS Keychain, never in files or logs. Then send your message again.</div>
+        <div className="text-muted">GameDevWorkstation needs your own {name} API key. It's saved in the macOS Keychain, never in files or logs. Then send your message again.</div>
       </div>
       <button className="btn btn-primary py-0.5 shrink-0" onClick={() => actions.go("settings", { section: "accounts" })}>Open Settings → Accounts</button>
     </div>

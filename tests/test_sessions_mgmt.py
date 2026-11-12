@@ -7,11 +7,11 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from workspace.app import AppState
-from workspace.core.types import Message, ToolResultBlock, ToolUseBlock
-from workspace.providers.base import ProviderError
-from workspace.providers.fake import FakeProvider, text_response
-from workspace.server import create_app
+from gamedevworkstation.app import AppState
+from gamedevworkstation.core.types import Message, ToolResultBlock, ToolUseBlock
+from gamedevworkstation.providers.base import ProviderError
+from gamedevworkstation.providers.fake import FakeProvider, text_response
+from gamedevworkstation.server import create_app
 
 TOKEN = "test-token"
 H = {"Authorization": f"Bearer {TOKEN}"}

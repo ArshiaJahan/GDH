@@ -4,9 +4,9 @@ import sys
 import pytest
 from fastapi.testclient import TestClient
 
-from workspace.agent.tools import ToolContext
-from workspace.app import AppState
-from workspace.server import create_app
+from gamedevworkstation.agent.tools import ToolContext
+from gamedevworkstation.app import AppState
+from gamedevworkstation.server import create_app
 
 from .conftest import FIXTURES, untrusted
 
@@ -35,7 +35,7 @@ def test_add_test_and_list_tools(env):
 
 async def test_session_tools_call_and_shared_approval(tmp_path):
     s = AppState(db_path=tmp_path / "m2.db")
-    from workspace.features import mcp_feature
+    from gamedevworkstation.features import mcp_feature
     from fastapi import APIRouter, FastAPI
 
     mcp_feature.register(FastAPI(), APIRouter(), s)

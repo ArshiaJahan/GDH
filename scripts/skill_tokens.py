@@ -14,8 +14,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
-from workspace.agent.context import est
-from workspace.skills import system_skill_segments
+from gamedevworkstation.agent.context import est
+from gamedevworkstation.skills import system_skill_segments
 
 UNITY_PIPELINE = ["unity-router", "compile-fix-loop", "play-verify", "headless-ops", "scene-prefab-safety",
                   "gdd-to-backlog", "project-memory", "architecture-patterns", "asset-pipeline", "perf-pass",

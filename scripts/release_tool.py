@@ -19,8 +19,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from workspace.config import get_config
-from workspace.features.updates import (APP_NAME, bundle_info, history, installed_versions, parse_version, prune,
+from gamedevworkstation.config import get_config
+from gamedevworkstation.features.updates import (APP_NAME, bundle_info, history, installed_versions, parse_version, prune,
                                         read_json, updates_dir, write_json_atomic)
 
 

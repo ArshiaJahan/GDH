@@ -51,7 +51,7 @@ export function CampaignsPage() {
           <button className="btn btn-primary ml-auto" onClick={() => setCreating(true)}><Plus size={14} /> New campaign</button>
         </div>
         <p className="text-[13px] text-muted mb-4">
-          Multi-session work with a plan you approve, phases with checks Workspace runs itself, and a campaign file in the project.
+          Multi-session work with a plan you approve, phases with checks GameDevWorkstation runs itself, and a campaign file in the project.
           For one-session work pick a workflow from the composer's skills menu (or type <span className="font-mono">/workflow</span>).
         </p>
         {data?.campaigns.length === 0 && <Empty>No campaigns or workflows yet.</Empty>}
@@ -275,7 +275,7 @@ function CampaignDetailView({ id, onBack }: { id: string; onBack: () => void }) 
 
         {c.checkpoints.length > 0 && (
           <Section title="Checkpoints">
-            <p className="text-[12px] text-muted mb-1">Workspace never resets your project. To go back to the start of a phase, run its command yourself in the project folder.</p>
+            <p className="text-[12px] text-muted mb-1">GameDevWorkstation never resets your project. To go back to the start of a phase, run its command yourself in the project folder.</p>
             {c.checkpoints.map((k) => (
               <div key={k.ref} className="flex items-center gap-2 py-0.5 text-[12.5px]">
                 <span className="shrink-0">Phase {k.phase} {k.name}</span>

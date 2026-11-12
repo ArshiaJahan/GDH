@@ -9,14 +9,14 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from workspace.app import AppState
-from workspace.config import data_dir
-from workspace.features import campaign_file as cf
-from workspace.features import campaigns as C
-from workspace.features import chains as ch
-from workspace.features.campaigns import CampaignError
-from workspace.providers.fake import FakeProvider, text_response, tool_response
-from workspace.server import create_app
+from gamedevworkstation.app import AppState
+from gamedevworkstation.config import data_dir
+from gamedevworkstation.features import campaign_file as cf
+from gamedevworkstation.features import campaigns as C
+from gamedevworkstation.features import chains as ch
+from gamedevworkstation.features.campaigns import CampaignError
+from gamedevworkstation.providers.fake import FakeProvider, text_response, tool_response
+from gamedevworkstation.server import create_app
 
 REQ = ("Add a Boss Rush mode: from the Title screen a Boss Rush button starts a run of five bosses in a row with no "
        "rooms in between, death returns to Title within three seconds and the best time is saved and shown.")
@@ -163,7 +163,7 @@ def test_campaign_file_round_trips_and_keeps_user_edits(tmp_path):
     # The user edits their sections and adds one of their own.
     text = text.replace("## Constraints\n", "## Constraints\n- Save format unchanged (ADR-004)\n")
     text += "## My notes\nkeep the boss order\n```\n## not a heading\n```\n"
-    p = tmp_path / ".workspace" / "campaigns" / "boss-rush.md"
+    p = tmp_path / ".gamedevworkstation" / "campaigns" / "boss-rush.md"
     cf.write_atomic(p, text)
     assert cf.render(cf.read(p)) == text
 
@@ -312,14 +312,14 @@ async def test_failing_done_when_decrements_retries_then_parks(app, mgr, proj):
 async def test_chain_steps_advance_in_one_session_and_complete(app, mgr, proj):
     s = chain_session(app, proj)
     c = await mgr.create({"template": "flow", "kind": "chain", "session_id": s["id"]})
-    from workspace.features.hooks import install as hooks_install
+    from gamedevworkstation.features.hooks import install as hooks_install
 
     assert hooks_install(app).phase_type(app.store.get(s["id"])) == "build"
     app.fake.script = [tool_response("write_file", {"path": "out.txt", "content": "x"}),
                        tool_response("chain_step_done", {"handoff": HANDOFF}),
                        tool_response("write_file", {"path": "done.txt", "content": "y"}),
                        tool_response("chain_step_done", {"handoff": HANDOFF}), text_response("all done")]
-    from workspace.core.types import Message
+    from gamedevworkstation.core.types import Message
 
     app.store.add_message(s["id"], Message.user("go"))
     await app.runner.start(s["id"])
@@ -341,7 +341,7 @@ async def chain_with_autopilot(app, mgr, proj, **body):
 
 
 async def run_turn(app, mgr, sid, text="go"):
-    from workspace.core.types import Message
+    from gamedevworkstation.core.types import Message
 
     app.store.add_message(sid, Message.user(text))
     await app.runner.start(sid)
@@ -439,7 +439,7 @@ async def test_checkpoint_ref_created_and_tree_untouched(app, mgr, proj):
     s = chain_session(app, proj)
     c = await mgr.create({"template": "flow", "kind": "chain", "session_id": s["id"]})
     cp = c["phases"][0]["checkpoint"]
-    assert cp["ref"] == f"refs/workspace/checkpoints/{c['slug']}/p1" and cp["kind"] == "stash"
+    assert cp["ref"] == f"refs/gamedevworkstation/checkpoints/{c['slug']}/p1" and cp["kind"] == "stash"
     assert git(proj, "rev-parse", cp["ref"]).strip() == cp["sha"]
     assert "two" in git(proj, "show", f"{cp['sha']}:a.txt")
     assert git(proj, "status", "--porcelain") == before  # nothing changed
@@ -451,7 +451,7 @@ async def test_checkpoint_ref_created_and_tree_untouched(app, mgr, proj):
 
 
 async def test_gate_conditions_read_ladder_evidence(app, mgr, proj):
-    from workspace.features import ladder as L
+    from gamedevworkstation.features import ladder as L
 
     lad = L.install(app)
     C.get(app)  # already installed: the critique hook is chained on install only
@@ -475,7 +475,7 @@ async def test_gate_conditions_read_ladder_evidence(app, mgr, proj):
 
 
 async def test_critique_required_follows_template(app, proj):
-    from workspace.features import ladder as L
+    from gamedevworkstation.features import ladder as L
 
     lad = L.install(app)
     mgr = C.install(app)

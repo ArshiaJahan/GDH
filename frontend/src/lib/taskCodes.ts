@@ -1,5 +1,5 @@
 // Task board codes (Task00001, …) and the composer's /task command. Mirrors the backend
-// (backend/workspace/features/task_board.py: parse_code, MENTION): a reference may be the code in
+// (backend/gamedevworkstation/features/task_board.py: parse_code, MENTION): a reference may be the code in
 // any case, the bare number ("1", "00001") or "#1"; a code inside text is "Task" plus 5+ digits.
 
 export const PRIORITIES = ["none", "low", "medium", "high", "urgent"] as const;

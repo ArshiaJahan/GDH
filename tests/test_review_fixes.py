@@ -8,11 +8,11 @@ import httpx
 import pytest
 import respx
 
-from workspace.agent.tools import ToolContext
-from workspace.app import AppState
-from workspace.core.types import FileBlock, Message
-from workspace.features import subagents as subs_mod
-from workspace.providers.fake import FakeProvider, text_response
+from gamedevworkstation.agent.tools import ToolContext
+from gamedevworkstation.app import AppState
+from gamedevworkstation.core.types import FileBlock, Message
+from gamedevworkstation.features import subagents as subs_mod
+from gamedevworkstation.providers.fake import FakeProvider, text_response
 
 from .conftest import FIXTURES
 from .mockhttp import MockAPI, jresp
@@ -24,7 +24,7 @@ def app(tmp_path):
     a.providers.override("anthropic", "default", FakeProvider("anthropic"))
     a.providers.override("openai", "default", FakeProvider("openai"))
     from fastapi import APIRouter, FastAPI
-    from workspace.routes import register_routes
+    from gamedevworkstation.routes import register_routes
 
     register_routes(FastAPI(), APIRouter(), a)
     return a
@@ -73,7 +73,7 @@ async def test_data_policy_applies_to_every_request(app, tmp_path):
 
 
 async def test_job_budget_and_spend_checks_for_spawns(app, tmp_path):
-    from workspace.core.types import Usage
+    from gamedevworkstation.core.types import Usage
 
     s = app.store.create()
     app.turn_started[s["id"]] = 0
@@ -132,7 +132,7 @@ async def test_tts_threshold_counts_characters(app, monkeypatch):
         return {"status": "denied"}
 
     monkeypatch.setattr(app.approvals, "ask", fake_ask)
-    from workspace.agent.tools import ToolDenied
+    from gamedevworkstation.agent.tools import ToolDenied
 
     with pytest.raises(ToolDenied):  # 3,000 chars on a cheap model still asks
         await svc._confirm("s", "agent", "tts", credits=1500, preview="x", characters=3000)
@@ -144,7 +144,7 @@ async def test_web_fetch_reads_pages_and_blocks_local(app, monkeypatch):
     async def resolve(host, port):  # no real DNS; safe_fetch connects to the address it checked
         return {"example.org": ["93.184.216.34"]}.get(host, ["127.0.0.1"])
 
-    monkeypatch.setattr("workspace.safe_fetch._getaddrinfo", resolve)
+    monkeypatch.setattr("gamedevworkstation.safe_fetch._getaddrinfo", resolve)
     respx.get("https://93.184.216.34/post", headers={"Host": "example.org"}).mock(return_value=httpx.Response(
         200, text="<html><title>Hello post</title><body><script>x()</script><p>Body text here.</p></body></html>",
         headers={"content-type": "text/html"}))
@@ -161,7 +161,7 @@ async def test_web_fetch_reads_pages_and_blocks_local(app, monkeypatch):
 async def test_web_search_returns_cited_findings(app):
     import anthropic
 
-    from workspace.providers.anthropic_provider import AnthropicProvider
+    from gamedevworkstation.providers.anthropic_provider import AnthropicProvider
 
     body = {"id": "msg_ws", "type": "message", "role": "assistant", "model": "claude-haiku-5-5", "stop_reason": "end_turn",
             "stop_sequence": None,
