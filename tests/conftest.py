@@ -24,6 +24,10 @@ def _isolated_home(tmp_path, monkeypatch, request):
     monkeypatch.setenv("GDW_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("GDW_NO_KEYCHAIN", "1")
     monkeypatch.setenv("GDW_UPDATES_DIR", str(tmp_path / "updates"))  # never the real ~/GameDevWorkstationUpdates
+    monkeypatch.setenv("GDW_UNITY_CLI_SEARCH", "0")  # never the real Unity CLI: only [unity].cli_path
+    from gamedevworkstation.features import unity_cli
+
+    monkeypatch.setattr(unity_cli, "GLOBAL_EDITOR_LOG", tmp_path / "no-global-editor.log")
     if "live" not in request.keywords:
         for k in REAL_KEYS:
             monkeypatch.delenv(k, raising=False)

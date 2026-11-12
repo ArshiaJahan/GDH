@@ -10,6 +10,10 @@ Drive Unity 6000.3 in batchmode safely: one command per job, always a timeout, a
 Pinned: Unity 6000.3.21f1 (macOS Apple Silicon), Test Framework 1.6.0, URP 17.3, MCP for Unity 10.3.0 (editor-open path).
 Tools are MCP for Unity 10.3 tools; your client may prefix them (e.g. `mcp__UnityMCP__run_tests`). For tool parameters see unity-mcp-orchestrator.
 
+In GameDevWorkstation, prefer the `unity` tool (`op=compile|test|build|exec|import`): it picks the route from the user's Unity
+backend (official Unity CLI `unity run/test/build`, or this skill's `unity.sh`), streams the job to the Terminal drawer,
+asks for approval and records ladder evidence. `unity.sh` stays the path for CI, manual runs and HarnessCli entry points.
+
 ## When to use / not to use
 - Use when no editor has the project open: compile gate for compile-fix-loop, test runs for play-verify/gdd-to-backlog
   criteria, imports after files were added on disk, player builds for build-ship, any `-executeMethod` job.

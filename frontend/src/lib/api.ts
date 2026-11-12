@@ -75,6 +75,7 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
 export const get = <T = any>(p: string) => api<T>(p);
 export const post = <T = any>(p: string, body: unknown = {}) => api<T>(p, { method: "POST", body });
 export const patch = <T = any>(p: string, body: unknown) => api<T>(p, { method: "PATCH", body });
+export const put = <T = any>(p: string, body: unknown) => api<T>(p, { method: "PUT", body });
 export const del = <T = any>(p: string) => api<T>(p, { method: "DELETE" });
 
 /** URL for a local file served by the backend (media players, downloads, viewers). */
@@ -198,3 +199,21 @@ export type Campaign = {
 
 export type FleetUnit = { wave_id: string; sub_id: string; scope: string[]; read_only: boolean; status: string; merged: boolean; discoveries: string | null };
 export type FleetWave = { id: string; session_id: string; campaign_id: string | null; n: number; status: string; strikes: number; created_at: number; closed_at: number | null; units?: FleetUnit[] };
+
+// Unity backend switch (MCP vs the official Unity CLI): GET /api/unity/state.
+export type UnityBackend = "auto" | "mcp" | "cli";
+export type UnityRoute = "mcp" | "cli_live" | "cli_batch" | "raw_batch" | "unavailable";
+export type UnityCliInfo = { path?: string; version?: string; ok?: boolean; reason?: string; update_available?: string | null };
+export type UnityState = {
+  unity_project: boolean; mode: string; route: UnityRoute | string;
+  routes: { compile: string; test: string; build: string; eval: string };
+  editor_open: boolean; mcp_connected: boolean; reason: string;
+  backend: UnityBackend; backend_source: "global" | "project" | "session";
+  session_backend: UnityBackend | null; project_backend: UnityBackend | null; global_backend: UnityBackend;
+  live: { state?: string; pid?: number | null; port?: number | null; pipeline_version?: string | null; reason?: string };
+  cli: UnityCliInfo;
+  actions: string[];
+  busy: { label: string; job_id: string } | null;
+  pipeline_in_manifest: string | null; mcp_in_manifest: boolean;
+};
+export type UnityInfo = { cli: UnityCliInfo; editors: { version: string; architecture?: string; location: string }[]; config: Record<string, any> };

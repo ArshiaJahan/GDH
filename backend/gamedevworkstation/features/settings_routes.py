@@ -17,17 +17,19 @@ if TYPE_CHECKING:
     from ..app import AppState
 
 EDITABLE = {"orchestrator", "tiers", "delegation", "limits", "elevenlabs", "modes", "data_policy", "appearance", "updates",
-            "skills", "hooks", "ladder", "campaigns", "fleet"}
+            "skills", "hooks", "ladder", "campaigns", "fleet", "unity"}
 BG_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".m4v", ".mov", ".webm"}
 
 
 # Settings that take one of a few words (checked on PATCH; types are checked by invalid_settings).
-CHOICES = {("skills", "disclosure"): ("progressive", "full"), ("campaigns", "handoff"): ("per_phase", "on_cost")}
+CHOICES = {("skills", "disclosure"): ("progressive", "full"), ("campaigns", "handoff"): ("per_phase", "on_cost"),
+           ("unity", "backend"): ("auto", "mcp", "cli"), ("unity", "eval"): ("ask", "off"),
+           ("unity", "clone_when_open"): ("ask", "never", "always"), ("unity", "harness_scripts"): ("ask", "never")}
 
 
 # Sections that never change which keys, profiles or models the providers use: saving only
 # these keeps the provider clients (and their connection pools) as they are.
-NO_PROVIDER_RESET = {"appearance", "skills", "hooks", "ladder", "campaigns", "fleet"}
+NO_PROVIDER_RESET = {"appearance", "skills", "hooks", "ladder", "campaigns", "fleet", "unity"}
 
 
 def _apply(app: "AppState", new: Config, reset_providers: bool = True) -> None:

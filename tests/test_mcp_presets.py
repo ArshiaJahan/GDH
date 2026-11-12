@@ -217,6 +217,15 @@ def test_server_on_by_default_or_missing_needs_nothing(env):
     assert s.mcp.enable_for_skills(sid, ["unity-router"]) == []
 
 
+def test_cli_unity_backend_keeps_mcp_for_unity_off(env):
+    c, s, _, seen = env
+    sid = c.post("/api/sessions", json={}, headers=H).json()["id"]
+    s.store.update(sid, settings={"unity_backend": "cli"})  # the official Unity CLI drives Unity instead
+    assert s.mcp.enable_for_skills(sid, ["headless-ops"]) == [] and not notices(seen, sid)
+    s.store.update(sid, settings={"unity_backend": "mcp"})
+    assert s.mcp.enable_for_skills(sid, ["headless-ops"]) == ["unity"]
+
+
 def test_config_maps_every_unity_skill_to_unity(cfg):
     from .test_skills import UNITY_PACK
 

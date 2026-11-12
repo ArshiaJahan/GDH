@@ -2,7 +2,8 @@
 
 Kinds: effort (above-high), command, edit, delete, elevenlabs (large generation),
 shared_tool, mcp_tool (a local MCP tool that isn't read-only), mcp_install (the Skills & MCP
-assistant adding a server; it has no session).
+assistant adding a server; it has no session), unity (a Unity op through the harness: payload op,
+key, route, argv and the generic card's subject / markdown / buttons; see unity_bridge.ensure_allowed).
 An effort approval yields a token minted by core.effort.APPROVALS.
 
 Any other kind (hook_trust, gate escalations, campaign plan approval, ...) is shown by the UI's

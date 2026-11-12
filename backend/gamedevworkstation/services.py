@@ -193,14 +193,35 @@ class Commands:
         self.jobs, self.bus = jobs, bus
 
     async def run(self, jid: str, cmd: str, cwd: Path, timeout: int = 120) -> tuple[int, str]:
+        code, text, _ = await self.run_exec(jid, [default_shell(), "-lc", cmd], cwd, timeout, display=cmd)
+        return code, text
+
+    async def run_exec(self, jid: str, argv: list[str], cwd: Path, timeout: float = 120, *,
+                       env: dict[str, str] | None = None, display: str | None = None,
+                       capture_stdout: bool = False, on_start: Any = None) -> tuple[int, str, str]:
+        """Run argv (no shell) as job `jid` in its own process group; the output streams to the job
+        log and the agent's terminal tab (head + bounded tail kept in memory, the full log in
+        data_dir/jobs). capture_stdout: stdout is kept apart (returned as the third value, not
+        streamed; e.g. a JSON envelope) and only stderr streams. on_start(proc) is called once the
+        process exists. Returns (exit code, streamed text, captured stdout); 124 = timed out."""
         j = self.jobs.get(jid) or {}
         sid = j.get("session_id")
-        self.bus.publish("terminal.agent_command", {"job_id": jid, "command": cmd, "cwd": str(cwd)}, sid)
-        proc = await asyncio.create_subprocess_exec(
-            default_shell(), "-lc", cmd, cwd=str(cwd), stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT, stdin=asyncio.subprocess.DEVNULL, start_new_session=True,
-            env={**os.environ, "TERM": "dumb", "NO_COLOR": "1"})
+        self.bus.publish("terminal.agent_command", {"job_id": jid, "command": display or " ".join(argv),
+                                                    "cwd": str(cwd), "kind": j.get("kind")}, sid)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *argv, cwd=str(cwd), stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE if capture_stdout else asyncio.subprocess.STDOUT,
+                stdin=asyncio.subprocess.DEVNULL, start_new_session=True,
+                env=env if env is not None else {**os.environ, "TERM": "dumb", "NO_COLOR": "1"})
+        except OSError as e:  # the program or the folder is gone: the job must not stay "running"
+            self.jobs.finish(jid, "failed", error=str(e)[:300])
+            self.bus.publish("terminal.agent_exit", {"job_id": jid, "exit_code": 127}, sid)
+            raise
         self.jobs.procs[jid] = proc
+        if on_start is not None:
+            on_start(proc)
+        captured: list[bytes] = []
         # The full output goes to a file; memory keeps only the head and a bounded tail, so a chatty
         # command (a build printing 500 MB) can't exhaust memory or flood the WebSocket.
         path = data_dir() / "jobs" / f"{jid}.log"
@@ -240,13 +261,24 @@ class Commands:
                 flush()
 
         async def pump() -> None:
-            assert proc.stdout
-            while data := await proc.stdout.read(65536):
+            src = proc.stderr if capture_stdout else proc.stdout
+            assert src
+            while data := await src.read(65536):
                 s = data.decode(errors="replace")
                 feed(s)
                 st["pending"] += s
                 if len(st["pending"]) > _EVENT_CAP:
                     flush()
+
+        async def grab() -> None:
+            if not capture_stdout:
+                return
+            assert proc.stdout
+            size = 0
+            while data := await proc.stdout.read(65536):
+                if size < 8 * _TAIL_CAP:  # an envelope is small; never hold an unbounded stdout
+                    captured.append(data)
+                    size += len(data)
 
         ftask = asyncio.ensure_future(flusher())
 
@@ -258,7 +290,7 @@ class Commands:
                 fh.close()
 
         try:
-            await asyncio.wait_for(asyncio.gather(pump(), proc.wait()), timeout)
+            await asyncio.wait_for(asyncio.gather(pump(), grab(), proc.wait()), timeout)
             code = proc.returncode or 0
             end()
             self.jobs.finish(jid, "done" if code == 0 else "failed", exit_code=code)
@@ -277,13 +309,14 @@ class Commands:
             end()
             self.jobs.procs.pop(jid, None)
         self.bus.publish("terminal.agent_exit", {"job_id": jid, "exit_code": code}, sid)
+        out = b"".join(captured).decode(errors="replace")
         tail, total = st["tail"], st["total"]
         if len(tail) == total:  # never trimmed: the whole output is here
-            return code, tail
+            return code, tail, out
         tail = tail[-_TAIL_CAP:]
         note = f"\n…[{total - len(st['head']) - len(tail)} chars omitted; full output in {path}]…\n"
         text = st["head"] + note + tail
-        return code, text
+        return code, text, out
 
 
 # ---------------------------------------------------------------------- changes

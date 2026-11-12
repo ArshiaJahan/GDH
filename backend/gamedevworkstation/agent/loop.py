@@ -90,7 +90,7 @@ class AgentRunner:
         # Codex CLI harness turns, agent commands, and any subagent job not tracked above. Jobs.cancel
         # kills each process group (they all start in a new session) and cancels the task.
         for j in app.db.all("SELECT id FROM jobs WHERE session_id=? AND status IN ('running','queued') "
-                            "AND kind IN ('subagent','codex_cli','command')", [sid]):
+                            "AND kind IN ('subagent','codex_cli','command','unity')", [sid]):
             if await app.jobs.cancel(j["id"]):
                 jobs += 1
         approvals = app.approvals.expire_session(sid)

@@ -411,6 +411,28 @@ def parse_nunit(path: Path) -> dict:
             "passed": passed[:NAMES_CAP], "failed": failed[:NAMES_CAP]}
 
 
+def evidence_from_nunit(p: Path, *, source: str, observed: str, cmd: str = "", mode: str = "",
+                        categories: list[str] | None = None, scope: str = "unknown", ts: float | None = None,
+                        extra: dict | None = None) -> dict | None:
+    """An L2 evidence spec (record_evidence kwargs + "note") from an NUnit results file; None when it
+    can't be read. Only a complete run with tests and no failures is a pass. ts: when the run
+    started (default: the file's mtime)."""
+    try:
+        r = parse_nunit(p)
+        mtime = p.stat().st_mtime
+    except (OSError, ValueError, ET.ParseError):
+        return None
+    ok = r["failed_n"] == 0 and r["total"] > 0
+    names = r["passed"] + r["failed"]
+    return {"level": "L2", "status": "pass" if ok else "fail", "source": source, "observed": observed,
+            "path": str(p), "ts": ts if ts is not None else min(time.time(), mtime),
+            "subjects": story_ids_from_tests(names),
+            "detail": {"kind": "tests", **r, "mode": mode, "categories": categories or [], "scope": scope,
+                       "summary": f"{r['passed_n']}/{r['total']} passed, {r['failed_n']} failed", "cmd": cmd[:500],
+                       **(extra or {})},
+            "note": f"L2 tests: {r['passed_n']}/{r['total']} passed, {r['failed_n']} failed ({p.name})"}
+
+
 def story_ids_from_tests(names: Iterable[str]) -> list[str]:
     """Story ids named by test methods (M1_S02_... -> M1-S02), the pack's naming convention."""
     out: list[str] = []
@@ -1298,6 +1320,12 @@ class Ladder:
         inside = self._inside(ctx)
         specs: list[dict] = []
         for argv, cwd in split_commands(cmd, base):
+            if argv and Path(argv[0]).name == "unity" and len(argv) > 1 and argv[1] in ("test", "recompile"):
+                try:
+                    specs += self._from_unity_cli(argv, cwd, text, inside, cmd)
+                except Exception:  # noqa: BLE001 — an unreadable artifact is simply no evidence
+                    log.info("ladder: couldn't re-check %s", cmd[:200], exc_info=True)
+                continue
             hit = find_script(argv)
             if not hit:
                 continue
@@ -1377,14 +1405,50 @@ class Ladder:
                   scope: str = "unknown") -> list[dict]:
         if not p.is_file() or not inside(p):
             return []
-        r = parse_nunit(p)
-        ok = r["failed_n"] == 0 and r["total"] > 0
-        names = r["passed"] + r["failed"]
-        return [{"level": "L2", "status": "pass" if ok else "fail", "source": src, "observed": "command",
-                 "path": str(p), "ts": min(time.time(), p.stat().st_mtime), "subjects": story_ids_from_tests(names),
-                 "detail": {"kind": "tests", **r, "mode": mode, "categories": categories or [], "scope": scope,
-                            "summary": f"{r['passed_n']}/{r['total']} passed, {r['failed_n']} failed", "cmd": cmd[:500]},
-                 "note": f"L2 tests: {r['passed_n']}/{r['total']} passed, {r['failed_n']} failed ({p.name})"}]
+        spec = evidence_from_nunit(p, source=src, observed="command", cmd=cmd, mode=mode, categories=categories,
+                                   scope=scope)
+        return [spec] if spec else []
+
+    def _from_unity_cli(self, argv: list[str], cwd: Path, text: str, inside: Any, cmd: str) -> list[dict]:
+        """`unity test … --output X` / `unity recompile … --format json` typed by the agent: re-checked
+        from the XML / the JSON envelope, never from the text around them."""
+        from .unity_cli import parse_envelope
+
+        sub = argv[1] if len(argv) > 1 else ""
+        opts = argv[2:argv.index("--")] if "--" in argv else argv[2:]
+        fwd = argv[argv.index("--") + 1:] if "--" in argv else []
+
+        def opt(name: str) -> str | None:
+            return next((opts[i + 1] for i, x in enumerate(opts[:-1]) if x == name), None)
+
+        if sub == "test":
+            xml = opt("--output") or "test-results.xml"
+            q = Path(xml).expanduser()
+            p = (q if q.is_absolute() else cwd / q).resolve()
+            cats = [fwd[i + 1] for i, x in enumerate(fwd[:-1]) if x == "-testCategory"]
+            filtered = bool(opt("--filter")) or "-assemblyNames" in fwd or bool(cats)
+            return self._from_xml(p, inside, "cmd:unity test", cmd, mode=opt("--mode") or "", categories=cats,
+                                  scope="filtered" if filtered else "all")
+        if sub == "recompile":
+            m = re.match(r"exit code (-?\d+)\n", text or "")
+            env = parse_envelope(text[m.end():] if m else text)
+            if not m or not env or env.get("command") != "recompile":
+                return []
+            code = int(m.group(1))
+            data = env.get("data") if isinstance(env.get("data"), dict) else {}
+            errs = [e for e in (data.get("errors") or []) if isinstance(e, dict)]
+            if code == 0 and env.get("success"):
+                ok = True
+            elif code == 6 and errs:
+                ok = False
+            else:
+                return []  # no Editor reachable, several Editors, …: no evidence either way
+            return [{"level": "L1", "status": "pass" if ok else "fail", "source": "cmd:unity recompile",
+                     "observed": "command", "ts": time.time(),
+                     "detail": {"kind": "compile", "compile_errors": len(errs), "route": "cli_live",
+                                "summary": f"{len(errs)} compile error(s) (unity recompile)", "cmd": cmd[:500]},
+                     "note": f"L1 {'PASS' if ok else 'FAIL'}: unity recompile, {len(errs)} error(s)"}]
+        return []
 
     def _from_criteria(self, ctx: ToolContext, args: list[str], cwd: Path, inside: Any, cmd: str) -> list[dict]:
         r = rerun_check_criteria(args, cwd, inside)

@@ -21,7 +21,8 @@ const REPORT = {
 
 const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn(async () => ({})));
-vi.mock("../../lib/api", () => ({ get, post }));
+const put = vi.hoisted(() => vi.fn());
+vi.mock("../../lib/api", () => ({ get, post, put }));
 vi.mock("../../lib/store", () => ({ actions: { toast: vi.fn(), onEvent: () => () => {} } }));
 vi.mock("../SidePanel", () => ({ Card: ({ title, children }: { title: string; children: ReactNode }) => <div><h2>{title}</h2>{children}</div> }));
 vi.mock("../items", () => ({ ItemViewer: () => null }));
@@ -29,7 +30,7 @@ vi.mock("../ui", () => ({ fmtAgo: () => "just now" }));
 
 import { QualityCard } from "./QualityCard";
 
-afterEach(() => { cleanup(); get.mockReset(); post.mockClear(); });
+afterEach(() => { cleanup(); get.mockReset(); post.mockClear(); put.mockReset(); });
 
 const session = (folder: string | null) => ({ id: "s1", folder, status: "idle", settings: {} }) as any;
 
@@ -76,5 +77,29 @@ describe("QualityCard", () => {
     await act(async () => {});
     expect((screen.getByLabelText("Unity gates") as HTMLInputElement).disabled).toBe(true);
     expect(screen.getByText("unavailable")).toBeTruthy();
+  });
+
+  it("switches the Unity backend per session and sets the project default", async () => {
+    const U = { unity_project: true, route: "cli_batch", reason: "Editor closed", backend: "cli", session_backend: "cli", project_backend: null, global_backend: "auto" };
+    get.mockImplementation(async (p: string) => {
+      if (p.startsWith("/ladder")) return REPORT;
+      if (p.startsWith("/unity/state")) return U;
+      throw new Error("404");
+    });
+    put.mockResolvedValue({ ...U, session_backend: "mcp" });
+    render(<QualityCard s={session("/p/game")} />);
+    await act(async () => {});
+    const sel = screen.getByLabelText("Unity backend") as HTMLSelectElement;
+    expect(sel.value).toBe("cli");
+    expect(screen.getByText("Project default (auto)")).toBeTruthy();
+    expect(screen.getByText(/Now: CLI batch \(Editor closed\)/)).toBeTruthy();
+
+    await act(async () => { fireEvent.click(screen.getByText("Set as project default")); });
+    expect(put).toHaveBeenCalledWith("/unity/backend", { session_id: "s1", scope: "project", backend: "cli" });
+
+    put.mockResolvedValue({ ...U, session_backend: null });
+    await act(async () => { fireEvent.change(screen.getByLabelText("Unity backend"), { target: { value: "mcp" } }); });
+    expect(put).toHaveBeenLastCalledWith("/unity/backend", { session_id: "s1", scope: "session", backend: "mcp" });
+    expect(screen.queryByText("Set as project default")).toBeNull(); // hidden once the session has no override
   });
 });

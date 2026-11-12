@@ -20,6 +20,7 @@ transcription, sound and music. Everything runs locally; the backend listens on 
 - [Sessions](#sessions)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [How delegation works](#how-delegation-works)
+- [Built-in skills](#built-in-skills) (and [Unity: MCP or CLI](#unity-mcp-or-cli))
 - [Building the app](#building-the-app)
 - [Versions & updates](#versions--updates)
 - [Upgrading from Workspace 0.4](#upgrading-from-workspace-04) <!-- rename:keep -->
@@ -143,6 +144,12 @@ keep an explicit **Save**.
 - `[mcp.presets.<key>]` built-in MCP servers (name, transport, command, args, description) added
   once to Skills & MCP; `[skills.mcp_on_invoke]` maps a skill to the MCP servers that invoking it
   turns on for the session (every Unity skill → `unity`).
+- `[unity]` the Unity backend (`backend = "auto" | "mcp" | "cli"`, see
+  [Unity: MCP or CLI](#unity-mcp-or-cli)), `auto_live_order`, `cli_path` (empty: find the Unity
+  CLI), `editor_path` / `editor_root`, `pipeline_version` (what "Install Pipeline package" pins),
+  the Unity job timeouts (`live_timeout_s`, `live_test_timeout_s`, `batch_timeout_s`,
+  `test_timeout_s`, `build_timeout_s`), `nographics`, `extra_editor_args` and `eval` (`ask` | `off`).
+  Settings → Unity edits it.
 - `[data_policy]` which providers may receive files you mark sensitive.
 - `[models."…"]` the model catalog: prices per million tokens, context windows, accepted effort
   levels, how each model expresses "no thinking", and a `display_name` (Opus 5.5, Sonnet 5.5,
@@ -722,7 +729,7 @@ others turn on when you invoke them.
 | `game-designer` | Game design partner, with references, templates and a calculator script |
 | `cost-effective-claude-delegation` | Does a task at the lowest total cost, step by step |
 | `high-performance-claude-delegation` | Runs independent units in parallel on Opus at high effort, then an Opus reviewer |
-| `unity-router` (featured) | Unity game pack entry point: picks which Unity skills to load for a task and whether to use the editor (MCP) or batchmode; see [`skills/unity-router`](../skills/unity-router/SKILL.md) |
+| `unity-router` (featured) | Unity game pack entry point: picks which Unity skills to load for a task and uses the route the harness reports (MCP, Unity CLI live or batch); see [`skills/unity-router`](../skills/unity-router/SKILL.md) |
 | `compile-fix-loop`, `play-verify`, `headless-ops`, `scene-prefab-safety`, `gdd-to-backlog`, `project-memory`, `architecture-patterns`, `asset-pipeline`, `perf-pass`, `game-feel-pass`, `build-ship`, `vcs-hygiene` | The rest of the Unity 6 game-creation pack: compile/fix, Play Mode checks, headless builds and tests, safe scene/prefab edits, GDD to backlog, project memory, architecture templates, asset pipeline, performance, game feel, shipping and git hygiene (with scripts, templates and references) |
 | `unity-mcp-orchestrator` | MCP for Unity tool reference and workflows, used by the Unity pack |
 
@@ -746,6 +753,88 @@ error on the server's dot, and the MCP tools fail with their usual errors.
 Its tools appear as `mcp__unity__<tool>`; the skills name them by bare name (`read_console`,
 `manage_editor`, ...), and the tool-mapping note tells the model how they correspond.
 With the editor closed, `headless-ops` and `build-ship` fall back to batchmode and work without it.
+
+### Unity: MCP or CLI
+
+The harness can drive Unity two ways, and you choose with the **Unity backend**:
+
+| Backend | Editor open | Editor closed |
+|---|---|---|
+| `mcp` | MCP for Unity (the `unity` server above) | `headless-ops` `unity.sh` batchmode (the behaviour before the CLI backend) |
+| `cli` | the official Unity CLI against the open Editor (`unity recompile`, `unity command …`); needs the `com.unity.pipeline` package in the project | `unity run` (compile), `unity test`, `unity build` in batch mode; `unity.sh` when the Unity CLI isn't installed |
+| `auto` (default) | `auto_live_order` (MCP first, then the Unity CLI live route) | the Unity CLI if found, else `unity.sh` |
+
+**Where you set it.** Settings → Unity sets the default for every project (`[unity] backend`) and
+shows the Unity CLI that was found (path and version) and the installed editors.
+The Quality card has **Unity backend** for the session ("Project default" or Auto / MCP / CLI)
+and **Set as project default**; the chip at the bottom of the composer (`Unity · MCP`,
+`Unity · CLI live`, `Unity · CLI batch`, `Unity · Batch (unity.sh)`, `Unity · Editor open — no
+bridge`, `Unity · Safe Mode`, `Unity · busy: …`) shows the route the next compile takes and has the
+same switch. A session's choice wins over the project's, which wins over the default.
+
+**The Unity CLI.** Unity Hub installs it (`/Applications/Unity Hub.app/Contents/Resources/unity`
+and `~/.unity/bin/unity`), or `curl -fsSL https://unity.com/install.sh | bash`. The app uses
+`[unity] cli_path`, else `unity` on your login shell's PATH, else those two places, and only a
+program that answers like the Unity CLI (`--version`, `commands --format json` listing
+`recompile`). Versions older than `min_cli_version` (1.0.0-beta.11) are reported and not used. The
+app never updates it by itself (run `unity self-update`; `POST /api/unity/actions/update_cli` does
+it behind a card).
+Batch jobs run the Editor version in `ProjectSettings/ProjectVersion.txt`; when that version isn't
+installed the check is skipped with "Unity <version> isn't installed", never run with another one.
+
+**Live Editor (`cli_live`).** The Unity CLI talks to a running Editor through the
+`com.unity.pipeline` package (Unity 6+). Compile is `unity recompile` (errors as JSON, a few hundred
+ms, no domain reload on a clean run); tests are the Editor's `run_tests` command (named `test run`
+in older Pipeline versions; the app reads the Editor's command list), run detached and waited for.
+The agent's `unity` tool also offers `eval` (C# in the Editor; always shown to you first, and
+`[unity] eval = "off"` turns it off), named Pipeline commands, `screenshot` and a `play` loop
+(`set_autotick`, then `editor_play`).
+
+**Editor open, no live route.** Batch mode can never open a project an Editor holds, so nothing runs
+in batch then. In `auto`, MCP is used when it's connected. Otherwise the gates report *skipped* with
+the reason, and the chip offers:
+- **Install Pipeline package**: `unity pipeline install --package-version 1.0.0` (pinned), behind a
+  card; it changes `Packages/manifest.json` (a tracked file). Unity loads it the next time its
+  window gets focus ("Switch to the Unity window once").
+- **Use MCP for this check** (when MCP for Unity is in the project): one compile over MCP, the
+  setting unchanged.
+- **Close Unity**: `unity close`, behind a card that says Unity exits **without saving**. Never
+  automatic, never forced.
+
+**Safe Mode.** An Editor that booted with compile errors loads neither MCP for Unity nor the
+Pipeline package. The app notices (`unity pipeline list`), takes the `error CS` lines for this
+project from `Logs/Editor.log` (or the global Editor log when it names this project), and the compile
+gate fails with them; it never passes. Tests are skipped until it compiles.
+
+**Approvals.** `status`, `commands` and `log` never ask. Compile and tests run without a card when
+the Unity gates are on for the project (their consent now also lists the Unity CLI checks
+`compile` and `test:editmode`; consent given before this version still covers the same gates) or
+after **Always allow** on a card; they also run in Plan only mode (they write only `Library/`,
+`Logs/` and `Temp/`). Builds, exec, import, Pipeline commands, screenshots and play always ask
+(with the exact command line), with **Always allow `<op>` in this project**, and never run in Plan
+only mode. Installing the Pipeline package, opening or closing Unity and updating the CLI always
+ask.
+
+**Jobs and logs.** One Unity job runs per project at a time (a second one waits). Each is a
+background job (kind `unity`) whose output streams to the Terminal drawer like an agent command;
+**Cancel** on the chip (or Stop) ends the Unity CLI's process group and any batch-mode Unity it
+left for that project (never a GUI Editor). Logs and test results go to
+`<project>/Logs/harness/` (Unity's default `.gitignore` ignores `Logs/`). Timeouts: `[unity]`
+`live_timeout_s` 120, `live_test_timeout_s` 900, `batch_timeout_s` 900, `test_timeout_s` 1800,
+`build_timeout_s` 3600; the CLI's own `--timeout` fires first, the app's watchdog 30 s later.
+
+**Evidence.** Compile and test results from the `unity` tool become quality-ladder evidence (L1,
+L2 from the NUnit XML or the live run's results) stamped with when the run *started*, so an edit
+made during a long compile isn't covered by it. `unity test … --output X` or `unity recompile
+--format json` typed into `run_command` are re-checked from the XML or the JSON envelope.
+
+**MCP stays off in CLI mode.** With the `cli` backend, invoking a Unity skill doesn't turn on the
+`unity` MCP server (`[unity] mcp_server`).
+
+**Not yet:** running batch jobs on an APFS copy while the Editor holds the project
+(`clone_when_open`), installing the headless-ops HarnessCli editor scripts on demand
+(`harness_scripts`; `import`, forced recompiles and development builds use `unity.sh`, which needs
+them in the project), menu items in batch mode, and a warm `unity shell` process for live calls.
 
 **Invoking a skill.** Any of these does the same thing:
 

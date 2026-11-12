@@ -89,10 +89,26 @@ exit code. "✓ local" = observed on this Mac (6000.3.21f1, Apple Silicon); "✓
 - One-liner: `perl -e 'alarm shift; exec @ARGV' 900 "$U" -batchmode … -logFile log` (SIGALRM ends Unity; ✓ local for a
   normal run, the kill path itself [UNVERIFIED]).
 
-## Official Unity CLI (beta, optional alternative)
-`~/.unity/bin/unity` 1.0.0-beta (not on PATH in non-login shells). `unity test <proj> --mode EditMode --output r.xml
---non-interactive --timeout 300 [--json]` ✓ local (exit 0, JSON `{success, data.reports.nunit}`). Also `build`, `recompile`,
-`status`, `command eval`. Beta: commands and codes may change; prefer unity.sh for anything a skill depends on.
+## Official Unity CLI (beta; GameDevWorkstation's `cli` / `auto` Unity backend)
+`~/.unity/bin/unity` and `/Applications/Unity Hub.app/Contents/Resources/unity`, 1.0.0-beta.13 (not on PATH in non-login
+shells). `unity test <proj> --mode EditMode --output r.xml --non-interactive --timeout 300 [--json]` ✓ local (exit 0, JSON
+`{success, data.reports.nunit}`). GameDevWorkstation runs it through the `unity` tool; equivalents (✓ `--help`, beta.13):
+
+| unity.sh | Official CLI (`--format json`; Editor log on stderr) | Notes |
+|---|---|---|
+| `compile` (closed) | `unity run <proj> --timeout T --log-file L -- -nographics` | batch + `-quit` added by the CLI; Unity's exit code |
+| `compile` (open, Pipeline) | `unity recompile --project-path <proj> --timeout T` | exit 0 ok · 6 errors (`data.errors[]` file/line/column/code/message) · 7 no Editor ✓ local |
+| `test editmode --category C` | `unity test <proj> --mode EditMode --output X --timeout T -- -testCategory C -nographics` | no `--category` flag; exit 0 · 8 tests failed · 6 no verdict (`TEST_TIMED_OUT`, `TEST_RUN_ERROR`) |
+| `build <target>` | `unity build <proj> --target T \| --profile P --output-path O --log-file L --timeout T` | verdict from the log; exit 6 = failed; `data.outputPath` |
+| `exec M` | `unity run <proj> -- -executeMethod M` | always `-quit`: HarnessCli methods (deferred Exit) stay on unity.sh |
+
+Reserved after `--` (exit 6 before any Editor starts, ✓ local): `-batchmode -quit -projectPath -useHub -hubIPC` (+ for
+`test`: `-runTests -testPlatform -testResults -testFilter` and the coverage trio). `unity status` with no Editor: exit 6
+`STATUS_NO_INSTANCES` ✓ local; `unity command` with no Editor: exit 6 ✓ local. Live tests: Pipeline 0.10 names the command
+`test run` (args `mode` editor|playmode|all, `filter`, `filter-type` testName|assembly|category, `timeout` s), the 1.0 docs
+`run_tests`; read the Editor's list (`unity command --query test --format json`). Editor params go after a `--` fence
+(the CLI eats its own `--timeout` anywhere in the tail). [UNVERIFIED] whether `unity run/test` start the Editor in their
+own process group (GameDevWorkstation kills the CLI's group and then sweeps `-batchmode` Unity with this `-projectPath`).
 
 ## CI notes
 - One job per platform (one target per Unity invocation); serialise jobs per project copy.

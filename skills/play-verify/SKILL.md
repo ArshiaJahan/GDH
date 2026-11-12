@@ -41,6 +41,12 @@ Tools are MCP for Unity 10.3 tools; your client may prefix them (e.g. `mcp__Unit
 11. **Evaluate.** `python3 <skills>/play-verify/scripts/check_criteria.py BACKLOG.md Logs/harness/verify/<run-id>/console.json --only <IDs> --type play-verify,PlayMode [--results <xml>] [--evidence <ID>=PASS:<shot path — observation>]...`. Exit 0 = all PASS; 1 = FAIL; 4 = screenshot/observe rows still need your `--evidence` verdict. Give `--evidence ...=FAIL:...` when the image does not match; never PASS an image you did not look at.
 12. **Report.** Write `Logs/harness/verify/<run-id>/VERIFY.md` from references/report-template.md: the script's table, screenshot paths, console summary, input script used, and next actions for each FAIL. Return the table and the report path.
 
+## Unity CLI live path (GameDevWorkstation, route `cli_live`)
+With the official Unity CLI and com.unity.pipeline instead of MCP for Unity: `unity` tool `op=play action=start` (sends
+`set_autotick` first so an unfocused Editor keeps ticking, then `editor_play`), confirm frames advance with
+`op=command name=editor_status`, `op=screenshot`, read values with `op=eval` (shown to the user first), then
+`op=play action=stop`. Evaluate and report as in steps 11-12.
+
 ## Headless path (no editor, CI, or long deterministic runs)
 - Copy `PlayVerifyTests.GameScene_MeetsAcceptanceCriteria` per scene/criterion set; set `ScenePath`, `WarmupSeconds`, `InputScript`, and turn criteria into `Assert`s on `VerifyProbe.GetFloat(...)`. Name tests after the AC (`M1_S02_AC2_HitLogged`) so `test:` signals match.
 - Run with headless-ops: `<skills>/headless-ops/scripts/unity.sh test playmode --category PlayVerify --results Logs/harness/verify/<run-id>/playmode.xml` (PlayMode never gets `-nographics` there; never `-quit` with `-runTests`). With the editor open instead: `run_tests(mode="PlayMode", category_names=["PlayVerify"], init_timeout=120000)` then `get_test_job(job_id, wait_timeout=60, include_failed_tests=true)`.

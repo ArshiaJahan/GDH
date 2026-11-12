@@ -32,6 +32,8 @@ Tools are MCP for Unity 10.3 tools; your client may prefix them (e.g. `mcp__Unit
    the global scene list (EditorBuildSettings) are built.
 
 ## Procedure
+In GameDevWorkstation, builds go through the `unity` tool (`op=build profile=… | target=…, out=…`; `dev=true` uses unity.sh +
+HarnessCli): the official Unity CLI's `unity build` when the user's Unity backend allows it, else headless-ops.
 1. **Path.** Read `mcpforunity://instances`. Editor open on this project → MCP path (step 6b); otherwise headless.
 2. **Preflight (all must pass; stop on the first failure).**
    - `git status --porcelain` is empty (otherwise ask the user to commit or stash; never discard changes).

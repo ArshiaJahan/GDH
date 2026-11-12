@@ -13,7 +13,7 @@ const create = vi.hoisted(() => vi.fn(async () => ({})));
 vi.mock("../lib/campaigns", async (orig) => ({ ...(await orig<any>()), campaignsApi: { chains, create } }));
 const toast = vi.hoisted(() => vi.fn());
 vi.mock("../lib/store", () => ({
-  actions: { toast, setSkillChip: vi.fn(), go: vi.fn() },
+  actions: { toast, setSkillChip: vi.fn(), go: vi.fn(), onEvent: () => () => {} },
   useStore: (sel: (s: any) => unknown) => sel({ appState: { tiers: {}, models: {} }, drafts: {}, skillChips: {} }),
 }));
 

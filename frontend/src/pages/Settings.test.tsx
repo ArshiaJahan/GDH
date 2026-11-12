@@ -3,11 +3,12 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../lib/api", () => ({ api: vi.fn(), del: vi.fn(), get: vi.fn(async () => null), post: vi.fn() }));
+const get = vi.hoisted(() => vi.fn(async (_p: string): Promise<any> => null));
+vi.mock("../lib/api", () => ({ api: vi.fn(), del: vi.fn(), get, post: vi.fn() }));
 vi.mock("../lib/store", () => ({ actions: { toast: vi.fn(), refreshState: vi.fn() }, useStore: (sel: (s: any) => unknown) => sel({ pageArgs: {} }) }));
 vi.mock("../components/StorageSettings", () => ({ StorageSettings: () => null }));
 
-import { Allowlist, Num, savableAllowRules, validAllowRule } from "./Settings";
+import { Allowlist, Num, savableAllowRules, UnitySettings, validAllowRule } from "./Settings";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => {
@@ -112,5 +113,33 @@ describe("Allowlist", () => {
     const values = screen.getAllByLabelText(/^Allowlist rule/).map((x) => (x as HTMLInputElement).value);
     expect(values).toEqual(["edit:*", "delete:tmp/*", "mcp:"]);
     expect(save).not.toHaveBeenCalled();
+  });
+});
+
+describe("UnitySettings", () => {
+  it("shows the detected CLI and editors, and saves the chosen backend", async () => {
+    vi.useRealTimers();
+    get.mockImplementation(async (p: string) => p === "/unity/info"
+      ? { cli: { path: "/usr/local/bin/unity", version: "1.2.3", ok: true, update_available: "1.3.0" },
+          editors: [{ version: "6000.0.1f1", architecture: "arm64", location: "/Applications/Unity/Hub/Editor/6000.0.1f1" }], config: {} }
+      : null);
+    const save = vi.fn();
+    render(<UnitySettings st={{ unity: { backend: "auto", eval: "ask" } }} save={save} />);
+    await act(async () => {});
+    expect(screen.getByTestId("unity-cli").textContent).toContain("1.2.3");
+    expect(screen.getByTestId("unity-cli").textContent).toContain("update available: 1.3.0");
+    expect(screen.getByText("6000.0.1f1")).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: "CLI" }));
+    expect(save).toHaveBeenCalledWith({ unity: { backend: "cli" } }, "Default backend");
+    fireEvent.change(screen.getByLabelText("Eval policy"), { target: { value: "off" } });
+    expect(save).toHaveBeenLastCalledWith({ unity: { eval: "off" } }, "Eval policy");
+  });
+
+  it("says when the CLI is missing", async () => {
+    vi.useRealTimers();
+    get.mockImplementation(async () => ({ cli: {}, editors: [], config: {} }));
+    render(<UnitySettings st={{ unity: {} }} save={vi.fn()} />);
+    await act(async () => {});
+    expect(screen.getByTestId("unity-cli").textContent).toContain("Not found");
   });
 });

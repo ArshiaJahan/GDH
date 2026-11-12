@@ -1,11 +1,11 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
-import { Bot, Plus, SquareTerminal, X } from "lucide-react";
+import { Bot, Plus, Square, SquareTerminal, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { get, sendWs } from "../lib/api";
+import { get, post, sendWs } from "../lib/api";
 import { actions, useStore } from "../lib/store";
 
-type Tab = { id: string; title: string; agent: boolean; exited?: boolean };
+type Tab = { id: string; title: string; agent: boolean; exited?: boolean; unityJob?: string };
 
 // Terminals live outside React so switching tabs or pages keeps their buffers.
 const terms = new Map<string, { term: Terminal; fit: FitAddon; el: HTMLDivElement }>();
@@ -86,7 +86,8 @@ export function TerminalDrawer() {
       const t = terms.get(d.tab);
       if (t) t.term.write(d.data);
     } else if (ev.type === "terminal.agent_command") {
-      const tab: Tab = { id: `agent:${d.job_id}`, title: d.command.slice(0, 28), agent: true };
+      const tab: Tab = { id: `agent:${d.job_id}`, title: d.command.slice(0, 28), agent: true,
+        unityJob: d.kind === "unity" ? d.job_id : undefined };
       ensureTerm(tab).term.write(`\x1b[2m${d.cwd} $\x1b[0m ${d.command}\r\n`);
       setTabs((x) => (x.some((y) => y.id === tab.id) ? x : [...x, tab]));
       // Other sessions' commands get a tab but never take over the view; the open session's
@@ -150,6 +151,10 @@ export function TerminalDrawer() {
             onClick={() => setActive(t.id)} title={t.agent ? `Agent command: ${t.title}` : t.title}>
             {t.agent ? <Bot size={12} /> : <SquareTerminal size={12} />}
             <span className={`max-w-[180px] truncate ${t.exited ? "opacity-60" : ""}`}>{t.title}</span>
+            {t.unityJob && !t.exited && (
+              <button className="p-0.5 rounded hover:bg-line text-muted hover:text-text" aria-label={`Cancel Unity job ${t.title}`} title="Cancel this Unity job"
+                onClick={(e) => { e.stopPropagation(); post(`/unity/jobs/${t.unityJob}/cancel`, {}).catch(() => {}); }}><Square size={10} /></button>
+            )}
             <button className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-0.5 rounded hover:bg-line" aria-label={`Close ${t.title}`}
               onClick={(e) => { e.stopPropagation(); closeTab(t.id); }}><X size={11} /></button>
           </div>

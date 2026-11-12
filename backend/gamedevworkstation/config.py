@@ -141,6 +141,7 @@ class Config(BaseModel):
     ladder: dict[str, Any] = Field(default_factory=dict)   # visual_globs, critique_tier, critique_rounds, arbiter_tier
     campaigns: dict[str, Any] = Field(default_factory=dict)  # handoff, rollover_input_tokens, max_auto_turns, ...
     fleet: dict[str, Any] = Field(default_factory=dict)    # enabled, max_units, unit_timeout_min, relay_tokens
+    unity: dict[str, Any] = Field(default_factory=dict)    # backend (auto|mcp|cli), cli_path, timeouts (features/unity_cli.py)
     models: dict[str, ModelConfig] = Field(default_factory=dict)
 
     def mcp_presets(self) -> dict[str, dict[str, Any]]:
@@ -252,7 +253,7 @@ PRE_OVERRIDES_BACKUP = "config.toml.pre-overrides.bak"  # the old full copy, kep
 # Free-form sections (plain tables, not validated by the Config model): values whose default is a
 # number, bool, string, list or table must have that type, else the default is used (see _check_types).
 TYPED_SECTIONS = ("orchestrator", "delegation", "assistant", "limits", "elevenlabs", "modes", "data_policy",
-                  "appearance", "updates", "sessions", "skills", "hooks", "ladder", "campaigns", "fleet")
+                  "appearance", "updates", "sessions", "skills", "hooks", "ladder", "campaigns", "fleet", "unity")
 # Tables inside typed sections that stay free-form (their entries may legitimately differ in type
 # from the defaults: [skills.mcp_on_invoke] takes a server name or a list of them).
 UNTYPED_KEYS = {"skills": ("mcp_on_invoke",)}

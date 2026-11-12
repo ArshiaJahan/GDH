@@ -41,7 +41,7 @@ Everything runs locally; the backend listens on `127.0.0.1` only.
 |---|---|
 | **Orchestrator + subagents** | Claude plans the job and delegates units to Claude and OpenAI subagents (API or Codex CLI), choosing model tier and effort per unit, with parallel git worktrees for code. |
 | **Unity skill pack** | 16 Unity 6 skills behind a router: compile/fix loops, Play Mode verification, headless builds, safe scene/prefab edits, perf and game-feel passes, shipping. |
-| **Unity MCP built in** | The MCP for Unity server is preconfigured and turns on automatically when you invoke a Unity skill. |
+| **Unity: MCP or CLI** | Drive Unity through MCP for Unity or the official Unity CLI (live Editor via `com.unity.pipeline`, or batch when it's closed), switchable per project and session, with a status chip and one `unity` tool for the agent. |
 | **Hooks and gates** | A hooks engine runs checks at fixed points of a turn: compile before finishing, tests in verify phases, blocked edits to generated files. |
 | **Quality ladder L1-L4** | Stories reach `done` only with fresh, app-observed evidence: compile, tests, play evidence and screenshots, design critique. |
 | **Taste and scars** | `TASTE.md`, `POSTMORTEMS.md` and an anti-pattern ratchet keep design judgement and past failures in the loop. |
@@ -82,12 +82,25 @@ and whether to work through the Editor (MCP) or batchmode.
 General skills ship too: `delegation` (on by default), `game-designer`, `graphify`, `grill-me`,
 `claude-handoff` and two Claude delegation strategies.
 
-### Unity MCP
+### Unity: MCP or CLI
 
-The built-in `unity` server runs [MCP for Unity](https://github.com/CoplayDev/unity-mcp) 10.3
-through `uvx`. Install the `com.coplaydev.unity-mcp` package in your project and open the Editor;
-invoking any Unity skill turns the server on for that session. With the Editor closed, the gates
-and `headless-ops` fall back to batchmode.
+Pick how the app drives Unity with the **Unity backend** (Settings → Unity, `[unity] backend` in
+`config.toml`; a project default and a per-session choice in the Quality card or the chip under the
+composer):
+
+| Backend | Editor open | Editor closed |
+|---|---|---|
+| `mcp` | [MCP for Unity](https://github.com/CoplayDev/unity-mcp) 10.3 (the built-in `unity` server, through `uvx`) | `headless-ops` `unity.sh` batchmode |
+| `cli` | the official [Unity CLI](https://docs.unity.com/en-us/unity-cli) against the open Editor (`unity recompile`, `unity command run_tests`, `eval`, `screenshot`), which needs the `com.unity.pipeline` package | `unity run` / `unity test` / `unity build` in batch mode (else `unity.sh`) |
+| `auto` (default) | MCP if it's connected, else the Unity CLI live route | the Unity CLI if it's installed, else `unity.sh` |
+
+The Unity CLI comes with Unity Hub (or `curl -fsSL https://unity.com/install.sh | bash`); the app
+finds it in `~/.unity/bin`, the Hub bundle or your `PATH`. In `cli` mode MCP for Unity is never
+turned on. When the Editor holds the project and no live route works, nothing runs in batch: the
+chip offers to install the Pipeline package (a one-time `Packages/manifest.json` change, behind a
+card), to use MCP once, or to close Unity (it exits without saving, behind a card). The gates, the
+agent's `unity` tool and the Quality card all use the same route; Unity jobs stream to the Terminal
+drawer and can be cancelled. Details: [Unity: MCP or CLI](docs/GUIDE.md#unity-mcp-or-cli).
 
 ### Quality ladder
 
@@ -227,13 +240,17 @@ click around without keys, run with `GDW_FAKE_PROVIDERS=1`.
 **For Unity:** install `com.coplaydev.unity-mcp` in your project, run
 `uvx --from mcpforunityserver==10.3.0 mcp-for-unity` once while online to cache the server, open
 the Editor, and invoke `unity-router` from the composer's skill button or with `/skill unity-router`.
+Or skip MCP: with the official Unity CLI installed (Unity Hub ships it), set the Unity backend to
+CLI in Settings → Unity; batch jobs need nothing in the project, the live Editor route needs the
+`com.unity.pipeline` package (the chip offers to add it).
 
 ### Configuration
 
 Defaults ship with the app; [`config.example.toml`](config.example.toml) lists them with
 comments. Your `config.toml` holds only what you change, and most of it is editable in Settings:
 model tiers, delegation budgets, spend limits, modes and allowlist, `[skills]`, `[hooks]`,
-`[ladder]`, `[campaigns]` and `[fleet]`. See the [guide](docs/GUIDE.md#configuration).
+`[ladder]`, `[campaigns]`, `[fleet]` and `[unity]` (the Unity backend: `auto`, `mcp` or `cli`, the
+Unity CLI path and the Unity job timeouts). See the [guide](docs/GUIDE.md#configuration).
 
 <!-- rename:keep-start -->
 ### Upgrading from Workspace 0.4

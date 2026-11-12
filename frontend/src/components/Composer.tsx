@@ -5,6 +5,7 @@ import { campaignsApi, parseWorkflowCommand, type ChainTemplate } from "../lib/c
 import { actions, useStore, type Session } from "../lib/store";
 import { parseTaskCommand, TASK_SUBCOMMANDS, taskCompletion, taskPick, taskSuggestions, type TaskHit } from "../lib/taskCodes";
 import { Popover } from "./Popover";
+import { UnityChip } from "./UnityChip";
 import { modelLabel } from "./ui";
 
 type Att = { path: string; name: string; mime: string; size?: number; item_id?: string; text?: string };
@@ -427,7 +428,10 @@ export function Composer({ session, running }: { session: Session; running: bool
           />
           <button className="btn btn-primary px-2 mb-0.5" disabled={busy || running || (!text.trim() && !atts.length && !skill && !workflow)} onClick={send} aria-label="Send"><ArrowUp size={16} /></button>
         </div>
-        <div className="mt-1 text-[11.5px] text-faint">{MODES[session.mode] ?? session.mode} · Enter to send, Shift+Enter for a new line · drop files to attach</div>
+        <div className="mt-1 flex items-center gap-2 text-[11.5px] text-faint">
+          <span className="flex-1 min-w-0">{MODES[session.mode] ?? session.mode} · Enter to send, Shift+Enter for a new line · drop files to attach</span>
+          <UnityChip sessionId={session.id} />
+        </div>
       </div>
     </div>
   );

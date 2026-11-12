@@ -23,6 +23,12 @@ Tools are MCP for Unity 10.3 tools; your client may prefix them (e.g. mcp__Unity
 6. When the stage is done (its skill's Verify passed), drop that skill and route again for the next stage.
 
 ## Execution mode: MCP or batchmode
+In GameDevWorkstation the harness decides this for you (the user's **Unity backend**: auto | mcp | cli). Call the `unity` tool
+with `op="status"` first: it reports the backend and the route now (`mcp`, `cli_live` = official Unity CLI against the
+open Editor, `cli_batch` = Unity CLI batch run, `raw_batch` = headless-ops unity.sh, or `unavailable` with the reason).
+Then use the `unity` tool for compile / test / build / exec / eval / screenshot / play on every route, and the MCP for
+Unity tools only when the route is `mcp` (with the `cli` backend they are off). Never switch the backend yourself; if
+the route is `unavailable`, tell the user the reason (the chip under the composer offers the fixes). Outside GameDevWorkstation:
 Decide once per session and again after the editor opens or closes.
 1. Read the resource `mcpforunity://instances`. If the target project is listed: `set_active_instance(instance="<Name>@<hash>")`, read `mcpforunity://editor/state`, wait for `ready_for_tools == true`. Mode = MCP.
 2. Not listed: check for an editor that has the project open:
@@ -32,13 +38,13 @@ Decide once per session and again after the editor opens or closes.
 3. CI, SSH, or no display: Mode = batchmode, always.
 4. Needs the running game in an editor (play-verify, screenshots, live profiling, game-feel tuning) but Mode = batchmode: ask the user before opening the editor. Otherwise turn the check into a PlayMode test, or mark it for the next MCP session.
 
-| Need | MCP (editor open) | Batchmode (editor closed) |
-|---|---|---|
-| Compile check | compile-fix-loop with `read_console` | compile-fix-loop with headless-ops compile run |
-| EditMode/PlayMode tests | `run_tests` + `get_test_job` | headless-ops `-runTests` (never with `-quit`) |
-| Look at the running game | play-verify | not possible; PlayMode test or later |
-| Scene/prefab edits | scene-prefab-safety via MCP tools | scene-prefab-safety via `-executeMethod` entry point |
-| Player build | build-ship via `manage_build` | build-ship via headless-ops |
+| Need | MCP (editor open) | Unity CLI live (editor open, com.unity.pipeline) | Batchmode (editor closed) |
+|---|---|---|---|
+| Compile check | compile-fix-loop with `read_console` | `unity` tool `op=compile` (`unity recompile`) | compile-fix-loop with `unity` tool `op=compile` / headless-ops compile run |
+| EditMode/PlayMode tests | `run_tests` + `get_test_job` | `unity` tool `op=test` (Pipeline run_tests job) | `unity` tool `op=test` / headless-ops `-runTests` (never with `-quit`) |
+| Look at the running game | play-verify | `unity` tool `op=play`, `op=screenshot`, `op=eval` | not possible; PlayMode test or later |
+| Scene/prefab edits | scene-prefab-safety via MCP tools | `unity` tool `op=command` (Pipeline scene/GameObject commands; `op=commands` lists them) | scene-prefab-safety via `-executeMethod` entry point |
+| Player build | build-ship via `manage_build` | close the editor first | build-ship via `unity` tool `op=build` / headless-ops |
 
 ## Routing table
 Signals are words or situations in the task. Load in order, at most 3. "Skip" lists skills that look related but are not needed now.

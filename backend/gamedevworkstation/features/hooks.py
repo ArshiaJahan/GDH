@@ -222,7 +222,8 @@ class HookSource:
         return self.state in ("enabled", "trusted")
 
     def consent_sets(self) -> dict[str, set[str]]:
-        return {"mcp": set(self.consent.get("tools") or []), "run_command": set(self.consent.get("commands") or [])}
+        return {"mcp": set(self.consent.get("tools") or []), "run_command": set(self.consent.get("commands") or []),
+                "unity_cli": set(self.consent.get("unity_ops") or [])}
 
     def to_dict(self, needs: dict | None = None) -> dict:
         d = {"kind": self.kind, "name": self.name, "path": str(self.path), "sha": self.sha, "state": self.state,
@@ -645,6 +646,7 @@ class HooksEngine:
         tools: set[str] = set()
         cmds: set[str] = set()
         templates: set[str] = set()
+        unity_ops: set[str] = set()
         scripts: list[str] = []
         for e in entries:
             if e.action == "command":
@@ -655,8 +657,12 @@ class HooksEngine:
                 n = b.needs(self, project, e) or {}
                 tools |= set(n.get("mcp") or ())
                 cmds |= set(n.get("run_command") or ())
+                unity_ops |= set(n.get("unity_cli") or ())
                 scripts += [s for s in n.get("scripts") or () if s not in scripts]
-        return {"tools": sorted(tools), "commands": sorted(cmds), "templates": sorted(templates), "scripts": scripts}
+        out = {"tools": sorted(tools), "commands": sorted(cmds), "templates": sorted(templates), "scripts": scripts}
+        if unity_ops:  # route-independent Unity op keys (the official Unity CLI backend)
+            out["unity_ops"] = sorted(unity_ops)
+        return out
 
     # ------------------------------------------------------------ trust
 
@@ -1212,6 +1218,9 @@ def _needs_md(needs: dict, *, consent: bool = False) -> list[str]:
     cmds = needs.get("commands", []) + needs.get("templates", [])
     if cmds:
         md.append(f"**{'Commands' if consent else head + ' these commands'}:**\n" + _fence("\n".join(cmds), "sh"))
+    if needs.get("unity_ops"):
+        md.append(f"**{head}, these Unity CLI checks** (official `unity` CLI, when the Unity backend uses it): "
+                  + ", ".join(f"`{o}`" for o in needs["unity_ops"]))
     if needs.get("scripts"):
         md.append("**Built-in scripts (read-only checks):** " + "; ".join(f"`{s}`" for s in needs["scripts"]))
     return md
@@ -1327,7 +1336,7 @@ def _bridge_needs(op: str) -> Callable[["HooksEngine", Path, HookEntry], dict]:
         spec = {"op": "compile"} if op == "compile" else {"op": "test", "platform": str(o.get("platform") or "editmode"),
                                                          "category": o.get("category"), "filter": o.get("filter")}
         c = get_bridge(eng.app).consent_for(project, [spec])
-        return {"mcp": c["mcp"], "run_command": c["run_command"]}
+        return {"mcp": c["mcp"], "run_command": c["run_command"], "unity_cli": c.get("unity_cli", set())}
     return needs
 
 
@@ -1443,9 +1452,11 @@ def _b_backlog_lint(eng: HooksEngine, e: HookEntry, ev: HookEvent, ac: ActionCon
 
 def _register_builtins(eng: HooksEngine) -> None:
     eng.add_builtin("unity.compile", _b_unity_compile, ("pre_complete", "post_merge"), needs=_bridge_needs("compile"),
-                    describe="Unity compile (MCP when the editor has the project open, else batchmode)")
+                    describe="Unity compile (per the Unity backend: MCP or the Unity CLI live Editor when it's "
+                             "open, else a batch compile: Unity CLI or unity.sh)")
     eng.add_builtin("unity.tests", _b_unity_tests, ("pre_complete",), needs=_bridge_needs("tests"),
-                    describe="Unity EditMode/PlayMode tests (MCP run_tests, else unity.sh test)")
+                    describe="Unity EditMode/PlayMode tests (MCP run_tests or Unity CLI run_tests when the Editor is "
+                             "open, else `unity test` / unity.sh test)")
     eng.add_builtin("unity.antipatterns", _b_unity_antipatterns, ("pre_complete",),
                     needs=lambda eng_, project, e: {"scripts": ["python3 perf-pass/scripts/unity_antipatterns.py "
                                                                 "--changed … --baseline .gamedevworkstation/antipatterns-baseline.json"]},
@@ -1542,8 +1553,8 @@ def register(app_: "FastAPI", api: "APIRouter", S: "AppState") -> None:
                 + [{"name": b.name, "events": list(b.events), "describe": b.describe} for b in eng.builtins.values()]}
 
     @api.get("/hooks/unity")
-    async def unity_state(session_id: str) -> dict:
-        return (await get_bridge(S).editor_state(_session(session_id))).to_dict()
+    async def unity_state(session_id: str) -> dict:  # alias of GET /api/unity/state
+        return await get_bridge(S).full_state(_session(session_id))
 
     @api.post("/hooks/preset")
     async def preset(body: dict = Body(...)) -> dict:

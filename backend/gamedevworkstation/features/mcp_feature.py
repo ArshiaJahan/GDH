@@ -529,10 +529,11 @@ class MCPManager:
         conn = dict((s.get("settings") or {}).get("connectors") or {})
         rows = {r["name"]: r for r in self._rows()}
         names: list[str] = []
+        skip = self._unity_cli_server(s)
         for sk in skills:
             for n in self.app.config.skill_mcp_servers(sk):
                 r = rows.get(n)
-                if not r or r["shared"] or n in names or conn.get(n, bool(r["enabled_default"])):
+                if not r or r["shared"] or n in names or n == skip or conn.get(n, bool(r["enabled_default"])):
                     continue
                 names.append(n)
         if not names:
@@ -541,6 +542,19 @@ class MCPManager:
         msg = f"Enabled MCP server{'s' if len(names) > 1 else ''} {', '.join(names)} for this session"
         self.app.bus.publish("mcp.auto_enabled", {"servers": names, "skills": skills, "message": msg}, sid)
         return names
+
+    def _unity_cli_server(self, session: dict) -> str | None:
+        """The MCP for Unity server name when the session's Unity backend is `cli` (it stays off:
+        the official Unity CLI drives Unity instead), else None."""
+        try:
+            from .unity_bridge import get_bridge
+            from .unity_cli import unity_cfg
+
+            if get_bridge(self.app).backend_for(session)[0] == "cli":
+                return str(unity_cfg(self.app).get("mcp_server") or "unity")
+        except Exception:  # noqa: BLE001 — never block enabling servers on a broken lookup
+            log.debug("unity backend lookup failed", exc_info=True)
+        return None
 
     async def test(self, name: str) -> dict:
         """(Re)connect a server and list its tools."""

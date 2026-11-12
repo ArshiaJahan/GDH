@@ -154,6 +154,36 @@ max_units = 3                       # writing units per wave
 unit_timeout_min = { build = 30, research = 15 }
 relay_tokens = 500                  # discoveries passed on to the next wave
 
+[unity]
+# How the harness drives Unity (gates, the agent's `unity` tool, the Quality card).
+# backend: auto | mcp | cli. Projects (Quality card) and sessions can override it.
+#   mcp  = MCP for Unity while the Editor is open, headless-ops unity.sh when it's closed (as before).
+#   cli  = never MCP for Unity: the official `unity` CLI drives the open Editor through the
+#          com.unity.pipeline package, or runs batch jobs (unity test/run/build) when it's closed.
+#   auto = the best available: an open Editor via auto_live_order, a closed one via the Unity CLI
+#          (else unity.sh).
+backend = "auto"
+auto_live_order = ["mcp", "cli_live"]   # which live route auto tries first when the Editor is open
+cli_path = ""                       # the official Unity CLI; "" = find it (PATH, ~/.unity/bin, Unity Hub)
+prefer_official_cli = true          # Editor closed: `unity test/run/build` when found, else unity.sh
+min_cli_version = "1.0.0-beta.11"   # older CLIs are reported and not used
+editor_root = "/Applications/Unity/Hub/Editor"
+editor_path = ""                    # a specific Unity binary or Unity.app (else the project's version)
+pipeline_version = "1.0.0"          # what "Install Pipeline package" pins in Packages/manifest.json
+live_timeout_s = 120                # unity recompile and single live Editor commands
+live_test_timeout_s = 900           # tests in the live Editor
+live_wait_s = 20                    # wait for a starting Editor / a Pipeline load before giving up
+batch_timeout_s = 900               # batch compile, exec (hooks.batchmode_timeout_s still works)
+test_timeout_s = 1800               # batch tests
+build_timeout_s = 3600              # builds
+nographics = true                   # batch compile and EditMode tests run with -nographics (never PlayMode)
+extra_editor_args = []              # extra Unity args for batch compile (e.g. ["-disable-playback-engines", "AndroidPlayer"])
+clone_when_open = "ask"             # ask | never | always: batch jobs on a copy while the Editor holds the project (not yet used)
+eval = "ask"                        # ask | off: C# eval in the live Editor always shows the code first
+harness_scripts = "ask"             # ask | never: HarnessCli editor scripts for import/menu jobs (not yet used)
+harness_git_exclude = true
+mcp_server = "unity"                # the MCP for Unity server the cli backend keeps off
+
 # ------------------------------------------------------------------ model catalog
 # Prices are USD per million tokens. `no_thinking` is how this model expresses the
 # "none" effort level: "disabled", "between_tools", or "" (can't turn thinking off;

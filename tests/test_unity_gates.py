@@ -249,7 +249,7 @@ async def test_editor_state_modes(app, proj, tmp_path):
     st = await UnityBridge(app, editor_open=editor_is_open).editor_state(s)
     assert st.mode == "unavailable" and st.editor_open and "connector is off" in st.reason
     st = await UnityBridge(app, editor_open=closed).editor_state(s)
-    assert st.mode == "batchmode"  # the built-in headless-ops script
+    assert st.mode == "raw_batch"  # the built-in headless-ops script (no official Unity CLI in tests)
     plain = session(app, tmp_path)
     assert (await UnityBridge(app).editor_state(plain)).reason.startswith("not a Unity project")
 
@@ -336,7 +336,7 @@ async def test_batchmode_tests(app, proj, fake_unity_sh):
     s = session(app, proj)
     consent = br.consent_for(proj)
     r = await br.run_tests(s, "editmode", consent=consent)
-    assert r.status == "pass" and r.mode == "batchmode" and r.evidence["passed"] == 4
+    assert r.status == "pass" and r.mode == "raw_batch" and r.evidence["passed"] == 4
     assert fake_unity_sh["log"].read_text().strip() == f"test editmode --project {proj.resolve()}"
 
 

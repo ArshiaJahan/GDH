@@ -1,6 +1,6 @@
 import { ArrowUpCircle, Check, FolderOpen, Plus, RefreshCw, RotateCcw, Star, Trash2, UserMinus, X } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { api, del, get, post } from "../lib/api";
+import { api, del, get, post, type UnityInfo } from "../lib/api";
 import { actions, useStore } from "../lib/store";
 import { modelLabel, providerLabel, providerRank } from "../components/ui";
 import { fmtBuilt, Inline, installUpdate, Notes, updateHeadline, type UpdatesStatus } from "../components/Updates";
@@ -8,7 +8,7 @@ import { revealInFinder } from "../lib/native";
 import { StorageSettings } from "../components/StorageSettings";
 
 const SECTIONS = [["accounts", "Accounts"], ["models", "Models and effort"], ["delegation", "Delegation and budgets"], ["modes", "Modes and approvals"],
-  ["data", "Data policy"], ["elevenlabs", "ElevenLabs defaults"], ["appearance", "Appearance"], ["storage", "Storage"], ["about", "About & updates"]];
+  ["data", "Data policy"], ["elevenlabs", "ElevenLabs defaults"], ["unity", "Unity"], ["appearance", "Appearance"], ["storage", "Storage"], ["about", "About & updates"]];
 const PROVIDER_NAME: Record<string, string> = { anthropic: providerLabel("anthropic"), openai: providerLabel("openai"), elevenlabs: providerLabel("elevenlabs") };
 
 /** A provider's configured models by real name, each with the tiers routing to it:
@@ -63,6 +63,7 @@ export function SettingsPage() {
           {section === "modes" && <Modes st={st} save={save} />}
           {section === "data" && <DataPolicy st={st} save={save} />}
           {section === "elevenlabs" && <ElevenDefaults st={st} save={save} />}
+          {section === "unity" && <UnitySettings st={st} save={save} />}
           {section === "appearance" && <Appearance st={st} save={save} reload={load} />}
           {section === "storage" && <StorageSettings />}
           {section === "about" && <About />}
@@ -395,6 +396,81 @@ function Modes({ st, save }: { st: any; save: Save }) {
         <div className="text-[12px] text-faint mb-2">One rule each, as <code className="font-mono">kind:pattern</code> with * wildcards. Kinds: run_command, edit, delete, elevenlabs, codex_cli, mcp and shared_tool (pattern <code className="font-mono">server__tool</code>), skill_install, mcp_install. Examples: <code className="font-mono">run_command:git status*</code>, <code className="font-mono">mcp:github__get_*</code>, <code className="font-mono">shared_tool:laptop__*</code>. A run_command rule covers one simple command only: anything with <code className="font-mono">; &amp; | ` $ ( ) &lt; &gt;</code> or a line break still asks, unless the rule is exactly <code className="font-mono">run_command:*</code>.</div>
         <Allowlist rules={st.modes.allowlist ?? []} save={(rules) => save({ modes: { allowlist: rules } }, "Approval allowlist")} />
       </div>
+    </div>
+  );
+}
+
+const UNITY_BACKENDS: [string, string, string][] = [
+  ["auto", "Auto", "MCP when the Editor is open and MCP for Unity is connected, else the Unity CLI live Editor, else batch"],
+  ["mcp", "MCP", "MCP for Unity while the Editor is open, unity.sh batchmode when it's closed (the previous behaviour)"],
+  ["cli", "CLI", "Never use MCP for Unity: the official unity CLI drives a live Editor (Pipeline package) or runs batch jobs when it's closed"],
+];
+
+/** A text setting that saves on blur or Enter (paths: never mid-typing). */
+function TextSetting({ value, onSave, label, placeholder }: { value: string; onSave: (v: string) => unknown; label: string; placeholder?: string }) {
+  const [v, setV] = useState(value);
+  useEffect(() => setV(value), [value]);
+  const commit = () => { if (v !== value) onSave(v); };
+  return <input className="input flex-1 font-mono text-[12.5px]" value={v} aria-label={label} placeholder={placeholder} spellCheck={false}
+    onChange={(e) => setV(e.target.value)} onBlur={commit} onKeyDown={(e) => e.key === "Enter" && commit()} />;
+}
+
+export function UnitySettings({ st, save }: { st: any; save: Save }) {
+  const u = st.unity ?? {};
+  const [info, setInfo] = useState<UnityInfo | null>(null);
+  useEffect(() => { get<UnityInfo>("/unity/info").then((i) => setInfo(i ?? null)).catch(() => setInfo(null)); }, []);
+  const set = (k: string, label: string) => (v: unknown) => save({ unity: { [k]: v } }, label);
+  const backend = u.backend ?? "auto";
+  const cli = info?.cli;
+  return (
+    <div>
+      <H2 sub="Which route compile, test, build and eval take for Unity projects: MCP for Unity or the official Unity CLI.">Unity</H2>
+      <Row label="Default backend" field="Default backend">
+        <div role="radiogroup" aria-label="Default Unity backend" className="inline-flex rounded-md border border-line overflow-hidden">
+          {UNITY_BACKENDS.map(([v, label]) => (
+            <button key={v} role="radio" aria-checked={backend === v} title={UNITY_BACKENDS.find((b) => b[0] === v)?.[2]}
+              className={`px-3 py-1 text-[13px] ${backend === v ? "bg-sunken text-text font-medium" : "text-muted hover:text-text"}`}
+              onClick={() => backend !== v && save({ unity: { backend: v } }, "Default backend")}>{label}</button>
+          ))}
+        </div>
+      </Row>
+      <ul className="text-[12px] text-faint py-2 space-y-0.5">
+        {UNITY_BACKENDS.map(([v, label, text]) => <li key={v}><span className="text-muted">{label}:</span> {text}</li>)}
+      </ul>
+      <Row label="Unity CLI" noMark>
+        <div className="text-[13px] min-w-0" data-testid="unity-cli">
+          {!cli ? <span className="text-muted">Checking…</span>
+            : !cli.path && !cli.version ? <span className="text-muted">Not found — install with Unity Hub or <code className="font-mono">curl -fsSL https://unity.com/install.sh | bash</code></span>
+            : <>
+                <span className="font-mono break-all">{cli.path}</span>{cli.version && <span className="chip ml-2">{cli.version}</span>}
+                {cli.update_available && <span className="chip ml-2 text-action">update available: {cli.update_available}</span>}
+                {cli.ok === false && <div className="text-[12px] text-bad">{cli.reason || "The CLI did not respond."}</div>}
+              </>}
+        </div>
+      </Row>
+      <Row label="Installed editors" noMark>
+        <div className="text-[13px] min-w-0">
+          {!info?.editors?.length ? <span className="text-muted">None found</span>
+            : <ul>{info.editors.map((e) => (
+                <li key={e.location} title={e.location}><span className="font-mono">{e.version}</span>{e.architecture && <span className="text-faint"> · {e.architecture}</span>}
+                  <span className="text-faint font-mono text-[12px]"> · {e.location}</span></li>
+              ))}</ul>}
+        </div>
+      </Row>
+      <Row label="Unity CLI path" hint="Empty: look it up automatically"><TextSetting value={u.cli_path ?? ""} label="Unity CLI path" onSave={set("cli_path", "Unity CLI path")} /></Row>
+      <Row label="Editor path" hint="Empty: pick the project's version"><TextSetting value={u.editor_path ?? ""} label="Editor path" onSave={set("editor_path", "Editor path")} /></Row>
+      <Row label="Live call timeout" hint="Seconds"><Num value={u.live_timeout_s ?? 120} min={1} label="Live call timeout" onSave={set("live_timeout_s", "Live call timeout")} /></Row>
+      <Row label="Batch timeout" hint="Seconds"><Num value={u.batch_timeout_s ?? 900} min={1} label="Batch timeout" onSave={set("batch_timeout_s", "Batch timeout")} /></Row>
+      <Row label="Test timeout" hint="Seconds"><Num value={u.test_timeout_s ?? 1800} min={1} label="Test timeout" onSave={set("test_timeout_s", "Test timeout")} /></Row>
+      <Row label="Build timeout" hint="Seconds"><Num value={u.build_timeout_s ?? 3600} min={1} label="Build timeout" onSave={set("build_timeout_s", "Build timeout")} /></Row>
+      <Row label="Eval policy" hint="Running C# in the Editor through the CLI">
+        <select className="input w-40" value={u.eval ?? "ask"} aria-label="Eval policy" onChange={(e) => save({ unity: { eval: e.target.value } }, "Eval policy")}>
+          <option value="ask">ask</option><option value="off">off</option>
+        </select>
+      </Row>
+      <Row label="No graphics" hint="Batch jobs run with -nographics">
+        <input type="checkbox" checked={!!u.nographics} aria-label="No graphics" onChange={(e) => save({ unity: { nographics: e.target.checked } }, "No graphics")} />
+      </Row>
     </div>
   );
 }

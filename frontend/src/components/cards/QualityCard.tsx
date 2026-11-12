@@ -1,6 +1,7 @@
 import { Play, RefreshCw, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { get, post, type GateStatus, type LadderLevel, type LadderPill } from "../../lib/api";
+import { get, post, put, type GateStatus, type LadderLevel, type LadderPill, type UnityBackend, type UnityState } from "../../lib/api";
+import { UNITY_ROUTE_LABEL } from "../../lib/unity";
 import { actions, type Session } from "../../lib/store";
 import { ItemViewer } from "../items";
 import { Card } from "../SidePanel";
@@ -54,6 +55,7 @@ function Pill({ level, label, state, active, onClick }: { level: string; label: 
 export function QualityCard({ s }: { s: Session }) {
   const [rep, setRep] = useState<LadderReport | null>(null);
   const [hooks, setHooks] = useState<HooksInfo | null>(null);
+  const [unity, setUnity] = useState<UnityState | null>(null);
   const [open, setOpen] = useState<{ story: string; level: LadderLevel } | null>(null);
   const [viewing, setViewing] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -67,11 +69,13 @@ export function QualityCard({ s }: { s: Session }) {
       if (n === seq.current) setRep(r);
     } catch { if (n === seq.current) setRep(null); }
     try { setHooks(await get<HooksInfo>(`/hooks?session_id=${encodeURIComponent(s.id)}`)); } catch { setHooks(null); }
+    try { const u = await get<UnityState>(`/unity/state?session_id=${encodeURIComponent(s.id)}`); if (n === seq.current) setUnity(u); } catch { if (n === seq.current) setUnity(null); }
   };
   useEffect(() => { setOpen(null); load(); }, [s.id, s.folder]);
   useEffect(() => {
     let t: ReturnType<typeof setTimeout> | undefined;
     const off = actions.onEvent((e) => {
+      if (e.type === "unity.state" && e.session_id === s.id && e.data) { setUnity(e.data as UnityState); return; }
       const mine = e.session_id === s.id || (e.type === "ladder.updated" && !!rep?.project && e.data?.project === rep.project);
       if (mine && ["ladder.updated", "gate.result", "gate.exhausted", "agent.idle", "file.changed"].includes(e.type)) {
         clearTimeout(t);
@@ -97,6 +101,12 @@ export function QualityCard({ s }: { s: Session }) {
     load();
   };
 
+  const setBackend = async (scope: "session" | "project", backend: UnityBackend | null) => {
+    try { setUnity(await put<UnityState>("/unity/backend", { session_id: s.id, scope, backend })); if (scope === "project") actions.toast("Project default set"); }
+    catch (e: any) { actions.toast(e.message, "error"); }
+  };
+  const routeText = unity && (unity.route === "unavailable" ? `unavailable${unity.reason ? ` (${unity.reason})` : ""}`
+    : `${UNITY_ROUTE_LABEL[unity.route] ?? unity.route}${unity.reason ? ` (${unity.reason})` : ""}`);
   const sel = open && rep.stories.find((x) => x.id === open.story)?.levels[open.level];
   return (
     <Card id="quality" title="Quality"
@@ -107,6 +117,23 @@ export function QualityCard({ s }: { s: Session }) {
           <span className="flex-1">Unity gates</span>
           <span className="text-[11.5px] text-muted">{!hooks ? "unavailable" : preset?.active ? "on" : preset?.state === "needs_consent" || preset?.state === "changed" ? "needs consent" : "off"}</span>
         </label>
+      )}
+      {rep.unity && unity && (
+        <div className="py-1">
+          <div className="flex items-center gap-2">
+            <span className="shrink-0">Unity backend</span>
+            <select className="input flex-1 min-w-0 py-0.5 text-[12px]" aria-label="Unity backend" value={unity.session_backend ?? ""}
+              onChange={(e) => setBackend("session", (e.target.value || null) as UnityBackend | null)}>
+              <option value="">Project default ({unity.project_backend ?? unity.global_backend})</option>
+              <option value="auto">Auto</option><option value="mcp">MCP</option><option value="cli">CLI</option>
+            </select>
+            {unity.session_backend && (
+              <button className="text-[11.5px] text-action hover:underline shrink-0" onClick={() => setBackend("project", unity.backend)}
+                title="Use this backend for every session in this project">Set as project default</button>
+            )}
+          </div>
+          <div className="text-[11.5px] text-muted mt-0.5">Now: {routeText}</div>
+        </div>
       )}
       {rep.gates.length > 0 && (
         <div className="mb-1">
