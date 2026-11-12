@@ -10,9 +10,9 @@ Built on the hook bus (features/hookbus.py, app.hooks). Two kinds of hooks run h
      the first time in a session a tool touches a matching path, `[Project rule PM-007: …]` is
      appended to its result.
    - `context.pack` (session_start): in a Unity project or a folder with PROJECT.md, builds the
-     project context pack once (PROJECT.md current milestone, TASTE.md, POSTMORTEMS.md index,
-     active campaign) and freezes it in settings.context_pack; the loop appends its text to the
-     system prompt. Rebuilt only on request (POST /api/hooks/context_pack), never mid-session.
+     project context pack once (the `Unity: backend=… route=…` line, PROJECT.md current milestone,
+     TASTE.md, POSTMORTEMS.md index, active campaign) and freezes it in settings.context_pack (and
+     the Unity route in settings.unity_route); the loop appends its text to the system prompt. Rebuilt only on request (POST /api/hooks/context_pack), never mid-session.
    - `hooks.cards` (model_call, first call of a turn): raises the trust card for an untrusted
      hook file and the one-time "Turn on Unity gates?" offer.
 
@@ -120,6 +120,7 @@ ENTRY_KEYS = {"id", "event", "tools", "paths", "changed", "roles", "phases", "ac
               "ok_exit", "timeout_s", "tool", "args", "name", "options", "on_fail", "max_retries", "fail", "level",
               "gate", "description"}
 CONTEXT_PACK_MAX = 3000
+UNITY_ROUTE_PROBE_S = 5.0  # the context pack's Unity route check waits at most this long
 BREAKER_NOTE_AT = 3
 BREAKER_STOP_AT = 5
 
@@ -1170,25 +1171,71 @@ class HooksEngine:
                 notes.append(f"[Project rule {r['id']} (POSTMORTEMS.md): {r['rule']}]")
         return HookResult(action="note", note="\n".join(notes), hook="scars.first_touch") if notes else None
 
-    def context_pack(self, ev: HookEvent) -> None:
-        """context.pack (session_start): build and freeze the pack once per session."""
+    async def context_pack(self, ev: HookEvent) -> None:
+        """context.pack (session_start): build and freeze the pack once per session. In a Unity
+        project the session's Unity backend and compile route are checked here (async, capped at
+        UNITY_ROUTE_PROBE_S) and frozen next to it in settings.unity_route (the skill index reads it)."""
         s = self.app.store.get(ev.session_id) or ev.ctx.session
         if isinstance((s.get("settings") or {}).get("context_pack"), dict):
             return None  # frozen
-        pack = build_context_pack(self.app, s)
+        unity = await self.unity_route(s)
+        pack = build_context_pack(self.app, s, unity=unity)
+        upd: dict = {}
         if pack:
-            self.app.store.update(ev.session_id, settings={"context_pack": pack})
+            upd["context_pack"] = pack
+        if unity:
+            upd["unity_route"] = unity
+        if upd:
+            self.app.store.update(ev.session_id, settings=upd)
         return None
 
-    def refresh_context_pack(self, sid: str) -> dict | None:
+    def refresh_context_pack(self, sid: str, *, unity: dict | None = None) -> dict | None:
         """Rebuild the pack (Refresh project context). It changes the system prompt from the next
-        model call on, so the prompt cache starts over once."""
+        model call on, so the prompt cache starts over once. unity: a fresh unity_route() (the
+        API route passes one; without it the Unity line says route=unknown)."""
         s = self.app.store.get(sid)
         if not s:
             raise KeyError(sid)
-        pack = build_context_pack(self.app, s)
-        self.app.store.update(sid, settings={"context_pack": pack or {}})
+        pack = build_context_pack(self.app, s, unity=unity)
+        upd: dict = {"context_pack": pack or {}}
+        if unity:
+            upd["unity_route"] = unity
+        self.app.store.update(sid, settings=upd)
         return pack
+
+    async def unity_route(self, session: dict) -> dict | None:
+        """The session's Unity backend and compile route now, for the context pack: {backend, route,
+        editor_open, mcp_connected, cli_version, reason, at}. None outside a Unity project. The
+        bridge's editor_state only probes (pgrep/lsof, the CLI's version/status, the MCP
+        connection), never starts Unity; if it takes longer than [hooks].unity_route_probe_s
+        (default 5 s) or fails, route is "unknown" and the probe finishes in the background (it
+        warms the bridge's caches)."""
+        project = project_of(session)
+        if not project or not is_unity_project(project):
+            return None
+        br = get_bridge(self.app)
+        try:
+            backend = br.backend_for(session)[0]
+        except Exception:  # noqa: BLE001
+            backend = "auto"
+        unknown = {"backend": backend, "route": "unknown", "at": time.time()}
+        cap = UNITY_ROUTE_PROBE_S
+        try:
+            cap = float((getattr(self.app.config, "hooks", None) or {}).get("unity_route_probe_s") or UNITY_ROUTE_PROBE_S)
+        except (TypeError, ValueError):
+            pass  # malformed config uses the default probe budget
+        t = asyncio.ensure_future(br.editor_state(session, "compile"))
+        self._tasks.add(t)
+        t.add_done_callback(lambda x: (self._tasks.discard(x), x.cancelled() or x.exception()))
+        try:
+            st = await asyncio.wait_for(asyncio.shield(t), max(cap, 0.1))
+        except asyncio.TimeoutError:
+            return {**unknown, "reason": f"the route check took over {cap:g} s"}
+        except Exception as e:  # noqa: BLE001 — the pack must still be built
+            return {**unknown, "reason": f"the route check failed ({type(e).__name__})"}
+        return {"backend": st.backend or backend, "route": st.mode, "editor_open": bool(st.editor_open),
+                "mcp_connected": bool(st.mcp_connected), "cli_version": (st.cli or {}).get("version") or "",
+                "cli_ok": bool((st.cli or {}).get("ok")), "reason": _cut(st.reason or "", 200), "at": time.time()}
 
     async def aclose(self) -> None:
         for t in list(self._tasks):
@@ -1253,16 +1300,53 @@ def error_signature(text: str) -> str:
 # ============================================================ context pack
 
 
-def build_context_pack(app: "AppState", session: dict) -> dict | None:
-    """The project context pack (≤ CONTEXT_PACK_MAX chars): PROJECT.md current milestone, TASTE.md
-    (three words, top 5 heuristics, anti-patterns), the 10 newest POSTMORTEMS rules, the active
-    campaign. None when the folder is neither a Unity project nor has a PROJECT.md, or nothing
-    was found. {text, sources, sha, built_at}."""
+def unity_line(u: dict) -> str:
+    """The context pack's Unity line, e.g. `Unity: backend=cli route=cli_batch (Editor closed;
+    Unity CLI 1.0.0-beta.13)`, from HooksEngine.unity_route()."""
+    route = str(u.get("route") or "unknown")
+    facts: list[str] = []
+    if route == "unknown":
+        facts.append(u.get("reason") or "not checked")
+    else:
+        facts.append("Editor open" if u.get("editor_open") else "Editor closed")
+        if route == "mcp" or u.get("mcp_connected"):
+            facts.append("MCP for Unity connected")
+        if u.get("cli_version"):
+            facts.append(f"Unity CLI {u['cli_version']}")
+        elif u.get("backend") != "mcp":
+            facts.append("Unity CLI not found")
+        if route == "unavailable" and u.get("reason"):
+            facts.append(_cut(str(u["reason"]), 200))
+    return f"Unity: backend={u.get('backend') or 'auto'} route={route} ({'; '.join(facts)})"
+
+
+def _unity_section(app: "AppState", session: dict, unity: dict | None) -> str:
+    if not unity:
+        try:
+            backend = get_bridge(app).backend_for(session)[0]
+        except Exception:  # noqa: BLE001
+            backend = "auto"
+        unity = {"backend": backend, "route": "unknown", "reason": "not checked"}
+    how = ('Call the `unity` tool with op="status" for the route.' if unity.get("route") == "unknown" else
+           'Checked at session start; after the Editor opens or closes, call the `unity` tool with op="status".')
+    return ("## Unity\n" + unity_line(unity) + "\n" + how + " Use the `unity` tool for compile / test / build / exec / "
+            "eval on every route; MCP for Unity tools only when route=mcp.")
+
+
+def build_context_pack(app: "AppState", session: dict, *, unity: dict | None = None) -> dict | None:
+    """The project context pack (≤ CONTEXT_PACK_MAX chars): in a Unity project the session's Unity
+    backend and compile route (`unity`: HooksEngine.unity_route(), else route=unknown), PROJECT.md
+    current milestone, TASTE.md (three words, top 5 heuristics, anti-patterns), the 10 newest
+    POSTMORTEMS rules, the active campaign. None when the folder is neither a Unity project nor has
+    a PROJECT.md, or nothing was found. {text, sources, sha, built_at}."""
     project = project_of(session)
     if not project or not (is_unity_project(project) or (project / "PROJECT.md").is_file()):
         return None
     parts: list[str] = []
     sources: list[str] = []
+    if is_unity_project(project):  # first: short, and the cut at CONTEXT_PACK_MAX never drops it
+        parts.append(_unity_section(app, session, unity))
+        sources.append("unity")
     if md := _read(project / "PROJECT.md"):
         sec = _section(md, re.compile(r"current milestone", re.I))
         if sec:
@@ -1609,4 +1693,4 @@ def register(app_: "FastAPI", api: "APIRouter", S: "AppState") -> None:
     @api.post("/hooks/context_pack")
     async def context_pack(body: dict = Body(...)) -> dict:
         s = _session(body.get("session_id"))
-        return {"context_pack": eng.refresh_context_pack(s["id"])}
+        return {"context_pack": eng.refresh_context_pack(s["id"], unity=await eng.unity_route(s))}

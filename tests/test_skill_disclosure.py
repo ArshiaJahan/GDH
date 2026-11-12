@@ -99,6 +99,21 @@ def test_index_sorted_excludes_pins_and_limits_descriptions(app):
     assert system.count(sk.TOOL_MAPPING_NOTE) == 1 and system[-1] == index
 
 
+@pytest.mark.parametrize("route,hidden", [
+    (None, False), ({"backend": "cli", "route": "cli_batch"}, True), ({"backend": "cli", "route": "unavailable"}, True),
+    ({"backend": "auto", "route": "cli_live"}, True), ({"backend": "auto", "route": "raw_batch"}, True),
+    ({"backend": "auto", "route": "mcp"}, False), ({"backend": "auto", "route": "unknown"}, False),
+    ({"backend": "mcp", "route": "unavailable"}, False)])
+def test_index_hides_mcp_for_unity_skill_off_the_mcp_route(route, hidden):
+    settings = {**PROGRESSIVE, **({"unity_route": route} if route else {})}
+    assert ("- unity-mcp-orchestrator:" not in sk.skills_index(settings)) == hidden
+    assert "- unity-router:" in sk.skills_index(settings)
+    # Pinned, it is still loaded in full (and read_skill doesn't look at the index).
+    pinned = {**settings, "pinned_skills": ["delegation", "unity-mcp-orchestrator"]}
+    assert sk.skill_load_text("unity-mcp-orchestrator") in "\n".join(sk.system_skill_segments(pinned))
+    assert sk.read_skill_file("unity-mcp-orchestrator", "")
+
+
 def test_skill_snapshot_uses_turn_state_and_leaves_legacy_live():
     turn = TurnState("snapshot", 0)
     initial = sk.turn_skill_segments(PROGRESSIVE, turn)

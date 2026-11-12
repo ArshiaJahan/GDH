@@ -10,7 +10,7 @@ always shows its code. Compile and test results become quality-ladder evidence (
 ts = when the run started, so an edit made during a long compile isn't covered by it.
 
 Routes: GET /api/unity/state, GET /api/unity/info, PUT /api/unity/backend,
-POST /api/unity/actions/{install_pipeline|close_editor|open_editor|use_mcp_once|update_cli},
+POST /api/unity/actions/{install_pipeline|install_harness|close_editor|open_editor|use_mcp_once|use_clone|update_cli},
 POST /api/unity/jobs/{job_id}/cancel. Events: unity.state (after a backend change, a Unity job
 or an action), unity.job (a job starts / ends), unity.action (an action's outcome).
 """
@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING, Any
 
 from ..agent.tools import ToolContext, ToolOutput, obj, wrap_untrusted
 from . import unity_cli as uc
+from . import unity_clone as uclone
+from . import unity_harness as uh
 from .unity_bridge import BACKENDS, ROUTE_LABELS, BridgeResult, get_bridge, is_unity_project
 
 if TYPE_CHECKING:
@@ -37,7 +39,8 @@ log = logging.getLogger(__name__)
 PRESET = "unity-router"
 _BG: set[asyncio.Future] = set()  # fire-and-forget state publishes
 OPS = ["status", "compile", "test", "build", "import", "exec", "menu", "eval", "command", "commands", "screenshot",
-       "play", "log", "open_editor", "close_editor", "install_pipeline"]
+       "play", "log", "open_editor", "close_editor", "install_pipeline", "install_harness"]
+ACTIONS = ("install_pipeline", "install_harness", "close_editor", "open_editor", "use_mcp_once", "use_clone", "update_cli")
 
 TOOL_DESCRIPTION = (
     "Drive Unity for this project through the harness. The route is chosen by the Unity backend setting: "
@@ -47,9 +50,11 @@ TOOL_DESCRIPTION = (
     "filter, category, assemblies), build (profile or target, out, dev), exec (method, args; batch), import "
     "(paths; batch), eval (code: C# run in the live Editor, always shown to the user first), command / commands "
     "(a live Pipeline command by name with params / the list of them), screenshot, play (action start|stop|"
-    "status), menu (a menu item path, live), log (the last Unity job's log), open_editor, close_editor, "
-    "install_pipeline. Prefer this tool to typing unity/unity.sh commands; when the route is mcp, use the "
-    "MCP for Unity tools for scene work.")
+    "status), menu (a menu item path: live, or batch with the Editor closed), log (the last Unity job's log), "
+    "open_editor, close_editor, install_pipeline, install_harness (the headless-ops editor scripts that "
+    "import, batch menu items, forced batch recompiles and development builds need; a result with "
+    "evidence.needs_harness asks for it). Prefer this tool to typing unity/unity.sh commands; when the route "
+    "is mcp, use the MCP for Unity tools for scene work.")
 
 SCHEMA = obj({
     "op": {"type": "string", "enum": OPS},
@@ -109,6 +114,7 @@ def record_evidence(app: "AppState", session: dict, op: str, r: BridgeResult, *,
             return lad.record_evidence(folder, "L1", r.status, source=f"unity:compile:{route}", observed="tool",
                                        session_id=session["id"], path=ev.get("log"), ts=ts,
                                        detail={"kind": "compile", "route": route, "compile_errors": r.errors,
+                                               **({"clone": True} if ev.get("clone") else {}),
                                                "root_causes": ev.get("root_causes"), "summary": r.summary,
                                                "cmd": str(ev.get("cmd") or ev.get("command") or "")[:500]})
         from .ladder import evidence_from_nunit, story_ids_from_tests
@@ -119,7 +125,8 @@ def record_evidence(app: "AppState", session: dict, op: str, r: BridgeResult, *,
         if xml and Path(str(xml)).is_file():
             spec = evidence_from_nunit(Path(str(xml)), source=f"unity:test:{route}", observed="tool",
                                        cmd=str(ev.get("cmd") or ev.get("command") or ""), mode=platform,
-                                       categories=cats, scope=scope, ts=ts, extra={"route": route})
+                                       categories=cats, scope=scope, ts=ts,
+                                       extra={"route": route, **({"clone": True} if ev.get("clone") else {})})
             if spec:
                 spec.pop("note", None)
                 return lad.record_evidence(folder, session_id=session["id"], **spec)
@@ -136,14 +143,15 @@ def record_evidence(app: "AppState", session: dict, op: str, r: BridgeResult, *,
             subjects=story_ids_from_tests(passed + failed),
             detail={"kind": "tests", "total": total, "passed_n": n_passed, "failed_n": n_failed, "skipped_n": 0,
                     "passed": passed, "failed": failed, "mode": platform, "categories": cats, "scope": scope,
-                    "route": route, "summary": f"{n_passed}/{total} passed, {n_failed} failed"})
+                    "route": route, "summary": f"{n_passed}/{total} passed, {n_failed} failed",
+                    **({"clone": True} if ev.get("clone") else {})})
     except Exception:  # noqa: BLE001 — evidence is best effort, the result still goes back
         log.warning("unity: couldn't record evidence", exc_info=True)
         return None
 
 
 def _format(op: str, r: BridgeResult, artifacts: dict | None = None) -> ToolOutput:
-    ev = {k: v for k, v in (r.evidence or {}).items() if k not in ("state", "data", "passed_names")}
+    ev = {k: v for k, v in (r.evidence or {}).items() if k not in ("state", "data", "passed_names", "harness")}
     head = {"route": r.mode or ev.get("route") or "", "status": r.status, "summary": r.summary, "errors": r.errors,
             "evidence": ev, "artifacts": {k: v for k, v in (artifacts or {}).items() if v}}
     text = f"Unity {op}: {r.status}. {r.summary}\n" + json.dumps(head, default=str, indent=1)[:8000]
@@ -168,6 +176,13 @@ def _state_text(d: dict) -> str:
         lines.append(f"Why unavailable: {d['reason']}")
     if d.get("actions"):
         lines.append("The user can: " + ", ".join(d["actions"]) + " (chip / Quality card).")
+    if d.get("clone"):
+        lines.append(f"Batch jobs run {uclone.CLONE_NOTE} while the Editor holds the project.")
+    h = d.get("harness") or {}
+    if h:
+        lines.append("Harness editor scripts (HarnessCli): " + (
+            f"installed, version {h.get('version')}" + (f" (version {h.get('current_version')} available)" if h.get("outdated") else "")
+            if h.get("installed") else "not installed (needed for import, batch menu items, forced batch recompiles, dev builds)"))
     if d.get("busy"):
         lines.append(f"Busy: {d['busy'].get('label')}")
     return "\n".join(lines)
@@ -198,7 +213,7 @@ async def run_op(app: "AppState", session: dict, a: dict, cancel: asyncio.Event 
     if session.get("mode") == "plan" and cls not in ("read", "verify"):
         return ToolOutput(f"Plan only mode: Unity {op} isn't run (only status, compile and tests are). "
                           "Describe it instead.", is_error=True)
-    if want != "auto" and op in ("compile", "test", "build", "exec", "eval", "command", "screenshot", "play"):
+    if want != "auto" and op in ("compile", "test", "build", "exec", "eval", "command", "screenshot", "play", "menu"):
         st = await br.editor_state(session, "test" if op == "test" else op)
         is_live = st.mode in ("mcp", "cli_live")
         if (want == "live") != is_live:
@@ -233,8 +248,7 @@ async def run_op(app: "AppState", session: dict, a: dict, cancel: asyncio.Event 
         item = str(a.get("menu") or "").strip()
         if not item:
             return ToolOutput("menu needs `menu` (e.g. \"Tools/Rebuild Atlas\")", is_error=True)
-        code = f"UnityEditor.EditorApplication.ExecuteMenuItem({json.dumps(item)});"
-        r = await br.eval(session, code, consent=consent)
+        r = await br.menu_item(session, item, consent=consent, cancel=cancel)
     elif op == "command":
         name = str(a.get("name") or "").strip()
         if not name:
@@ -256,7 +270,7 @@ async def run_op(app: "AppState", session: dict, a: dict, cancel: asyncio.Event 
         r = await br.play(session, str(a.get("action") or "start"), consent=consent)
     elif op == "log":
         return _last_log(root, int(a.get("lines") or 200))
-    elif op in ("open_editor", "close_editor", "install_pipeline"):
+    elif op in ("open_editor", "close_editor", "install_pipeline", "install_harness"):
         r = await setup_action(app, session, op)
     else:
         return ToolOutput(f"Unknown op {op!r}. ops: {', '.join(OPS)}", is_error=True)
@@ -283,10 +297,49 @@ def _last_log(root: Path, lines: int) -> ToolOutput:
     return ToolOutput(f"Last Unity log: {p.relative_to(root)}\n\n" + wrap_untrusted(tail, f"unity:log:{p.name}"))
 
 
-async def setup_action(app: "AppState", session: dict, action: str) -> BridgeResult:
-    """install_pipeline | close_editor | open_editor | update_cli: always a card (never automatic)."""
+async def install_harness_action(app: "AppState", session: dict) -> BridgeResult:
+    """Copy the headless-ops harness editor scripts into the project (unity_harness), after a card."""
     br = get_bridge(app)
     root = Path(session["folder"]).expanduser().resolve()
+    cfg = uc.unity_cfg(app)
+    if cfg.get("harness_scripts") == "never":
+        return BridgeResult("skipped", "Harness editor scripts are off ([unity].harness_scripts = \"never\")", "files")
+    st = await asyncio.to_thread(uh.harness_status, root)
+    if problem := await asyncio.to_thread(uh.install_problem, root, st):
+        return BridgeResult("fail", problem, "files", evidence={"harness": st})
+    if st["modified"]:
+        return BridgeResult("fail", f"Not installing: {', '.join(st['modified'])} in {uh.HARNESS_DIR} was changed in "
+                                    "this project (it matches no shipped version). Merge by hand or move it away first.",
+                            "files", evidence={"harness": st})
+    if st["complete"] and not st["outdated"]:
+        br.harness_installed(root)
+        return BridgeResult("pass", f"The harness editor scripts are already installed (version {st['version']})",
+                            "files", evidence={"harness": st})
+    excl = bool(cfg.get("harness_git_exclude", True))
+    what = (f"Updates the harness editor scripts from version {st['version']} to {st['current_version']}"
+            if st["outdated"] else f"Copies the headless-ops harness editor scripts ({', '.join(uh.FILES)}, with .meta files)")
+    detail = (f"{what} into **{uh.HARNESS_DIR}/**. Needed for import, batch menu items, forced batch recompiles and "
+              "development builds. "
+              + ("They're kept out of git with `.git/info/exclude` (local only; nothing tracked changes)."
+                 if excl else "`[unity].harness_git_exclude` is off: git will see the new files.")
+              + " Unity compiles them the next time it opens or refreshes the project.")
+    if why := await br.ensure_allowed(session, "install_harness", "install_harness", route="files", detail=detail):
+        return BridgeResult("skipped", why, "files")
+    res = await asyncio.to_thread(uh.install_harness, root, exclude_from_git=excl, allow_upgrade=True)
+    if res["ok"]:
+        br.harness_installed(root)
+    return BridgeResult("pass" if res["ok"] else "fail", res["message"], "files",
+                        evidence={"harness": res.get("harness"), "written": res.get("written"),
+                                  "git_exclude": res.get("git_exclude"), "status": res.get("status")})
+
+
+async def setup_action(app: "AppState", session: dict, action: str) -> BridgeResult:
+    """install_pipeline | install_harness | close_editor | open_editor | update_cli: always a card
+    (never automatic)."""
+    br = get_bridge(app)
+    root = Path(session["folder"]).expanduser().resolve()
+    if action == "install_harness":
+        return await install_harness_action(app, session)
     cli_st = await br.cli_status()
     if not (cli_st.info and cli_st.ok):
         return BridgeResult("skipped", f"needs the official Unity CLI: {cli_st.reason}", "unavailable")
@@ -390,13 +443,14 @@ def register(app_: "FastAPI", api: "APIRouter", S: "AppState") -> None:
         s = _session(body.get("session_id"))
         if not is_unity_project(s.get("folder")):
             raise HTTPException(400, "Not a Unity project")
-        if action not in ("install_pipeline", "close_editor", "open_editor", "use_mcp_once", "update_cli"):
+        if action not in ACTIONS:
             raise HTTPException(404, f"No action {action}")
 
         async def go() -> None:
             try:
-                if action == "use_mcp_once":
-                    r = await get_bridge(S).compile(s, consent=gate_consent(S, s), source="tool", force_route="mcp")
+                if action in ("use_mcp_once", "use_clone"):
+                    r = await get_bridge(S).compile(s, consent=gate_consent(S, s), source="tool",
+                                                    force_route="mcp" if action == "use_mcp_once" else "clone")
                     record_evidence(S, s, "compile", r)
                 else:
                     r = await setup_action(S, s, action)
@@ -409,8 +463,9 @@ def register(app_: "FastAPI", api: "APIRouter", S: "AppState") -> None:
         t = asyncio.create_task(go())
         tasks.add(t)
         t.add_done_callback(tasks.discard)
-        return {"status": "pending", "message": "Confirm on the card in the chat" if action != "use_mcp_once"
-                else "Compiling over MCP for Unity once"}
+        msg = {"use_mcp_once": "Compiling over MCP for Unity once",
+               "use_clone": "Compiling on a copy of the project files (unsaved Editor changes not included)"}
+        return {"status": "pending", "message": msg.get(action, "Confirm on the card in the chat")}
 
     @api.post("/unity/jobs/{job_id}/cancel")
     async def cancel_job(job_id: str) -> dict:
@@ -421,4 +476,5 @@ def register(app_: "FastAPI", api: "APIRouter", S: "AppState") -> None:
         return {"cancelled": await S.jobs.cancel(job_id)}
 
 
-__all__ = ["OPS", "gate_consent", "install", "record_evidence", "register", "run_op", "setup_action"]
+__all__ = ["ACTIONS", "OPS", "gate_consent", "install", "install_harness_action", "record_evidence", "register", "run_op",
+           "setup_action"]

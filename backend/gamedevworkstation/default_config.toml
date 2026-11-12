@@ -122,6 +122,7 @@ trailer-maker = ["unity"]
 enabled = true                      # master switch for every hook and gate
 gate_max_retries = 2                # a failing gate asks the agent to fix it this often per turn, then you
 gate_timeout_s = 180                # a gate that takes longer is skipped (with a notice)
+unity_route_probe_s = 5             # session-start Unity route check budget; timeout keeps the route unknown
 fail_open_notice = true             # say so when a gate couldn't run (e.g. Unity unreachable)
 
 [ladder]
@@ -179,10 +180,17 @@ test_timeout_s = 1800               # batch tests
 build_timeout_s = 3600              # builds
 nographics = true                   # batch compile and EditMode tests run with -nographics (never PlayMode)
 extra_editor_args = []              # extra Unity args for batch compile (e.g. ["-disable-playback-engines", "AndroidPlayer"])
-clone_when_open = "ask"             # ask | never | always: batch jobs on a copy while the Editor holds the project (not yet used)
+# clone_when_open: the Editor holds the project and there's no live route (cli/auto backend):
+#   ask = offer "Run on a copy of the files" (compile/tests); always = do that without asking; never = don't.
+#   The copy is ~/Library/Caches/GameDevWorkstation/unity-clones/<id>/ (cp -c first, then rsync of
+#   Assets/, Packages/, ProjectSettings/); results say unsaved Editor changes aren't included.
+clone_when_open = "ask"
 eval = "ask"                        # ask | off: C# eval in the live Editor always shows the code first
-harness_scripts = "ask"             # ask | never: HarnessCli editor scripts for import/menu jobs (not yet used)
-harness_git_exclude = true
+# harness_scripts: import, batch menu items, forced batch recompiles and development builds need the
+#   headless-ops HarnessCli editor scripts. ask = such an op offers "Install harness editor scripts"
+#   (a card; Assets/Harness/Headless/Editor/); never = never offer it (unity.sh then reports them missing).
+harness_scripts = "ask"
+harness_git_exclude = true          # keep the installed harness scripts out of git (.git/info/exclude, local only)
 mcp_server = "unity"                # the MCP for Unity server the cli backend keeps off
 
 # ------------------------------------------------------------------ model catalog

@@ -1,8 +1,12 @@
+// harness-version: 2
 // Harness.Headless: batchmode entry points for headless-ops/scripts/unity.sh (Unity 6000.3).
+// (Keep the version line first: GameDevWorkstation reads it to offer upgrades. Edited copies are never overwritten.)
 //   -executeMethod Harness.Headless.HarnessCli.Compile      [-forceRecompile]
 //   -executeMethod Harness.Headless.HarnessCli.ImportAssets [-importPaths "Assets/a;Assets/b"] [-forceReimport]
 //   -executeMethod Harness.Headless.HarnessCli.Build        (-buildProfile Assets/...asset | -buildTarget <name>)
-//                                                           -out <path> [-dev] [-cleanBuild] [-scenes "a;b"] [-buildReport file.json]
+//                                                           -out <path> (or -buildOutput <path>) [-dev] [-cleanBuild]
+//                                                           [-scenes "a;b"] [-buildReport file.json]
+//   -executeMethod Harness.Headless.HarnessCli.MenuItem     -menu "Path/To/Item"   (then AssetDatabase.SaveAssets)
 // Every entry point ends with a deferred EditorApplication.Exit(code): 0 ok, 1 failed, 2 bad arguments/setup.
 // Run them WITHOUT -quit (see Exit). Called from an interactive editor (MCP execute_code) they log but never exit.
 // Progress lines are logged as "[HARNESS] ..." so unity.sh can grep them from the -logFile.
@@ -189,6 +193,52 @@ namespace Harness.Headless
             Exit(failures.Count == 0 ? 0 : 1);
         }
 
+        // ------------------------------------------------------------------ MenuItem
+
+        /// <summary>
+        /// Runs a menu item by its path (-menu "Tools/Rebuild Atlas") with EditorApplication.ExecuteMenuItem, then saves
+        /// modified assets (AssetDatabase.SaveAssets). Exit 1 when the item doesn't exist, is disabled (its validate
+        /// function said no) or throws; exit 2 without -menu. Errors logged while it runs are reported but don't fail it
+        /// (many menu items log as they go). Items that open a window or a modal dialog can't work in batchmode.
+        /// </summary>
+        public static void MenuItem()
+        {
+            string item = HarnessArgs.Get("menu");
+            if (string.IsNullOrEmpty(item)) { Say("MENU FAIL missing -menu \"Path/To/Item\""); Exit(2); return; }
+
+            var logged = new List<string>();
+            Application.LogCallback onLog = (msg, stack, type) =>
+            {
+                if (type == LogType.Error || type == LogType.Exception || type == LogType.Assert)
+                    if (!msg.StartsWith(Marker)) logged.Add(type + ": " + FirstLine(msg));
+            };
+            Application.logMessageReceived += onLog;
+            bool ran;
+            try
+            {
+                Say("MENU run " + item);
+                ran = EditorApplication.ExecuteMenuItem(item);
+            }
+            catch (Exception e)
+            {
+                Application.logMessageReceived -= onLog;
+                Say("MENU FAIL exception " + FirstLine(e.Message));
+                Exit(1);
+                return;
+            }
+            Application.logMessageReceived -= onLog;
+            foreach (var l in logged.Distinct().Take(30)) Say("MENU LOGGED " + l);
+            if (!ran)
+            {
+                Say("MENU FAIL not found or disabled: " + item);
+                Exit(1);
+                return;
+            }
+            AssetDatabase.SaveAssets();
+            Say("MENU OK " + item + " logged_errors=" + logged.Count);
+            Exit(0);
+        }
+
         // ------------------------------------------------------------------ Build
 
         [Serializable]
@@ -222,8 +272,9 @@ namespace Harness.Headless
         {
             string profilePath = HarnessArgs.Get("buildProfile");
             string targetArg = HarnessArgs.Get("buildTarget");
-            string outArg = HarnessArgs.Get("out");
-            if (string.IsNullOrEmpty(outArg)) { Say("BUILD FAIL missing -out <path>"); Exit(2); return; }
+            // -buildOutput is the Unity CLI's spelling (unity build --execute-method); -out is unity.sh's.
+            string outArg = HarnessArgs.Get("out", HarnessArgs.Get("buildOutput"));
+            if (string.IsNullOrEmpty(outArg)) { Say("BUILD FAIL missing -out <path> (or -buildOutput <path>)"); Exit(2); return; }
 
             BuildProfile profile = null;
             BuildTarget target = EditorUserBuildSettings.activeBuildTarget;

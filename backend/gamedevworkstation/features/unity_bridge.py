@@ -9,7 +9,12 @@ each op resolves to a **route** now (editor_state):
 - cli_batch — the official Unity CLI in batch mode, Editor closed (`unity run|test|build`);
 - raw_batch — headless-ops `unity.sh` (Editor closed, no official CLI, or `mcp` backend);
 - unavailable — with a reason and, for an open Editor in CLI mode, `actions` the UI offers
-              (install_pipeline, use_mcp_once, close_editor).
+              (install_pipeline, use_mcp_once, use_clone, close_editor).
+An open Editor without a live route can also run compile/tests on a copy of the project (unity_clone,
+[unity].clone_when_open: ask = the use_clone action, always = route cli_batch with extra.clone).
+Batch ops that need the headless-ops HarnessCli editor scripts (forced recompile, import, menu,
+unity.sh builds, Harness.Headless.HarnessCli.* methods) return a `needs_harness` skipped result
+with the install_harness action while they're missing (unity_harness; [unity].harness_scripts).
 `mcp` backend = the previous behaviour exactly (MCP when open, unity.sh when closed). `cli` never
 touches MCP for Unity. `auto` takes the best available ([unity].auto_live_order for an open Editor).
 CLI runs go through unity_cli.UnityRunner (one Unity job per project, streamed to the Terminal
@@ -59,6 +64,8 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from ..skills import builtin_skills_dir
 from . import unity_cli as uc
+from . import unity_clone as uclone
+from . import unity_harness as uh
 from .hookbus import hook_context
 
 if TYPE_CHECKING:
@@ -80,7 +87,7 @@ STALE_HINT = ("Unity seems throttled (an unfocused editor compiles slowly): brin
 BACKENDS = uc.BACKENDS
 ROUTES = ("mcp", "cli_live", "cli_batch", "raw_batch", "unavailable")
 ROUTE_LABELS = {"mcp": "MCP for Unity", "cli_live": "Unity CLI, live Editor", "cli_batch": "Unity CLI, batch",
-                "raw_batch": "batch (unity.sh)", "unavailable": "unavailable"}
+                "raw_batch": "batch (unity.sh)", "unavailable": "unavailable", "files": "project files"}
 # Which routes can run which op ("state" ops never need one).
 OP_ROUTES: dict[str, tuple[str, ...]] = {
     "compile": ("mcp", "cli_live", "cli_batch", "raw_batch"),
@@ -89,7 +96,7 @@ OP_ROUTES: dict[str, tuple[str, ...]] = {
     "exec": ("cli_batch", "raw_batch"),
     "import": ("raw_batch",),
     "eval": ("cli_live",),
-    "menu": ("cli_live",),
+    "menu": ("cli_live", "raw_batch"),
     "command": ("cli_live",),
     "screenshot": ("cli_live",),
     "play": ("cli_live",),
@@ -103,7 +110,9 @@ SETUP_OPS = {"install_pipeline", "open_editor", "close_editor", "self_update", "
 # Pipeline commands that only read (no card, Plan mode ok); anything else is a change (default-deny).
 READ_COMMANDS = {"editor_status", "recompile_status", "test_status", "test status", "test list", "list_tests",
                  "get_scene_hierarchy", "find_gameobjects", "list_build_targets", "wait_status"}
-ACTION_ORDER = ("install_pipeline", "use_mcp_once", "close_editor")
+ACTION_ORDER = ("install_pipeline", "use_mcp_once", "use_clone", "close_editor", "install_harness")
+CLONE_OPS = {"compile", "test"}  # ops that may run on a copy of the project while the Editor holds it
+HARNESS_METHOD = "Harness.Headless.HarnessCli."
 PROJECT_BACKEND_KEY = "unity.backend:"
 ALLOW_KEY = "unity.allow:"
 
@@ -327,6 +336,7 @@ class UnityBridge:
         self._editors: tuple[float, list[dict]] | None = None
         self._test_cmd: dict[str, tuple[float, str]] = {}
         self._eval_ok: dict[str, set[str]] = {}  # session id -> sha256 of eval code the user allowed
+        self._harness_wanted: set[str] = set()  # projects where an op asked for the harness scripts
 
     # ----------------------------------------------------------- config
 
@@ -597,6 +607,20 @@ class UnityBridge:
             st.mcp_connected = ok
             st.mode, st.reason = ("mcp", "") if ok and is_open else ("unavailable", why or "Unity isn't open")
             return st
+        if "harness" not in memo:
+            memo["harness"] = await asyncio.to_thread(self._harness_info, root, cfg)
+        st.extra["harness"] = memo["harness"]
+        if force_route == "clone":
+            if is_open and self._clone_ok(op, usable, cfg):
+                self._use_clone(st)
+            else:
+                st.reason = ("a copy is only used while the Editor holds the project" if not is_open else
+                             f"`{op}` can't run on a copy of the project" if op not in CLONE_OPS else
+                             "running on a copy is off ([unity].clone_when_open = \"never\")"
+                             if cfg.get("clone_when_open") == "never" else
+                             f"running on a copy needs the official Unity CLI: {cli.reason if cli else 'not checked'}")
+            st.routes = {op: st.mode}
+            return st
         if is_open:
             order = ["mcp"] if backend == "mcp" else ["cli_live"] if backend == "cli" else \
                 [r for r in (cfg.get("auto_live_order") or ["mcp", "cli_live"]) if r in ("mcp", "cli_live")] or ["mcp", "cli_live"]
@@ -635,10 +659,12 @@ class UnityBridge:
                                  f"{whys[0].split('reachable: ', 1)[-1] if whys else ''}. Start MCP for Unity in the editor "
                                  "(Window > MCP for Unity) and turn on the unity connector; batchmode can't run "
                                  "while the editor has the project open.")
+                elif cfg.get("clone_when_open") == "always" and self._clone_ok(op, usable, cfg):
+                    self._use_clone(st)
                 else:
                     st.reason = ("Unity has this project open but " + "; ".join(whys)
                                  + ". Batch mode can't run while the Editor has the project open.")
-                    st.actions = self._actions(st, usable)
+                    st.actions = self._actions(st, usable, op)
         else:
             routes = OP_ROUTES.get(op, ("cli_batch", "raw_batch"))
             if backend != "mcp" and usable and cfg.get("prefer_official_cli", True) and "cli_batch" in routes:
@@ -651,19 +677,92 @@ class UnityBridge:
                 st.reason = f"`{op}` needs the Unity Editor open (with the Pipeline package)"
             else:
                 st.reason = f"`{op}` needs the official Unity CLI: {cli.reason if cli else 'CLI backend is off'}"
+        if st.extra["harness"].get("offer") and "install_harness" not in st.actions:
+            st.actions = [a for a in ACTION_ORDER if a in {*st.actions, "install_harness"}]
         st.routes = {"compile": st.mode} if op == "compile" else {op: st.mode}
         return st
 
-    def _actions(self, st: EditorState, cli: uc.UnityCliInfo | None) -> list[str]:
+    def _actions(self, st: EditorState, cli: uc.UnityCliInfo | None, op: str = "compile") -> list[str]:
         out = []
         live = st.live.get("state")
         if cli and live == "absent":
             out.append("install_pipeline")
         if st.extra.get("mcp_in_manifest") and st.backend == "cli":
             out.append("use_mcp_once")
+        if self.cfg().get("clone_when_open", "ask") == "ask" and self._clone_ok(op, cli, self.cfg()):
+            out.append("use_clone")
         if cli:
             out.append("close_editor")
         return [a for a in ACTION_ORDER if a in out]
+
+    # ------------------------------------------------------------ clone + harness
+
+    @staticmethod
+    def _clone_ok(op: str, cli: uc.UnityCliInfo | None, cfg: dict) -> bool:
+        """Whether `op` may run as cli_batch on a copy of the project (§2.5 action 3)."""
+        return (bool(cli) and op in CLONE_OPS and cfg.get("clone_when_open", "ask") != "never"
+                and bool(cfg.get("prefer_official_cli", True)))
+
+    @staticmethod
+    def _use_clone(st: EditorState) -> None:
+        st.mode = "cli_batch"
+        st.extra["clone"] = True
+        st.actions = []
+        st.reason = f"Unity has this project open: batch jobs run {uclone.CLONE_NOTE}"
+
+    async def _on_clone(self, session: dict, run: Callable[[Path], Awaitable[BridgeResult]]) -> BridgeResult:
+        """Bring the copy up to date, then run(clone root) under the clone's lock; the result is
+        labelled as coming from a copy (summary + evidence.clone)."""
+        root = Path(session["folder"]).expanduser().resolve()
+        async with uclone.lock(root):
+            try:
+                info = await uclone.sync_clone(root, timeout_s=uc.cfg_int(self.cfg(), "batch_timeout_s", 30, 4 * 3600))
+            except uclone.CloneError as e:
+                return BridgeResult("skipped", f"couldn't copy the project for a batch run: {e}", "cli_batch",
+                                    evidence={"route": "cli_batch", "clone": True})
+            r = await run(Path(info["clone"]))
+        r.summary = f"{r.summary} ({uclone.CLONE_NOTE})"
+        r.evidence.update({"clone": True, "clone_dir": info["clone"], "clone_first": info["first"],
+                           "project": str(root)})
+        return r
+
+    def _harness_info(self, root: Path, cfg: dict) -> dict:
+        """The harness scripts' status for the state (+ "offer": show the install_harness action:
+        an op asked for them, or an older shipped version is installed)."""
+        try:
+            h = uh.harness_status(root)
+        except OSError as e:  # templates missing from the app bundle
+            return {"installed": False, "error": str(e), "offer": False}
+        on = cfg.get("harness_scripts", "ask") != "never"
+        wanted = project_key(root) in self._harness_wanted and not h["installed"]
+        out = {k: h[k] for k in ("installed", "version", "current_version", "outdated", "modified", "path")}
+        out["offer"] = on and (wanted or h["outdated"])
+        if out["offer"] and not h["installed"] and uh.external_harness(root):
+            out["offer"] = False
+        return out
+
+    def harness_installed(self, root: Path | str) -> None:
+        self._harness_wanted.discard(project_key(root))
+
+    async def _needs_harness(self, root: Path, what: str, mode: str, *, min_version: int = 1) -> BridgeResult | None:
+        """A `needs_harness` skipped result when `what` needs HarnessCli or a newer installed version
+        ([unity].harness_scripts = "never": None, unity.sh then reports it missing as before)."""
+        if self.cfg().get("harness_scripts", "ask") == "never":
+            return None
+        present = await asyncio.to_thread(uh.harness_present, root)
+        h = await asyncio.to_thread(uh.harness_status, root)
+        upgrade = h["installed"] and h["version"] < min_version
+        if present and not upgrade:
+            return None
+        self._harness_wanted.add(project_key(root))
+        reason = (f"version {h['version']} is installed but version {min_version} or newer is required. Upgrade them"
+                  if upgrade else "the project doesn't have them. The user can install them")
+        return BridgeResult(
+            "skipped", f"needs_harness: {what} needs the headless-ops harness editor scripts (HarnessCli); "
+                       f"{reason} with the install_harness action "
+                       f"(3 editor scripts in {uh.HARNESS_DIR}, kept out of git; asks first), or op install_harness.",
+            mode, evidence={"route": mode, "needs_harness": True, "actions": ["install_harness"],
+                            "harness": h})
 
     async def full_state(self, session: dict) -> dict:
         """editor_state for compile plus the route of test/build/eval (for the chip and the API)."""
@@ -703,6 +802,16 @@ class UnityBridge:
         st = await self.editor_state(session, "compile", wait=True, force_route=force_route)
         if st.mode == "mcp":
             return await self._compile_mcp(session, consent)
+        if st.extra.get("clone"):
+            r = await self._on_clone(session, lambda r: self._compile_cli_batch(session, st, consent, source, cancel,
+                                                                              root=r))
+            if force:
+                r.summary += "; force=True is not supported on the clone path (regular batch compile only)"
+            return r
+        if force and st.mode in ("cli_batch", "raw_batch"):
+            root = Path(session["folder"]).expanduser().resolve()
+            if nh := await self._needs_harness(root, "a forced recompile in batch mode", st.mode):
+                return nh
         if st.mode == "raw_batch":
             return await self._compile_batch(session, consent, source=source, force=force, cancel=cancel)
         if st.mode == "cli_live":
@@ -764,8 +873,9 @@ class UnityBridge:
                             report=p["report"] or text[-4000:], errors=n, evidence=ev)
 
     async def _compile_cli_batch(self, session: dict, st: EditorState, consent: dict | None, source: str,
-                                 cancel: asyncio.Event | None) -> BridgeResult:
-        root = Path(session["folder"]).expanduser().resolve()
+                                 cancel: asyncio.Event | None, *, root: Path | None = None) -> BridgeResult:
+        """root: where Unity runs (default the session's project; a clone for use_clone)."""
+        root = root or Path(session["folder"]).expanduser().resolve()
         cli = await self._cli_info()
         cfg = self.cfg()
         editor, problem = await self._editor_arg(root, cli)
@@ -908,6 +1018,9 @@ class UnityBridge:
         st = await self.editor_state(session, "test", wait=True)
         if st.mode == "mcp":
             return await self._tests_mcp(session, platform, category, test_filter, consent)
+        if st.extra.get("clone"):
+            return await self._on_clone(session, lambda r: self._tests_cli_batch(
+                session, platform, category, test_filter, assemblies, consent, source, cancel, root=r))
         if st.mode == "raw_batch":
             return await self._tests_batch(session, platform, category, test_filter, consent, source=source,
                                            cancel=cancel)
@@ -923,8 +1036,8 @@ class UnityBridge:
 
     async def _tests_cli_batch(self, session: dict, platform: str, category: str | None, test_filter: str | None,
                                assemblies: str | None, consent: dict | None, source: str,
-                               cancel: asyncio.Event | None) -> BridgeResult:
-        root = Path(session["folder"]).expanduser().resolve()
+                               cancel: asyncio.Event | None, *, root: Path | None = None) -> BridgeResult:
+        root = root or Path(session["folder"]).expanduser().resolve()
         cli = await self._cli_info()
         cfg = self.cfg()
         editor, problem = await self._editor_arg(root, cli)
@@ -1139,6 +1252,9 @@ class UnityBridge:
             r = uc.result_from_build(run)
             r.evidence["started_at"] = run.started_at
             return r
+        if nh := await self._needs_harness(root, "a development build" if dev else "a batch build through unity.sh",
+                                           st.mode):
+            return nh
         if not self.unity_sh():
             return BridgeResult("skipped", "a development build needs headless-ops unity.sh (HarnessCli)", st.mode)
         args = ["build", str(profile or target), "--out", str(out_p)] + (["--dev"] if dev else [])
@@ -1181,6 +1297,8 @@ class UnityBridge:
                                     "cli_batch", evidence=ev)
             return BridgeResult("fail", f"{method} failed (exit {run.exit_code})", "cli_batch", report=text[-4000:],
                                 evidence=ev)
+        if method.startswith(HARNESS_METHOD) and (nh := await self._needs_harness(root, f"`{method}`", st.mode)):
+            return nh
         if not self.unity_sh():
             return BridgeResult("skipped", "headless-ops unity.sh not found", st.mode)
         a = ["exec", method, *(["--no-quit"] if no_quit else [])] + (["--", *args] if args else [])
@@ -1194,11 +1312,36 @@ class UnityBridge:
         st, root = await self._route(session, "import")
         if st.mode == "unavailable":
             return self._skip(st)
+        if nh := await self._needs_harness(root, "an asset import", st.mode):
+            return nh
         paths = [p for p in (paths or []) if p.startswith("Assets/") or p.startswith("Packages/")]
         a = ["import", *paths] + (["--force"] if force else [])
         code, body, res, refused, t0 = await self._raw(session, "import", a, consent, source="tool", key="import",
                                                        label="Unity import · unity.sh", cancel=cancel)
         return _raw_result("import", code, body, res, refused, t0)
+
+    async def menu_item(self, session: dict, item: str, *, consent: dict | None = None,
+                        cancel: asyncio.Event | None = None) -> BridgeResult:
+        """Run a menu item: in the live Editor (cli_live: eval of EditorApplication.ExecuteMenuItem,
+        shown first), or with the Editor closed through unity.sh `menu` (HarnessCli.MenuItem, then
+        AssetDatabase.SaveAssets)."""
+        item = (item or "").strip()
+        if not item or len(item) > 400 or "/" not in item or any(c in item for c in "\r\n\0") or item.startswith("-"):
+            return BridgeResult("error", "menu needs a menu item path, e.g. \"Tools/Rebuild Atlas\"")
+        st, root = await self._route(session, "menu")
+        if st.mode == "cli_live":
+            return await self.eval(session, f"UnityEditor.EditorApplication.ExecuteMenuItem({json.dumps(item)});",
+                                   consent=consent)
+        if st.mode != "raw_batch":
+            return self._skip(st) if st.mode == "unavailable" else BridgeResult(
+                "skipped", f"menu items run in the live Editor or in batch (now {st.mode})", st.mode)
+        if nh := await self._needs_harness(root, "a menu item in batch mode", st.mode, min_version=2):
+            return nh
+        if not self.unity_sh():
+            return BridgeResult("skipped", "headless-ops unity.sh not found", st.mode)
+        code, body, res, refused, t0 = await self._raw(session, "menu", ["menu", item], consent, source="tool", key="menu",
+                                                       label=f"Unity menu · {item} · unity.sh", cancel=cancel)
+        return _raw_result("menu", code, body, res, refused, t0)
 
     async def editor_command(self, session: dict, name: str, params: dict | None = None, *,
                              consent: dict | None = None, timeout_s: int | None = None, op: str = "command",

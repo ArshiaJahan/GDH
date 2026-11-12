@@ -19,6 +19,8 @@ commands
   build <profile.asset|target> [--out PATH] [--dev] [--clean] [--scenes "a;b"]
                                           target: macos|windows|webgl|android|ios|linux, or a Build Profile
                                           asset path (Assets/...asset). Needs HarnessCli. Writes build-report.json.
+  menu "<Path/To/Item>"                    run a menu item (EditorApplication.ExecuteMenuItem), then save assets.
+                                          Needs HarnessCli (HarnessCli.MenuItem).
   exec <Ns.Class.Method> [unity args...] [--no-quit]
                                           run a static editor method with -quit; extra args go to Unity verbatim.
                                           --no-quit for methods that end with a deferred EditorApplication.Exit
@@ -27,7 +29,7 @@ commands
 
 common flags (anywhere before a literal --)
   --project DIR      Unity project root (default: $UNITY_PROJECT, else walk up from the current directory)
-  --timeout SEC      watchdog; default compile 900, import 1800, test 1800, build 3600, exec 1800
+  --timeout SEC      watchdog; default compile 900, import 1800, test 1800, build 3600, exec 1800, menu 900
   --log FILE         Unity log file (default <project>/Logs/harness/<command>-<timestamp>.log)
   --unity PATH       editor binary (default: $UNITY_PATH, else from ProjectSettings/ProjectVersion.txt)
   --accept-apiupdate pass -accept-apiupdate (lets the API updater rewrite obsolete API in your scripts)
@@ -66,7 +68,7 @@ CMD="${POS[0]}"
 ARGS=("${POS[@]:1}")
 
 case "$CMD" in
-  compile|test|import|build|exec) ;;
+  compile|test|import|build|exec|menu) ;;
   *) echo "unknown command: $CMD" >&2; usage >&2; result 3 FAIL "usage unknown command $CMD" ;;
 esac
 
@@ -322,6 +324,18 @@ PY
   fi
   [ "$N_ERR" -gt 0 ] && result 1 FAIL "compile-errors $N_ERR (build not started, log $LOG)"
   result 1 FAIL "build no report written, Unity exit $UNITY_RC (log $LOG)"
+  ;;
+
+menu)
+  : "${TIMEOUT:=900}"
+  need_harness_cli
+  [ ${#ARGS[@]} -eq 1 ] || result 3 FAIL "usage menu \"Path/To/Item\" (one quoted menu path)"
+  ITEM="${ARGS[0]}"
+  case "$ITEM" in */*) ;; *) result 3 FAIL "usage menu: not a menu path: $ITEM" ;; esac
+  run_unity "$TIMEOUT" ${NG[@]+"${NG[@]}"} ${API[@]+"${API[@]}"} -executeMethod Harness.Headless.HarnessCli.MenuItem -menu "$ITEM"
+  finish_generic "menu $ITEM"
+  grep -qF '[HARNESS] MENU OK' "$LOG" 2>/dev/null || result 1 FAIL "menu $ITEM did not report MENU OK (log $LOG)"
+  result 0 OK "menu $ITEM (log $LOG)"
   ;;
 
 exec)

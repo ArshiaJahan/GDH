@@ -100,7 +100,10 @@ The Unity CLI comes with Unity Hub (or `curl -fsSL https://unity.com/install.sh 
 finds it in `~/.unity/bin`, the Hub bundle or your `PATH`. In `cli` mode MCP for Unity is never
 turned on. When the Editor holds the project and no live route works, nothing runs in batch: the
 chip offers to install the Pipeline package (a one-time `Packages/manifest.json` change, behind a
-card), to use MCP once, or to close Unity (it exits without saving, behind a card). The gates, the
+card), to use MCP once, to run on a copy of the project, or to close Unity (it exits without saving,
+behind a card). A few batch ops (asset import, menu items, forced recompile, builds through unity.sh) need
+the small HarnessCli editor scripts; the app installs them on request behind a card, git-excluded so
+no tracked file changes. The gates, the
 agent's `unity` tool and the Quality card all use the same route; Unity jobs stream to the Terminal
 drawer and can be cancelled. Details: [Unity: MCP or CLI](docs/GUIDE.md#unity-mcp-or-cli).
 
@@ -271,23 +274,6 @@ comments. Your `config.toml` holds only what you change, and most of it is edita
 model tiers, delegation budgets, spend limits, modes and allowlist, `[skills]`, `[hooks]`,
 `[ladder]`, `[campaigns]`, `[fleet]` and `[unity]` (the Unity backend: `auto`, `mcp` or `cli`, the
 Unity CLI path and the Unity job timeouts). See the [guide](docs/GUIDE.md#configuration).
-
-<!-- rename:keep-start -->
-### Upgrading from Workspace 0.4
-
-GameDevWorkstation is the app that was called Workspace up to 0.4. It has a new name and bundle
-id, so it installs next to the old app instead of updating it in place. Install it once by hand
-(quit Workspace first):
-
-```bash
-make app && make install
-```
-
-On its first start your data, settings, sessions and API keys come over automatically; the old
-app's files are never changed or deleted. When you are happy with GameDevWorkstation, remove
-`/Applications/Workspace.app` yourself. Details in the
-[guide](docs/GUIDE.md#upgrading-from-workspace-04).
-<!-- rename:keep-end -->
 
 <details>
 <summary><b>Project layout</b></summary>

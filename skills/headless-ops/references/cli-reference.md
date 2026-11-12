@@ -83,6 +83,16 @@ exit code. "✓ local" = observed on this Mac (6000.3.21f1, Apple Silicon); "✓
 - Only one Unity process per project. Copy the project (on APFS `cp -cR` makes a near-free clone, incl. `Library/`)
   to run jobs in parallel.
 
+## HarnessCli.MenuItem and `-buildOutput`
+- `-executeMethod Harness.Headless.HarnessCli.MenuItem -menu "Path/To/Item"` runs the menu item (`unity.sh menu "Path/To/Item"` wraps it), calls
+  `AssetDatabase.SaveAssets()` and exits through the deferred `HarnessCli.Exit`; run it without `-quit`.
+- `-buildOutput <dir>` is accepted as an alias of `-out` (HarnessCli.Build).
+
+## Run on a copy (GameDevWorkstation `clone_when_open`)
+With the Editor open and no live route, the `unity` tool can run compile/tests (official CLI batch) on an APFS copy at
+`~/Library/Caches/GameDevWorkstation/unity-clones/<hash>/`: `cp -cR` the first time, then rsync of `Assets/`, `Packages/`
+and `ProjectSettings/` only. Results are labelled "on a copy of the files on disk (unsaved Editor changes not included)".
+
 ## Portable timeout on macOS (no GNU `timeout`)
 - unity.sh: background Unity + background watchdog subshell; **redirect both to /dev/null** (a background `sleep` that
   inherits the caller's stdout keeps tool calls hanging until it ends). TERM, 10 s grace, then KILL.

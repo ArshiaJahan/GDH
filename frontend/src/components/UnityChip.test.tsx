@@ -58,6 +58,35 @@ describe("UnityChip", () => {
     expect(toast).toHaveBeenCalledWith("Approve in the chat", undefined);
   });
 
+  it("offers running on a copy and posts use_clone", async () => {
+    await show({ route: "unavailable", editor_open: true, reason: "No bridge", actions: ["install_pipeline", "use_mcp_once", "use_clone", "close_editor"] });
+    fireEvent.click(screen.getByRole("button", { name: /Unity:/ }));
+    expect(screen.getAllByRole("menuitem").map((m) => m.textContent)).toEqual([
+      "Install Pipeline package (one-time, edits Packages/manifest.json)", "Use MCP for this check", "Run on a copy of the files",
+      "Close Unity (exits without saving)"]);
+    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { name: "Run on a copy of the files" })); });
+    expect(post).toHaveBeenCalledWith("/unity/actions/use_clone", { session_id: "s1" });
+  });
+
+  it("labels batch runs on a copy", async () => {
+    await show({ route: "cli_batch", editor_open: true, clone: true, reason: "Unity has this project open: batch jobs run on a copy" });
+    const b = screen.getByRole("button", { name: /Unity:/ });
+    expect(b.textContent).toBe("Unity · CLI batch · on a copy");
+    expect(b.title).toContain("on a copy");
+  });
+
+  it("offers install_harness whatever the route, and the upgrade wording when outdated", async () => {
+    await show({ route: "raw_batch", editor_open: false, actions: ["install_harness"], harness: { installed: false, offer: true } });
+    fireEvent.click(screen.getByRole("button", { name: /Unity:/ }));
+    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { name: /Install harness editor scripts/ })); });
+    expect(post).toHaveBeenCalledWith("/unity/actions/install_harness", { session_id: "s1" });
+    cleanup();
+    await show({ route: "cli_batch", editor_open: false, actions: ["install_harness"],
+      harness: { installed: true, version: 1, current_version: 2, outdated: true, offer: true } });
+    fireEvent.click(screen.getByRole("button", { name: /Unity:/ }));
+    expect(screen.getByRole("menuitem").textContent).toBe("Update harness editor scripts (version 1 → 2)");
+  });
+
   it("is muted and action-less when unavailable with the Editor closed", async () => {
     await show({ route: "unavailable", editor_open: false, actions: ["install_pipeline"] });
     expect(screen.getByRole("button", { name: /Unity:/ }).textContent).toBe("Unity · unavailable");

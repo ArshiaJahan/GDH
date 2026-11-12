@@ -135,6 +135,21 @@ describe("UnitySettings", () => {
     expect(save).toHaveBeenLastCalledWith({ unity: { eval: "off" } }, "Eval policy");
   });
 
+  it("saves the clone-when-open and harness script policies", async () => {
+    vi.useRealTimers();
+    get.mockImplementation(async () => ({ cli: {}, editors: [], config: {} }));
+    const save = vi.fn();
+    render(<UnitySettings st={{ unity: { clone_when_open: "ask", harness_scripts: "ask", harness_git_exclude: true } }} save={save} />);
+    await act(async () => {});
+    expect((screen.getByLabelText("Run on a copy") as HTMLSelectElement).value).toBe("ask");
+    fireEvent.change(screen.getByLabelText("Run on a copy"), { target: { value: "always" } });
+    expect(save).toHaveBeenLastCalledWith({ unity: { clone_when_open: "always" } }, "Run on a copy");
+    fireEvent.change(screen.getByLabelText("Harness editor scripts"), { target: { value: "never" } });
+    expect(save).toHaveBeenLastCalledWith({ unity: { harness_scripts: "never" } }, "Harness editor scripts");
+    fireEvent.click(screen.getByLabelText("Keep harness scripts out of git"));
+    expect(save).toHaveBeenLastCalledWith({ unity: { harness_git_exclude: false } }, "Keep harness scripts out of git");
+  });
+
   it("says when the CLI is missing", async () => {
     vi.useRealTimers();
     get.mockImplementation(async () => ({ cli: {}, editors: [], config: {} }));

@@ -356,13 +356,33 @@ def pinned_skill_names(settings: dict) -> list[str]:
     return list(dict.fromkeys([*settings.get("pinned_skills", []), "delegation"]))
 
 
+MCP_ONLY_SKILLS = ("unity-mcp-orchestrator",)  # MCP for Unity tool reference: no use off the mcp route
+_NON_MCP_ROUTES = ("cli_live", "cli_batch", "raw_batch")
+
+
+def index_hidden_skills(settings: dict) -> set[str]:
+    """Skills left out of the index for this session (they can still be pinned or read): the MCP
+    for Unity skill when the Unity route frozen at session start (settings.unity_route, written with
+    the context pack) isn't MCP — the backend is `cli`, or `auto` resolved to a CLI / batch route.
+    Decided from frozen settings only, so the cached index stays the same all session."""
+    u = (settings or {}).get("unity_route")
+    if not isinstance(u, dict):
+        return set()
+    backend, route = u.get("backend"), u.get("route")
+    if backend == "cli" or (backend != "mcp" and route in _NON_MCP_ROUTES):
+        return set(MCP_ONLY_SKILLS)
+    return set()
+
+
 def skills_index(settings: dict) -> str:
-    """A stable, name-sorted index of installed skills, excluding the pinned full text."""
+    """A stable, name-sorted index of installed skills, excluding the pinned full text (and
+    index_hidden_skills)."""
     pinned = set(pinned_skill_names(settings))
+    skip = pinned | index_hidden_skills(settings)
     limit = max(0, int(get_config().skills.get("index_description_chars", 300)))
     lines = ["<skill-index>"]
     for s in sorted(list_skills(), key=lambda s: s["name"]):
-        if s["name"] not in pinned:
+        if s["name"] not in skip:
             description = " ".join(s["description"].split())[:limit]
             lines.append(f"- {s['name']}: {description}")
     lines += ["To follow a skill, load it first with read_skill(name); a loaded skill stays loaded until the "

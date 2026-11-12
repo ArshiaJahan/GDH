@@ -10,9 +10,13 @@ Drive Unity 6000.3 in batchmode safely: one command per job, always a timeout, a
 Pinned: Unity 6000.3.21f1 (macOS Apple Silicon), Test Framework 1.6.0, URP 17.3, MCP for Unity 10.3.0 (editor-open path).
 Tools are MCP for Unity 10.3 tools; your client may prefix them (e.g. `mcp__UnityMCP__run_tests`). For tool parameters see unity-mcp-orchestrator.
 
-In GameDevWorkstation, prefer the `unity` tool (`op=compile|test|build|exec|import`): it picks the route from the user's Unity
+In GameDevWorkstation, prefer the `unity` tool (`op=compile|test|build|exec|import|menu`): it picks the route from the user's Unity
 backend (official Unity CLI `unity run/test/build`, or this skill's `unity.sh`), streams the job to the Terminal drawer,
 asks for approval and records ladder evidence. `unity.sh` stays the path for CI, manual runs and HarnessCli entry points.
+When an op needs HarnessCli and the project has none, the tool answers `needs_harness`: use `op=install_harness`
+(the user approves; it installs step 2's files with fixed .meta GUIDs and keeps them out of git) instead of copying by hand.
+With the Editor open and no live route, compile and tests can run on an APFS copy of the project (`[unity] clone_when_open`);
+the result says "on a copy of the files on disk (unsaved Editor changes not included)".
 
 ## When to use / not to use
 - Use when no editor has the project open: compile gate for compile-fix-loop, test runs for play-verify/gdd-to-backlog
@@ -23,13 +27,13 @@ asks for approval and records ladder evidence. `unity.sh` stays the path for CI,
 
 ## Inputs
 - Project root (folder with `ProjectSettings/ProjectVersion.txt`). `<skills>` = the folder holding this skill.
-- For `import`, `build`, `compile --force`: the HarnessCli templates installed in the project (step 2).
+- For `import`, `build`, `menu`, `compile --force`: the HarnessCli templates installed in the project (step 2).
 
 ## Procedure
 1. **Pick the path.** Read `mcpforunity://instances`. If an instance shows this project, use MCP (table below) and stop here.
    Otherwise continue. `unity.sh` double-checks: it refuses (exit 4) when a Unity process has `-projectPath <root>` or holds
    `Temp/UnityLockfile`; a stale lockfile with no holder is fine.
-2. **Install entry points once** (needed by `import`, `build`, `compile --force`):
+2. **Install entry points once** (needed by `import`, `build`, `menu`, `compile --force`):
    copy `<skills>/headless-ops/templates/Editor/` to `<root>/Assets/Harness/Headless/Editor/` (HarnessCli.cs, HarnessArgs.cs,
    Harness.Headless.Editor.asmdef: Editor-only, not auto-referenced, namespace `Harness.Headless`). Then run `compile`.
 3. **Run the job** from the project root (or pass `--project <root>`):
@@ -39,9 +43,10 @@ asks for approval and records ladder evidence. `unity.sh` stays the path for CI,
    $S/unity.sh test editmode|playmode [--filter X] [--category Y] [--assembly Z] [--results F.xml] [--allow-empty]
    $S/unity.sh import [Assets/path ...] [--force]        # no paths = AssetDatabase.Refresh
    $S/unity.sh build <macos|windows|webgl|android|ios|linux|Assets/…/Profile.asset> [--out DIR] [--dev] [--clean] [--scenes "a;b"]
+   $S/unity.sh menu "Tools/Rebuild Atlas"                # a menu item, then AssetDatabase.SaveAssets
    $S/unity.sh exec <Ns.Class.Method> [-yourArg value ...] [--no-quit]
    ```
-   Common flags (anywhere): `--project DIR`, `--timeout SEC` (defaults: compile 900, test/import/exec 1800, build 3600),
+   Common flags (anywhere): `--project DIR`, `--timeout SEC` (defaults: compile/menu 900, test/import/exec 1800, build 3600),
    `--log FILE` (default `<root>/Logs/harness/<cmd>-<ts>.log`, copied to `Logs/harness/last.log`), `--accept-apiupdate`,
    `--graphics` (drop `-nographics`; PlayMode tests never get it), `UNITY_PATH=<binary>` to override the editor.
 4. **Read the result.** The last line is `RESULT: OK <summary>` or `RESULT: FAIL <reason>`. Above it the script prints the
@@ -58,6 +63,7 @@ asks for approval and records ladder evidence. `unity.sh` stays the path for CI,
 | import | `-executeMethod …HarnessCli.ImportAssets [-importPaths "a;b"] [-forceReimport]` (StartAssetEditing/StopAssetEditing, checks each path has a GUID and loads, counts logged errors) |
 | build | target: `-buildTarget <osxuniversal\|win64\|webgl\|android\|ios\|linux64> -executeMethod …HarnessCli.Build -out <dir>`; profile: `-activeBuildProfile P -buildProfile P …`; writes `build-report.json` next to the player |
 | exec | `-quit -executeMethod <M> <your args>`; no `-quit` for `Harness.Headless.HarnessCli.*` or with `--no-quit` |
+| menu | `-executeMethod …HarnessCli.MenuItem -menu "Path/To/Item"`: ExecuteMenuItem, then SaveAssets, then a deferred exit (no `-quit`); fails when the item isn't found |
 
 ### Exit codes
 `0` ok · `1` failure (compile errors, Unity abort/crash, build/import/exec failed, no results XML, no tests ran) ·

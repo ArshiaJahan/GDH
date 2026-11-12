@@ -215,5 +215,9 @@ export type UnityState = {
   actions: string[];
   busy: { label: string; job_id: string } | null;
   pipeline_in_manifest: string | null; mcp_in_manifest: boolean;
+  /** batch jobs run on a copy of the project while the Editor holds it ([unity].clone_when_open = "always") */
+  clone?: boolean;
+  /** the headless-ops harness editor scripts (HarnessCli); offer = show install_harness */
+  harness?: { installed: boolean; version?: number | null; current_version?: number; outdated?: boolean; modified?: string[]; path?: string; offer?: boolean };
 };
 export type UnityInfo = { cli: UnityCliInfo; editors: { version: string; architecture?: string; location: string }[]; config: Record<string, any> };

@@ -328,7 +328,7 @@ async def test_editor_open_without_pipeline_offers_actions(app, proj, fake_cli):
     b = bridge(app, open_=True)
     s = session(app, proj)
     st = await b.editor_state(s)
-    assert st.mode == "unavailable" and st.actions == ["install_pipeline", "use_mcp_once", "close_editor"]
+    assert st.mode == "unavailable" and st.actions == ["install_pipeline", "use_mcp_once", "use_clone", "close_editor"]
     assert st.live["state"] == "absent"
     r = await b.compile(s, consent=consent(app, proj))
     assert r.status == "skipped" and fake_cli.calls_of("run") == [] and fake_cli.calls_of("recompile") == []

@@ -149,7 +149,8 @@ keep an explicit **Save**.
   [Unity: MCP or CLI](#unity-mcp-or-cli)), `auto_live_order`, `cli_path` (empty: find the Unity
   CLI), `editor_path` / `editor_root`, `pipeline_version` (what "Install Pipeline package" pins),
   the Unity job timeouts (`live_timeout_s`, `live_test_timeout_s`, `batch_timeout_s`,
-  `test_timeout_s`, `build_timeout_s`), `nographics`, `extra_editor_args` and `eval` (`ask` | `off`).
+  `test_timeout_s`, `build_timeout_s`), `nographics`, `extra_editor_args` and `eval` (`ask` | `off`), `harness_scripts` (`ask` | `never`),
+  `harness_git_exclude` (default `true`) and `clone_when_open` (`ask` | `never` | `always`).
   Settings → Unity edits it.
 - `[data_policy]` which providers may receive files you mark sensitive.
 - `[models."…"]` the model catalog: prices per million tokens, context windows, accepted effort
@@ -801,12 +802,16 @@ The agent's `unity` tool also offers `eval` (C# in the Editor; always shown to y
 
 **Editor open, no live route.** Batch mode can never open a project an Editor holds, so nothing runs
 in batch then. In `auto`, MCP is used when it's connected. Otherwise the gates report *skipped* with
-the reason, and the chip offers:
+the reason, and the chip offers these actions, in this order (install Pipeline, use MCP once, run on
+a copy, close Unity):
 - **Install Pipeline package**: `unity pipeline install --package-version 1.0.0` (pinned), behind a
   card; it changes `Packages/manifest.json` (a tracked file). Unity loads it the next time its
   window gets focus ("Switch to the Unity window once").
 - **Use MCP for this check** (when MCP for Unity is in the project): one compile over MCP, the
   setting unchanged.
+- **Run on a copy**: the compile or tests run on a copy of the project instead (see
+  [Run on a copy](#run-on-a-copy-while-the-editor-is-open) below). With
+  `clone_when_open = "always"` this happens without the chip action.
 - **Close Unity**: `unity close`, behind a card that says Unity exits **without saving**. Never
   automatic, never forced.
 
@@ -840,10 +845,58 @@ made during a long compile isn't covered by it. `unity test … --output X` or `
 **MCP stays off in CLI mode.** With the `cli` backend, invoking a Unity skill doesn't turn on the
 `unity` MCP server (`[unity] mcp_server`).
 
-**Not yet:** running batch jobs on an APFS copy while the Editor holds the project
-(`clone_when_open`), installing the headless-ops HarnessCli editor scripts on demand
-(`harness_scripts`; `import`, forced recompiles and development builds use `unity.sh`, which needs
-them in the project), menu items in batch mode, and a warm `unity shell` process for live calls.
+**Harness editor scripts.** Asset import, menu items with the Editor closed, a forced clean
+recompile, a development build and `Harness.*` exec methods need `HarnessCli` (the `headless-ops`
+editor scripts) in the project. When they're missing, the `unity` tool returns a "needs harness"
+result instead of failing, and the chip offers **Install harness editor scripts** behind an approval
+card.
+- It copies 3 files (`HarnessCli.cs`, `HarnessArgs.cs`, `Harness.Headless.Editor.asmdef`) into
+  `Assets/Harness/Headless/Editor/`, with fixed `.meta` GUIDs so every machine gets the same ones.
+- It adds `Assets/Harness/Headless/` and `Assets/Harness/Headless.meta` (plus `Assets/Harness.meta` when
+  it created `Assets/Harness/`) to `.git/info/exclude` (your local, untracked ignore list), so no tracked
+  file changes and nothing shows up in `git status`. Other skills' code under `Assets/Harness/` stays
+  tracked as usual. Set
+  `harness_git_exclude = false` if you want to commit the scripts instead.
+- It never overwrites a file you edited. An older install (`// harness-version: N` in the header) is
+  upgraded only after you agree on a card.
+- Removing the scripts is manual: delete `Assets/Harness/Headless` and its `.meta`, and the lines
+  under the GameDevWorkstation header in `.git/info/exclude`.
+- `[unity] harness_scripts = "ask"` (default) offers the install; `"never"` stops offering it, and
+  those ops then report what's missing.
+
+**Menu items in batch.** `HarnessCli.MenuItem` runs one menu item with the Editor closed: it passes
+`-menu "Path/To/Item"`, calls `EditorApplication.ExecuteMenuItem`, runs `AssetDatabase.SaveAssets()`
+and exits one tick later (the same deferred exit as the other entry points). So the `menu` op now works
+in batch too, and needs the harness scripts. `-buildOutput` is accepted as an alias of `-out`.
+
+### Run on a copy while the Editor is open
+
+When Unity holds the project and no live route is available in `cli` or `auto` mode, compile and tests can
+run on a copy of the project instead of waiting for you to close Unity. The copy lives at
+`~/Library/Caches/GameDevWorkstation/unity-clones/<hash>/`. The first time it's made with `cp -cR`
+(an APFS clone, so it costs almost no disk and keeps `Library/`, which makes the first import fast);
+later runs only `rsync` `Assets/`, `Packages/` and `ProjectSettings/` over it. Your project is never
+written to.
+
+Results from a copy are labelled **"on a copy of the files on disk (unsaved Editor changes not
+included)"**: the copy sees what is saved, not what is open and unsaved in the Editor, so save first
+when it matters.
+
+`[unity] clone_when_open`: `"ask"` (default) offers **Run on a copy** in the chip, `"never"` removes the action
+(and refuses it), `"always"` runs compile, tests and gates on the copy automatically while Unity is open.
+Builds and exec never run on a copy. Set it in Settings → Unity. The copies are
+a cache; deleting the folder only means the next run makes the copy again.
+
+**What the agent already knows.** At session start the project context pack includes one line,
+`Unity: backend=… route=… (…)`, with the backend, the route the next job takes and why, so
+the agent doesn't need to work it out first.
+
+**Skill index.** The `unity-mcp-orchestrator` skill is hidden from the index when the backend is
+`cli`, or when the backend is `auto` and the route checked at session start is `cli_live`, `cli_batch`
+or `raw_batch`. This is decided once at session start; **Refresh context** updates it. The skill can
+still be pinned or invoked by name.
+
+**Not yet:** a warm `unity shell` process for live calls.
 
 **Trailers (`trailer-maker`).** What it needs beyond the Unity pack:
 

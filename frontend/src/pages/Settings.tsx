@@ -468,6 +468,19 @@ export function UnitySettings({ st, save }: { st: any; save: Save }) {
           <option value="ask">ask</option><option value="off">off</option>
         </select>
       </Row>
+      <Row label="Editor open: run on a copy" hint="Compile/tests on a copy of the files on disk while Unity holds the project">
+        <select className="input w-40" value={u.clone_when_open ?? "ask"} aria-label="Run on a copy" onChange={(e) => save({ unity: { clone_when_open: e.target.value } }, "Run on a copy")}>
+          <option value="ask">ask</option><option value="always">always</option><option value="never">never</option>
+        </select>
+      </Row>
+      <Row label="Harness editor scripts" hint="HarnessCli for import, batch menu items, forced recompiles and dev builds">
+        <select className="input w-40" value={u.harness_scripts ?? "ask"} aria-label="Harness editor scripts" onChange={(e) => save({ unity: { harness_scripts: e.target.value } }, "Harness editor scripts")}>
+          <option value="ask">offer when needed</option><option value="never">never</option>
+        </select>
+      </Row>
+      <Row label="Keep harness scripts out of git" hint="Adds them to .git/info/exclude (local only)">
+        <input type="checkbox" checked={u.harness_git_exclude ?? true} aria-label="Keep harness scripts out of git" onChange={(e) => save({ unity: { harness_git_exclude: e.target.checked } }, "Keep harness scripts out of git")} />
+      </Row>
       <Row label="No graphics" hint="Batch jobs run with -nographics">
         <input type="checkbox" checked={!!u.nographics} aria-label="No graphics" onChange={(e) => save({ unity: { nographics: e.target.checked } }, "No graphics")} />
       </Row>

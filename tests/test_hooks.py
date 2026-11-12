@@ -407,7 +407,8 @@ async def test_context_pack_is_built_once_and_stays_frozen(app, folder):
     await turn(app, s["id"])
     pack = app.store.get(s["id"])["settings"]["context_pack"]
     sys1 = app.fake.calls[0].system[-1]
-    assert sys1 == pack["text"] and pack["sources"] == ["PROJECT.md", "TASTE.md", "POSTMORTEMS.md"]
+    assert sys1 == pack["text"] and pack["sources"] == ["unity", "PROJECT.md", "TASTE.md", "POSTMORTEMS.md"]
+    assert "\nUnity: backend=auto route=" in sys1
     assert "M3 Boss rush" in sys1 and "crunchy" in sys1 and "no screen shake" in sys1
     assert sys1.index("PM-002") < sys1.index("PM-001") and len(sys1) <= H.CONTEXT_PACK_MAX
     (folder / "PROJECT.md").write_text("## Current milestone\nM4 Something else\n")
@@ -419,6 +420,80 @@ async def test_context_pack_is_built_once_and_stays_frozen(app, folder):
     other = session(app, folder.parent)
     await turn(app, other["id"])
     assert "context_pack" not in app.store.get(other["id"])["settings"]
+
+
+def fake_bridge(app, state=None):
+    from gamedevworkstation.features.unity_bridge import FakeUnityBridge
+
+    b = app.extensions["unity_bridge"] = FakeUnityBridge(app, state=state)
+    return b
+
+
+PROGRESSIVE = {"skill_mode": "progressive", "pinned_skills": ["delegation"], "loaded_skills": []}
+
+
+async def test_context_pack_unity_line_freezes_route_and_hides_mcp_skill(app, folder):
+    from gamedevworkstation.features.unity_bridge import EditorState
+
+    unity_project(folder)  # no PROJECT.md: the Unity line alone makes a pack
+    fake_bridge(app, EditorState("cli_batch", True, backend="cli", cli={"version": "1.0.0-beta.13", "ok": True}))
+    s = session(app, folder, **PROGRESSIVE)
+    await turn(app, s["id"])
+    st = app.store.get(s["id"])["settings"]
+    pack, route = st["context_pack"], st["unity_route"]
+    assert pack["sources"] == ["unity"] and len(pack["text"]) <= H.CONTEXT_PACK_MAX
+    assert "Unity: backend=cli route=cli_batch (Editor closed; Unity CLI 1.0.0-beta.13)" in pack["text"]
+    assert route["backend"] == "cli" and route["route"] == "cli_batch"
+    system = "\n".join(app.fake.calls[0].system)
+    assert "<skill-index>" in system and "- unity-mcp-orchestrator:" not in system and "- unity-router:" in system
+    # The route changes mid-session (Editor opened with MCP): prompt and index stay as frozen.
+    get_bridge = app.extensions["unity_bridge"]
+    get_bridge.state = EditorState("mcp", True, True, True, backend="auto")
+    await turn(app, s["id"], "next")
+    assert app.fake.calls[-1].system == app.fake.calls[0].system
+    # Refresh rebuilds the line and the route (the cache starts over once anyway).
+    new = await eng(app).unity_route(app.store.get(s["id"]))
+    pack2 = eng(app).refresh_context_pack(s["id"], unity=new)
+    assert "Unity: backend=auto route=mcp (Editor open; MCP for Unity connected; Unity CLI not found)" in pack2["text"]
+    assert app.store.get(s["id"])["settings"]["unity_route"]["route"] == "mcp"
+
+
+async def test_context_pack_unity_route_unknown_when_the_probe_is_slow(app, folder):
+    from gamedevworkstation.features.unity_bridge import FakeUnityBridge
+
+    class Slow(FakeUnityBridge):
+        async def editor_state(self, session, op="compile", **kw):
+            await asyncio.sleep(0.5)
+            return await super().editor_state(session, op, **kw)
+
+    unity_project(folder)
+    app.extensions["unity_bridge"] = Slow(app)
+    app.config.hooks["unity_route_probe_s"] = 0.05
+    s = session(app, folder, **PROGRESSIVE)
+    t0 = time.monotonic()
+    await turn(app, s["id"])
+    assert time.monotonic() - t0 < 0.45  # didn't wait for the probe
+    st = app.store.get(s["id"])["settings"]
+    assert "Unity: backend=auto route=unknown (the route check took over 0.05 s)" in st["context_pack"]["text"]
+    assert 'op="status"' in st["context_pack"]["text"] and st["unity_route"]["route"] == "unknown"
+    assert "- unity-mcp-orchestrator:" in "\n".join(app.fake.calls[0].system)  # unknown: not hidden
+    # Without a probe result (sync rebuild), the line still says so instead of disappearing.
+    pack = H.build_context_pack(app, app.store.get(s["id"]))
+    assert "Unity: backend=auto route=unknown (not checked)" in pack["text"] and pack["sources"] == ["unity"]
+    await eng(app).aclose()
+
+
+async def test_context_pack_unity_route_mcp_keeps_the_mcp_skill(app, folder):
+    from gamedevworkstation.features.unity_bridge import EditorState
+
+    unity_project(folder)
+    fake_bridge(app, EditorState("mcp", True, True, True, backend="auto"))
+    s = session(app, folder, **PROGRESSIVE)
+    await turn(app, s["id"])
+    st = app.store.get(s["id"])["settings"]
+    assert "Unity: backend=auto route=mcp (Editor open; MCP for Unity connected; Unity CLI not found)" \
+        in st["context_pack"]["text"]
+    assert "- unity-mcp-orchestrator:" in "\n".join(app.fake.calls[0].system)
 
 
 async def test_backlog_lint_note_after_write(app, folder):
@@ -479,6 +554,8 @@ def test_routes(tmp_path, folder):
         assert c.get("/api/hooks", headers=h).status_code == 400
         assert c.get("/api/hooks/unity", params={"session_id": s["id"]}, headers=h).json()["unity_project"] is True
         r = c.post("/api/hooks/context_pack", json={"session_id": s["id"]}, headers=h).json()
-        assert r["context_pack"] is None  # a Unity project with nothing to pack yet
+        # A Unity project with nothing else to pack still gets the Unity route line (checked now).
+        assert r["context_pack"]["sources"] == ["unity"] and "\nUnity: backend=" in r["context_pack"]["text"]
+        assert "route=unknown" not in r["context_pack"]["text"]
     row = st.db.one("SELECT detail FROM hook_trust WHERE kind='preset'")
     assert row is None  # disabled again

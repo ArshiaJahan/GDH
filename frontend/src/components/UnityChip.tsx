@@ -10,7 +10,10 @@ const ACTION_LABEL: Record<string, string> = {
   use_mcp_once: "Use MCP for this check",
   use_clone: "Run on a copy of the files",
   close_editor: "Close Unity (exits without saving)",
+  install_harness: "Install harness editor scripts (3 files, local only)",
 };
+/** Actions that make sense whatever the route (the others only for an open Editor without a bridge). */
+const ANY_ROUTE = new Set(["install_harness"]);
 const BACKENDS: [UnityBackend | "", string][] = [["", "Project default"], ["auto", "Auto"], ["mcp", "MCP"], ["cli", "CLI"]];
 const WARN = "var(--warn, #c98a00)";
 
@@ -57,7 +60,7 @@ export function UnityChip({ sessionId }: { sessionId: string }) {
   else if (safe) { label = "Safe Mode"; color = "var(--bad)"; tip = "compile errors at boot"; }
   else if (route === "unavailable" && st.editor_open) { label = "Editor open — no bridge"; color = WARN; tip = st.reason; }
   else if (route === "unavailable") { label = "unavailable"; tip = st.reason; }
-  else { label = UNITY_ROUTE_LABEL[route] ?? route; tip = st.reason; }
+  else { label = (UNITY_ROUTE_LABEL[route] ?? route) + (st.clone ? " · on a copy" : ""); tip = st.reason; }
   tip = tip || `Unity route: ${UNITY_ROUTE_LABEL[route] ?? route}`;
   const aria = st.busy ? "Unity: busy" : safe ? "Unity: Safe Mode" : `Unity: ${UNITY_ROUTE_LABEL[route] ?? route}${route === "unavailable" && st.editor_open ? ", Editor open" : ""}`;
 
@@ -78,6 +81,9 @@ export function UnityChip({ sessionId }: { sessionId: string }) {
     try { await post(`/unity/jobs/${st.busy.job_id}/cancel`, {}); actions.toast("Cancelling the Unity job"); } catch (e: any) { actions.toast(e.message, "error"); }
   };
   const cur = (st.session_backend ?? "") as UnityBackend | "";
+  const shown = st.actions.filter((a) => a in ACTION_LABEL && (ANY_ROUTE.has(a) || (route === "unavailable" && st.editor_open)));
+  const actionLabel = (a: string) => a === "install_harness" && st.harness?.outdated
+    ? `Update harness editor scripts (version ${st.harness.version ?? "?"} → ${st.harness.current_version ?? "?"})` : ACTION_LABEL[a];
   const item = "block w-full text-left px-2 py-1 rounded hover:bg-sunken text-[12px]";
 
   return (
@@ -95,8 +101,8 @@ export function UnityChip({ sessionId }: { sessionId: string }) {
               <button role="menuitem" className={item} onClick={cancel}>Cancel</button>
             </>
           )}
-          {route === "unavailable" && st.editor_open && st.actions.filter((a) => a in ACTION_LABEL).map((a) => (
-            <button key={a} role="menuitem" className={item} onClick={() => act(a)}>{ACTION_LABEL[a]}</button>
+          {shown.map((a) => (
+            <button key={a} role="menuitem" className={item} onClick={() => act(a)}>{actionLabel(a)}</button>
           ))}
           {st.reason && <div className="px-2 py-1 text-[11.5px] text-muted">{st.reason}</div>}
         </div>

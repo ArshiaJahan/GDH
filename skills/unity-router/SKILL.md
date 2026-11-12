@@ -23,8 +23,10 @@ Tools are MCP for Unity 10.3 tools; your client may prefix them (e.g. mcp__Unity
 6. When the stage is done (its skill's Verify passed), drop that skill and route again for the next stage.
 
 ## Execution mode: MCP or batchmode
-In GameDevWorkstation the harness decides this for you (the user's **Unity backend**: auto | mcp | cli). Call the `unity` tool
-with `op="status"` first: it reports the backend and the route now (`mcp`, `cli_live` = official Unity CLI against the
+In GameDevWorkstation the harness decides this for you (the user's **Unity backend**: auto | mcp | cli) and tells you the
+route: the project context has a line like `Unity: backend=cli route=cli_batch (Editor closed; Unity CLI 1.0.0-beta.13)`,
+checked at session start. Call the `unity` tool with `op="status"` only when it says `route=unknown` or after the editor
+opens or closes (routes: `mcp`, `cli_live` = official Unity CLI against the
 open Editor, `cli_batch` = Unity CLI batch run, `raw_batch` = headless-ops unity.sh, or `unavailable` with the reason).
 Then use the `unity` tool for compile / test / build / exec / eval / screenshot / play on every route, and the MCP for
 Unity tools only when the route is `mcp` (with the `cli` backend they are off). Never switch the backend yourself; if
