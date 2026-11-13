@@ -1,6 +1,6 @@
 [project]
 name = "gamedevworkstation"
-version = "0.5.0"
+version = "0.5.1"
 description = "Personal agent workstation: Claude orchestrator + Codex + ElevenLabs"
 requires-python = ">=3.11"
 dependencies = [
