@@ -124,9 +124,9 @@ describe("NewSession", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we work on, Arshia J.?");
     expect(box().placeholder).toContain("type / for commands and skills");
     expect(select("Location").value).toBe("chat");
-    // Claude models only, with tier labels; Opus (the orchestrator's model) by default.
+    // Claude models only, by name (the tier is in the tooltip); Opus (the orchestrator's model) by default.
     expect(optionValues("Model")).toEqual(["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]);
-    expect(select("Model").selectedOptions[0].textContent).toBe("Opus 5.5 · claude.deep");
+    expect(select("Model").selectedOptions[0].textContent).toBe("Opus 5.5");
     expect(select("Effort").value).toBe("medium");
     // GDW's modes only: no bypass.
     expect(optionValues("Permission mode")).toEqual(["plan", "ask", "accept_edits"]);

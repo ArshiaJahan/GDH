@@ -3,19 +3,20 @@
 // Code on the user's own Claude subscription (harness claude_code). Chat only = no folder: Claude
 // Code works in a private scratch folder; Folder = it works in that project folder. The session is
 // created when the first message is sent.
-import { ChevronDown, Folder } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Folder } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { get } from "../lib/api";
 import { pickFolder } from "../lib/native";
 import { sessionActions } from "../lib/sessions";
 import { useStore, type Session } from "../lib/store";
 import { ClaudeStatusNotice, useClaudeStatus } from "./ClaudeCode";
-import { Composer, EFFORTS, type ComposerDraft } from "./Composer";
-import { modelLabel, providerModels, useModelCatalog } from "./ui";
+import { EffortSelect, EFFORTS, folderName, ModelSelect, ModeSelect, NEW_SESSION_MODES, TextSelect, tilde } from "./ClaudeCard";
+import { Composer, type ComposerDraft } from "./Composer";
+import { providerModels, useModelCatalog } from "./ui";
+
+export { folderName, NEW_SESSION_MODES };
 
 export type Location = "chat" | "folder";
-/** The permission modes a session can have, in menu order (no bypass mode: see store.SESSION_MODES). */
-export const NEW_SESSION_MODES: [string, string][] = [["plan", "Plan only"], ["ask", "Ask before edits"], ["accept_edits", "Accept edits"]];
 export const PLACEHOLDER = "Describe a task, or type / for commands and skills, /task for a Kanban card…";
 const PREFS_KEY = "newSession.prefs";
 const RECENT_MAX = 6;
@@ -35,9 +36,6 @@ function savePrefs(p: Prefs) {
   try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch { /* private window: not remembered */ }
 }
 
-/** "/Users/me/Games/Forklift" → "Forklift". */
-export const folderName = (f: string) => f.replace(/\/+$/, "").split("/").pop() || f;
-const tilde = (f: string) => f.replace(/^\/Users\/[^/]+/, "~");
 
 /** Folders of recent sessions, most recently active first (Trash left out). */
 export function recentFolders(sessions: Session[], max = RECENT_MAX): string[] {
@@ -48,21 +46,6 @@ export function recentFolders(sessions: Session[], max = RECENT_MAX): string[] {
     if (out.length >= max) break;
   }
   return out;
-}
-
-/** A borderless dropdown that reads as text with a chevron (a native <select> underneath). */
-function TextSelect({ label, value, onChange, children, className = "", title }: {
-  label: string; value: string; onChange: (v: string) => void; children: ReactNode; className?: string; title?: string;
-}) {
-  return (
-    <span className={`relative inline-flex items-center rounded-md hover:bg-sunken focus-within:bg-sunken ${className}`} title={title}>
-      <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}
-        className="appearance-none bg-transparent text-text text-[14px] leading-6 pl-2 pr-7 py-1 rounded-md cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-action max-w-full truncate">
-        {children}
-      </select>
-      <ChevronDown size={15} className="absolute right-2 text-muted pointer-events-none" aria-hidden />
-    </span>
-  );
 }
 
 export function NewSession() {
@@ -135,19 +118,11 @@ export function NewSession() {
             <Folder size={15} className="shrink-0" aria-hidden /><span className="truncate max-w-[220px]">{folder ? folderName(folder) : "Choose a folder…"}</span>
           </button>
         )}
-        <TextSelect label="Model" value={model} onChange={(v) => setPrefs({ model: v })} className="ml-auto min-w-0">
-          {!models.some((m) => m.id === model) && <option value={model}>{modelLabel(model)}</option>}
-          {models.map((m) => <option key={m.id} value={m.id}>{modelLabel(m.id)}</option>)}
-        </TextSelect>
+        <ModelSelect value={model} onChange={(v) => setPrefs({ model: v })} />
       </>,
       <>
-        <TextSelect label="Effort" value={effort} onChange={(v) => setPrefs({ effort: v })}
-          title={["xhigh", "max"].includes(effort) ? "Effort above high asks for approval on each turn" : "How hard Claude thinks"}>
-          {EFFORTS.map((e) => <option key={e} value={e}>{e} effort</option>)}
-        </TextSelect>
-        <TextSelect label="Permission mode" value={mode} onChange={(v) => setPrefs({ mode: v })}>
-          {NEW_SESSION_MODES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </TextSelect>
+        <EffortSelect value={effort} onChange={(v) => setPrefs({ effort: v })} />
+        <ModeSelect value={mode} onChange={(v) => setPrefs({ mode: v })} />
       </>,
     ],
   };

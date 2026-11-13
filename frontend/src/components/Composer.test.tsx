@@ -4,7 +4,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const get = vi.hoisted(() => vi.fn(async (path: string): Promise<any> => (path === "/skills" ? { skills: [] } : [])));
 const post = vi.hoisted(() => vi.fn(async (_path: string, _body?: unknown): Promise<any> => ({ code: "Task00007", column: "Backlog" })));
-vi.mock("../lib/api", () => ({ get, post, patch: vi.fn(), upload: vi.fn() }));
+const patch = vi.hoisted(() => vi.fn(async (_path: string, _body?: unknown): Promise<any> => ({})));
+vi.mock("../lib/api", () => ({ get, post, patch, upload: vi.fn() }));
+vi.mock("../lib/native", () => ({ revealInFinder: vi.fn(async () => true) }));
 const chains = vi.hoisted(() => vi.fn(async () => ({
   templates: [{ id: "bugfix", title: "Bug fix", summary: "repro, fix, verify", kinds: ["chain", "campaign"], phases: [{ name: "Repro" }, { name: "Fix" }] }],
   errors: [],
@@ -14,7 +16,8 @@ vi.mock("../lib/campaigns", async (orig) => ({ ...(await orig<any>()), campaigns
 const toast = vi.hoisted(() => vi.fn());
 vi.mock("../lib/store", () => ({
   actions: { toast, setSkillChip: vi.fn(), go: vi.fn(), onEvent: () => () => {} },
-  useStore: (sel: (s: any) => unknown) => sel({ appState: { tiers: {}, models: {} }, drafts: {}, skillChips: {} }),
+  useStore: Object.assign((sel: (s: any) => unknown) => sel({ appState: { tiers: {}, models: {} }, drafts: {}, skillChips: {} }),
+    { getState: () => ({ appState: { tiers: {}, models: {} } }) }),
 }));
 
 import { Composer } from "./Composer";
@@ -26,6 +29,30 @@ const options = () => screen.queryAllByRole("option").map((o) => o.textContent ?
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
+describe("Claude Code session chat box", () => {
+  it.each([["/p/game", "game"], [null, "Chat only"]])("is the Claude card: place %s, model, effort and permission selectors", async (folder, place) => {
+    render(<Composer session={{ ...SESSION, folder, harness: "claude_code", model: "claude-opus-5-5", effort: "high", mode: "ask" }} running={false} />);
+    await act(async () => {});
+    expect(screen.getByTestId("session-place").textContent).toBe(place);
+    expect((screen.getByLabelText("Model") as HTMLSelectElement).value).toBe("claude-opus-5-5");
+    expect((screen.getByLabelText("Effort") as HTMLSelectElement).value).toBe("high");
+    const mode = screen.getByLabelText("Permission mode") as HTMLSelectElement;
+    expect(Array.from(mode.options).map((o) => o.value)).toEqual(["plan", "ask", "accept_edits"]); // no bypass
+    expect(screen.getByLabelText("Attach files")).toBeTruthy();
+    await act(async () => { fireEvent.change(mode, { target: { value: "plan" } }); });
+    expect(patch).toHaveBeenCalledWith("/sessions/s1", { mode: "plan" });
+    await act(async () => { fireEvent.change(screen.getByLabelText("Effort"), { target: { value: "low" } }); });
+    expect(patch).toHaveBeenCalledWith("/sessions/s1", { effort: "low" });
+  });
+
+  it("keeps the plain chat box for built-in sessions", async () => {
+    render(<Composer session={{ ...SESSION, harness: "builtin" }} running={false} />);
+    await act(async () => {});
+    expect(screen.queryByLabelText("Permission mode")).toBeNull();
+    expect(screen.getByRole("button", { name: "Use a skill" })).toBeTruthy();
+  });
+});
+
 describe("Composer slash commands", () => {
   it.each([false, true])("hides workflows and explains /workflow for Claude subscription sessions (draft=%s)", async (draft) => {
     render(<Composer session={{ ...SESSION, harness: "claude_code" }} running={false}
@@ -34,7 +61,7 @@ describe("Composer slash commands", () => {
     expect(chains).not.toHaveBeenCalled();
     await type("/");
     expect(options().some((o) => o.startsWith("/workflow"))).toBe(false);
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: draft ? "Tools" : "Use a skill" })); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Tools" })); });
     expect(screen.getByRole("dialog", { name: "Use a skill" }).textContent).not.toContain("Bug fix");
     fireEvent.keyDown(document, { key: "Escape" });
     await type("/workflow bugfix fix it");

@@ -10,7 +10,9 @@ import { modelLabel } from "./ui";
 
 export type Att = { path: string; name: string; mime: string; size?: number; item_id?: string; text?: string };
 
-export const EFFORTS = ["none", "low", "medium", "high", "xhigh", "max"];
+import { EFFORTS, sessionCardRows } from "./ClaudeCard";
+
+export { EFFORTS };
 export const MODES: Record<string, string> = { ask: "Ask before edits", accept_edits: "Accept edits", plan: "Plan only" };
 
 /** The new-session screen's composer: no session exists yet. The settings live on the screen
@@ -424,6 +426,9 @@ export function Composer({ session, running, draft }: { session: Session; runnin
       onPick={(n) => { setSkill(n); setSkillMenu(false); ta.current?.focus(); }} />
   );
   const canSend = !(busy || running || (!text.trim() && !atts.length && !skill && !workflow));
+  // The Claude-style card: the new-session screen, and the chat box of a Claude Code session.
+  const card = draft ? { rows: draft.rows, placeholder: draft.placeholder }
+    : session.harness === "claude_code" ? { rows: sessionCardRows(session), placeholder: "Reply to Claude, or type / for commands and skills…" } : null;
   const textarea = (
     <textarea
       id="composer"
@@ -431,10 +436,10 @@ export function Composer({ session, running, draft }: { session: Session; runnin
       rows={draft ? 2 : 1}
       value={text}
       aria-label={draft ? "Describe a task" : undefined}
-      placeholder={running ? "Agent is working… (Stop to interrupt)" : workflow ? `What should the ${workflow.title} workflow do?` : skill ? `What should ${skill} work on? (or send as is)` : draft ? draft.placeholder : "Message the agent, or / for commands"}
-      className={draft ? "w-full resize-none bg-transparent outline-none focus-visible:outline-none px-1 py-0.5 min-h-[52px] max-h-72 text-[15px] leading-[1.6] placeholder:text-faint"
+      placeholder={running ? "Agent is working… (Stop to interrupt)" : workflow ? `What should the ${workflow.title} workflow do?` : skill ? `What should ${skill} work on? (or send as is)` : card ? card.placeholder : "Message the agent, or / for commands"}
+      className={card ? `w-full resize-none bg-transparent outline-none focus-visible:outline-none px-1 py-0.5 ${draft ? "min-h-[52px]" : "min-h-[28px]"} max-h-72 text-[15px] leading-[1.6] placeholder:text-faint`
         : "flex-1 resize-none bg-transparent outline-none focus-visible:outline-none py-1 max-h-60 leading-6"}
-      onChange={(e) => { setText(e.target.value); setSel(0); e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, draft ? 288 : 240)}px`; }}
+      onChange={(e) => { setText(e.target.value); setSel(0); e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, card ? 288 : 240)}px`; }}
       onPaste={(e) => { if (e.clipboardData.files.length) { e.preventDefault(); addFiles(e.clipboardData.files); } }}
       onKeyDown={(e) => {
         if (suggestions.length && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
@@ -456,28 +461,40 @@ export function Composer({ session, running, draft }: { session: Session; runnin
     />
   );
 
-  if (draft) {
-    // The new-session card: the editor, then the screen's settings and Tools, then Send.
-    return (
+  if (card) {
+    // The editor, then the controls (paperclip, place, model; effort, mode, Tools), then Send.
+    const box = (
       <div className={`relative rounded-[20px] border border-line surface-raised px-4 pt-3.5 pb-2.5 shadow-[0_1px_2px_rgb(0_0_0/0.04),0_6px_24px_-8px_rgb(0_0_0/0.10)] focus-within:border-[color-mix(in_srgb,var(--action)_35%,var(--line))] ${drag ? "outline-2 outline-dashed outline-action -outline-offset-4" : ""}`}
         onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
         onDragLeave={() => setDrag(false)}
         onDrop={(e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); }}>
         {chips}
         {textarea}
-        {suggestionList}
-        <div className="mt-2 flex items-center gap-1 min-w-0">{draft.rows[0]}</div>
-        <div className="mt-1 flex items-center gap-1 min-w-0">
+        {draft && suggestionList}
+        <div className="mt-2 flex items-center gap-1 min-w-0">
           <button className="btn btn-ghost px-2 shrink-0" title="Attach files (images, PDFs, text)" aria-label="Attach files" onClick={() => fileIn.current?.click()}><Paperclip size={15} /></button>
           <input ref={fileIn} type="file" multiple hidden onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }} />
-          {draft.rows[1]}
+          {card.rows[0]}
+        </div>
+        <div className="mt-1 flex items-center gap-1 min-w-0">
+          {card.rows[1]}
           <div className="relative">
             <button className={`btn btn-ghost gap-1.5 px-2 text-[14px] ${skill || workflow ? "text-action" : ""}`} title="Skills for this message" aria-label="Tools"
               aria-haspopup="dialog" aria-expanded={skillMenu} onClick={openSkills}><Plug size={15} aria-hidden />Tools</button>
             {skillPicker}
           </div>
+          {!draft && <UnityChip sessionId={session.id} />}
           <button className="ml-auto shrink-0 size-9 rounded-full inline-flex items-center justify-center bg-action text-action-text transition hover:brightness-110 disabled:opacity-35 disabled:hover:brightness-100"
-            disabled={!canSend} onClick={send} aria-label="Send" title="Start the session (Enter)"><ArrowUp size={18} strokeWidth={2.25} /></button>
+            disabled={!canSend} onClick={send} aria-label="Send" title={draft ? "Start the session (Enter)" : "Send (Enter)"}><ArrowUp size={18} strokeWidth={2.25} /></button>
+        </div>
+      </div>
+    );
+    if (draft) return box;
+    return (
+      <div className="shrink-0 surface px-4 pt-2 pb-4">
+        <div className="max-w-[780px] mx-auto relative">
+          {suggestionList}
+          {box}
         </div>
       </div>
     );

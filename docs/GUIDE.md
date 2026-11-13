@@ -732,6 +732,11 @@ directory and the folder scope of its approvals, removed when the session is del
 Older chat-only sessions keep `<data>/sessions/<session>` so Claude can find their transcripts
 when resuming.
 
+**The chat box.** A Claude Code session keeps the new-session screen's card after it starts: the
+paperclip, *Chat only* or the folder (fixed once the session has started; click the folder to show it in
+Finder), the model (Claude models by name), effort, permission mode (Plan only, Ask before edits,
+Accept edits), Tools and Send. Changing a dropdown updates the session; the next message uses it.
+
 **Attachments.** The paperclip works as in other sessions. Attached files go to Claude Code inside the
 message itself, the way the API takes them: images (already converted and shrunk at upload) and PDFs
 as base64, text files as text, audio as its transcript (when there is one), and other binary files
