@@ -66,7 +66,9 @@ from fastapi import APIRouter, Body, FastAPI, HTTPException
 
 from ..children import CHILDREN
 from ..config import data_dir, sessions_dir
-from ..core.types import Message, TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock, Usage, new_id
+from ..core.media import cap_media
+from ..core.types import (AudioBlock, FileBlock, ImageBlock, Message, TextBlock, ThinkingBlock, ToolResultBlock,
+                          ToolUseBlock, Usage, new_id)
 from ..providers.base import compute_cost
 from ..skills import turn_skill_segments
 from ..store import remove_claude_code_folder, valid_claude_code_session
@@ -220,6 +222,32 @@ def build_argv(cli: str, *, session_id: str | None, resume: str | None, model: s
     if bad:
         raise ValueError(f"refusing to start claude with {bad}")
     return argv
+
+
+MAX_TURN_MEDIA = 20_000_000  # base64 chars of attachments in one CLI message (the API caps requests at 32 MB)
+
+
+def _user_content(msgs: list[Message], recap: str | None) -> list[dict]:
+    """The `content` blocks of one CLI user message: the messages' text with their attachments inline,
+    as the Anthropic API takes them (images and PDFs base64, text files as text documents, audio as its
+    transcript), so Claude Code sees them without reading a path outside its folder. Each attachment
+    follows a one-line label with its name; the oldest are left out (with a note) over MAX_TURN_MEDIA."""
+    from ..providers.anthropic_provider import block_to_wire
+
+    out: list[dict] = [{"type": "text", "text": recap}] if recap else []
+    for m in msgs:
+        for b in m.content:
+            if isinstance(b, TextBlock):
+                if b.text:
+                    out.append({"type": "text", "text": b.text})
+            elif isinstance(b, (ImageBlock, FileBlock, AudioBlock)):
+                out.append({"type": "text", "text": f"[Attached {b.type}: {b.name or 'attachment'}]"})
+                if isinstance(b, AudioBlock) and not b.transcript:  # the built-in note names a tool Claude Code lacks
+                    out.append({"type": "text", "text": "[Audio: no transcript yet, so Claude can't hear it]"})
+                elif (w := block_to_wire(b, "user")) is not None:
+                    out.append(w)
+    wire = cap_media([{"role": "user", "content": out}], MAX_TURN_MEDIA)
+    return wire[0]["content"]
 
 
 def _block_text(content: Any) -> str:
@@ -735,11 +763,14 @@ class ClaudeCode:
         new = [m for m in tail if m.role == "user" and not m.meta.get("tool_results")]
         if not new:
             raise RuntimeError("No user message to answer")
-        text = "\n\n".join(t for t in (_prompt_text(m) for m in new) if t)
+        recap_text = None
         if recap and (h := self.app.extensions.get("harnesses")) is not None:
             if r := h._recap(sid, new[0]):  # type: ignore[attr-defined]
-                text = f"Earlier in this conversation:\n{r}\n\nNow: {text}"
-        return text, new[-1].id
+                recap_text = f"Earlier in this conversation:\n{r}\n\nNow: "
+        if not any(isinstance(b, (ImageBlock, FileBlock, AudioBlock)) for m in new for b in m.content):
+            text = "\n\n".join(t for t in (_prompt_text(m) for m in new) if t)
+            return (recap_text or "") + text, new[-1].id
+        return _user_content(new, recap_text), new[-1].id
 
     def _system_prompt(self, s: dict, cwd: Path) -> str:
         app = self.app

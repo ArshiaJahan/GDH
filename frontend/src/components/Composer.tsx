@@ -18,7 +18,7 @@ export const MODES: Record<string, string> = { ask: "Ask before edits", accept_e
 export type ComposerDraft = {
   set: (body: { model?: string; effort?: string; mode?: string }) => void;
   /** Create the session and send the first message; false when it didn't start (the text stays). */
-  start: (text: string, skill: string | null) => Promise<boolean>;
+  start: (text: string, skill: string | null, attachments: Att[]) => Promise<boolean>;
   /** The card's two control rows (location, folder, model; effort, mode). Tools and Send are added. */
   rows: [ReactNode, ReactNode];
   placeholder: string;
@@ -198,10 +198,10 @@ export function Composer({ session, running, draft }: { session: Session; runnin
   }, [text, commands, taskHits, taskCols, skills, workflows]);
 
   const addFiles = async (files: FileList | File[]) => {
-    if (draft) return; // the new-session screen has no attachments (Claude Code reads only its folder)
     setBusy(true);
     try {
-      const ups = await Promise.all(Array.from(files).map((f) => upload(f, session.id)));
+      // The new-session screen has no session yet: the files are filed under it when the first message is sent.
+      const ups = await Promise.all(Array.from(files).map((f) => upload(f, draft ? undefined : session.id)));
       setAtts((a) => [...a, ...ups]);
       const notes = ups.map((u) => u.note).filter(Boolean); // e.g. a HEIC photo converted to JPEG for the model
       if (notes.length) actions.toast(notes.join(" "));
@@ -321,7 +321,7 @@ export function Composer({ session, running, draft }: { session: Session; runnin
     setBusy(true);
     try {
       if (draft) {
-        if (!(await draft.start(t, sk))) return;
+        if (!(await draft.start(t, sk, atts))) return;
       } else await post(`/sessions/${session.id}/messages`, { text: t, attachments: atts, ...(sk ? { skill: sk } : {}) });
       setText("");
       setAtts([]);
@@ -435,7 +435,7 @@ export function Composer({ session, running, draft }: { session: Session; runnin
       className={draft ? "w-full resize-none bg-transparent outline-none focus-visible:outline-none px-1 py-0.5 min-h-[52px] max-h-72 text-[15px] leading-[1.6] placeholder:text-faint"
         : "flex-1 resize-none bg-transparent outline-none focus-visible:outline-none py-1 max-h-60 leading-6"}
       onChange={(e) => { setText(e.target.value); setSel(0); e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, draft ? 288 : 240)}px`; }}
-      onPaste={(e) => { if (!draft && e.clipboardData.files.length) { e.preventDefault(); addFiles(e.clipboardData.files); } }}
+      onPaste={(e) => { if (e.clipboardData.files.length) { e.preventDefault(); addFiles(e.clipboardData.files); } }}
       onKeyDown={(e) => {
         if (suggestions.length && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
           e.preventDefault();
@@ -459,12 +459,17 @@ export function Composer({ session, running, draft }: { session: Session; runnin
   if (draft) {
     // The new-session card: the editor, then the screen's settings and Tools, then Send.
     return (
-      <div className="relative rounded-[20px] border border-line surface-raised px-4 pt-3.5 pb-2.5 shadow-[0_1px_2px_rgb(0_0_0/0.04),0_6px_24px_-8px_rgb(0_0_0/0.10)] focus-within:border-[color-mix(in_srgb,var(--action)_35%,var(--line))]">
+      <div className={`relative rounded-[20px] border border-line surface-raised px-4 pt-3.5 pb-2.5 shadow-[0_1px_2px_rgb(0_0_0/0.04),0_6px_24px_-8px_rgb(0_0_0/0.10)] focus-within:border-[color-mix(in_srgb,var(--action)_35%,var(--line))] ${drag ? "outline-2 outline-dashed outline-action -outline-offset-4" : ""}`}
+        onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+        onDragLeave={() => setDrag(false)}
+        onDrop={(e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); }}>
         {chips}
         {textarea}
         {suggestionList}
         <div className="mt-2 flex items-center gap-1 min-w-0">{draft.rows[0]}</div>
         <div className="mt-1 flex items-center gap-1 min-w-0">
+          <button className="btn btn-ghost px-2 shrink-0" title="Attach files (images, PDFs, text)" aria-label="Attach files" onClick={() => fileIn.current?.click()}><Paperclip size={15} /></button>
+          <input ref={fileIn} type="file" multiple hidden onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }} />
           {draft.rows[1]}
           <div className="relative">
             <button className={`btn btn-ghost gap-1.5 px-2 text-[14px] ${skill || workflow ? "text-action" : ""}`} title="Skills for this message" aria-label="Tools"

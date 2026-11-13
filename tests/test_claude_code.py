@@ -5,6 +5,7 @@ GameDevWorkstation's MCP server over HTTP, as the real CLI does. Nothing here ru
 or touches ~/.claude, the Keychain or the real data dir (conftest isolates GDW_HOME; HOME is a
 temp folder too)."""
 import asyncio
+import base64
 import errno
 import json
 import os
@@ -1430,3 +1431,58 @@ def test_work_dir_rejects_invalid_session_ids(sid):
 @pytest.mark.parametrize("sid", ["a", "A0_-", "a" * 64])
 def test_work_dir_accepts_valid_session_ids(sid):
     assert ccm.work_dir(sid) == data_dir() / "claude_code" / sid / "work"
+
+
+# ---------------------------------------------------------------- attachments
+
+_PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+
+
+def test_attachments_reach_claude_code_inline(live, tmp_path):
+    """The paperclip: images, PDFs and text files go in the CLI user message as API content blocks,
+    each after a label with its name; Claude Code never has to read a path outside its folder."""
+    sid = live.session(_project(tmp_path))
+    ups = []
+    for name, data, mime in [("shot.png", _PNG, "image/png"), ("notes.txt", b"level 3 needs a door", "text/plain"),
+                             ("spec.pdf", b"%PDF-1.4\n%%EOF\n", "application/pdf")]:
+        r = live.c.post("/api/uploads", params={"session_id": sid}, files={"file": (name, data, mime)})
+        assert r.status_code == 200, r.text
+        ups.append(r.json())
+    r = live.c.post(f"/api/sessions/{sid}/messages", json={"text": "hello, look at these", "attachments": ups})
+    assert r.status_code == 200, r.text
+    live.wait_idle(sid)
+    ev = live.events("user")[-1]
+    assert [b["type"] for b in ev["blocks"]] == ["text", "text", "image", "text", "document", "text", "document"]
+    assert ev["blocks"][2]["media_type"] == "image/png" and ev["blocks"][2]["size"] > 0
+    assert ev["blocks"][6]["media_type"] == "application/pdf"
+    assert "[Attached image: shot.png]" in ev["text"] and "[Attached file: notes.txt]" in ev["text"]
+    assert live.msgs(sid)[-1]["content"][0]["text"] == "Hello from fake claude (turn 1)."
+    # a plain message stays a plain string
+    live.send(sid, "hello again")
+    live.wait_idle(sid)
+    assert "blocks" not in live.events("user")[-1]
+
+
+def test_attachments_over_the_turn_limit_become_a_note(tmp_path):
+    from gamedevworkstation.core.types import FileBlock, Message, TextBlock
+
+    big = tmp_path / "big.pdf"
+    big.write_bytes(b"%PDF-1.4\n" + b"x" * 2000)
+    small = tmp_path / "small.pdf"
+    small.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    m = Message(role="user", content=[TextBlock(text="read these"),
+                                      FileBlock(media_type="application/pdf", path=str(big), name="big.pdf"),
+                                      FileBlock(media_type="application/pdf", path=str(small), name="small.pdf")])
+    import gamedevworkstation.features.claude_code as ccm2
+
+    out = ccm2._user_content([m], "Earlier in this conversation:\nhi\n\nNow: ")
+    full = len(json.dumps(out))
+    assert out[0]["text"].startswith("Earlier in this conversation:") and out[1]["text"] == "read these"
+    orig = ccm2.MAX_TURN_MEDIA
+    try:
+        ccm2.MAX_TURN_MEDIA = 1000
+        capped = ccm2._user_content([m], None)
+    finally:
+        ccm2.MAX_TURN_MEDIA = orig
+    assert "left out of this request" in capped[2]["text"]  # the big (oldest) one; the newest stays
+    assert capped[4]["type"] == "document" and len(json.dumps(capped)) < full

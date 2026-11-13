@@ -498,5 +498,7 @@ while True:
     if m.get("type") == "user":
         content = m["message"]["content"]
         text = content if isinstance(content, str) else " ".join(b.get("text", "") for b in content)
-        log({"event": "user", "text": text})
+        log({"event": "user", "text": text, **({} if isinstance(content, str) else {"blocks": [
+            {"type": b.get("type"), **({"media_type": b["source"].get("media_type"), "size": len(b["source"].get("data") or "")}
+                                       if isinstance(b.get("source"), dict) else {})} for b in content]})})
         turn(text.split("Now: ")[-1])  # after a recap: the keyword is in the new message

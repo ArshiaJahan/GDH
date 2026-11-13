@@ -180,7 +180,11 @@ let starting: Promise<boolean> | null = null;
 
 /** What the new-session screen sends: every new session runs Claude Code on the user's Claude
  *  subscription (harness claude_code). No folder = chat only (a private scratch folder). */
-export type NewSessionRequest = { text: string; skill?: string | null; folder: string | null; model: string; effort: string; mode: string };
+export type NewSessionRequest = {
+  text: string; skill?: string | null; attachments?: NewSessionAttachment[]; folder: string | null; model: string; effort: string; mode: string;
+};
+/** A file uploaded on the new-session screen (POST /uploads before the session exists). */
+type NewSessionAttachment = { path: string; name: string; mime: string; item_id?: string; text?: string };
 
 export const sessionActions = {
   /** ⌘N / New session: the new-session screen. The session is made when its first message is sent
@@ -215,9 +219,9 @@ export const sessionActions = {
       }
       set((x) => ({ draftGroup: null, sessions: x.sessions.some((v) => v.id === s.id) ? x.sessions : [...x.sessions, s] }));
       try {
-        await post(`/sessions/${s.id}/messages`, { text: r.text, attachments: [], ...(r.skill ? { skill: r.skill } : {}) });
+        await post(`/sessions/${s.id}/messages`, { text: r.text, attachments: r.attachments ?? [], ...(r.skill ? { skill: r.skill } : {}) });
       } catch (e: any) {
-        actions.setDrafts(s.id, [...(st().drafts[s.id] ?? []), { kind: "text", text: r.text }]);
+        actions.setDrafts(s.id, [...(st().drafts[s.id] ?? []), ...(r.text ? [{ kind: "text" as const, text: r.text }] : []), ...(r.attachments ?? [])]);
         if (r.skill) actions.setSkillChip(s.id, r.skill);
         actions.toast(e?.message ?? String(e), "error");
         // openSession selects the session before loading its history. A second network

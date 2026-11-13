@@ -630,8 +630,7 @@ Every new session from this screen runs **Claude Code on your Claude subscriptio
 `[sessions].default_harness`); there's no harness choice. Sessions made before keep their harness,
 shown read-only in the Environment card. If the `claude` CLI is missing or logged out, the screen
 shows a slim notice (*Claude Code isn't logged in: run `claude auth login`*) with Copy and Retry.
-The screen has no attachments (Claude Code reads only its folder); attach files once the session
-has started.
+The paperclip (or drop/paste onto the card) attaches files to the first message, as in any session.
 
 **The session menu** has:
 
@@ -732,6 +731,14 @@ folder) runs in a private scratch folder, `<data>/claude_code/<session>/work`: t
 directory and the folder scope of its approvals, removed when the session is deleted for good.
 Older chat-only sessions keep `<data>/sessions/<session>` so Claude can find their transcripts
 when resuming.
+
+**Attachments.** The paperclip works as in other sessions. Attached files go to Claude Code inside the
+message itself, the way the API takes them: images (already converted and shrunk at upload) and PDFs
+as base64, text files as text, audio as its transcript (when there is one), and other binary files
+as a note. Each one comes after a `[Attached image: name]` line. Claude Code doesn't get the file's
+path and doesn't need to read anything outside its folder. Up to about 20 MB of attachments (base64)
+go in one message; the oldest beyond that are replaced by a note. Files marked sensitive follow your
+data policy for Anthropic.
 
 **Your login.** These sessions use the Claude account you logged in to with `claude auth login`.
 GameDevWorkstation passes no API key and never uses `--bare`. Every CLI process (including status

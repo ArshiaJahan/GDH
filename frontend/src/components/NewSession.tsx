@@ -117,8 +117,8 @@ export function NewSession() {
       if (b.mode && !NEW_SESSION_MODES.some(([v]) => v === b.mode)) throw new Error("Mode must be plan, ask or accept_edits.");
       setPrefs({ ...(m ? { model: m } : {}), ...(b.effort ? { effort: b.effort } : {}), ...(b.mode ? { mode: b.mode } : {}) });
     },
-    start: async (text, skill) => {
-      const started = await sessionActions.start({ text, skill, folder, model, effort, mode });
+    start: async (text, skill, attachments) => {
+      const started = await sessionActions.start({ text, skill, attachments, folder, model, effort, mode });
       if (!started) setPrefsState(loadPrefs()); // a missing folder resets saved preferences to Chat only
       return started;
     },

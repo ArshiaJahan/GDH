@@ -13,7 +13,8 @@ const get = vi.hoisted(() => vi.fn(async (path: string): Promise<any> => {
   return [];
 }));
 const post = vi.hoisted(() => vi.fn(async (path: string, _body?: unknown): Promise<any> => (path === "/sessions" ? { id: "s9", title: "New session" } : {})));
-vi.mock("../lib/api", () => ({ get, post, patch: vi.fn(), upload: vi.fn(), del: vi.fn(), fileUrl: (p: string) => p, inTauri: () => false }));
+const upload = vi.hoisted(() => vi.fn(async (f: File, _sid?: string) => ({ path: `/up/${f.name}`, name: f.name, mime: f.type, size: f.size })));
+vi.mock("../lib/api", () => ({ get, post, patch: vi.fn(), upload, del: vi.fn(), fileUrl: (p: string) => p, inTauri: () => false }));
 const pickFolder = vi.hoisted(() => vi.fn(async (): Promise<string | null> => "/Users/me/Games/Forklift"));
 vi.mock("../lib/native", () => ({ pickFolder, revealInFinder: vi.fn(), downloadFile: vi.fn(), openLocalFile: vi.fn() }));
 
@@ -132,7 +133,7 @@ describe("NewSession", () => {
     expect(select("Permission mode").value).toBe("ask");
     expect(screen.getByRole("button", { name: "Tools" })).toBeTruthy();
     expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.queryByLabelText("Attach files")).toBeNull();
+    expect(screen.getByLabelText("Attach files")).toBeTruthy(); // the paperclip
     expect(screen.queryByTestId("claude-status-notice")).toBeNull();
     // Tools opens the skills chooser.
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Tools" })); });
@@ -202,6 +203,31 @@ describe("NewSession", () => {
     await act(async () => { fireEvent.keyDown(box(), { key: "Enter" }); });
     expect(post).toHaveBeenCalledWith("/sessions", { harness: "claude_code", folder: null, model: "claude-haiku-5-5", effort: "medium", mode: "ask" });
     expect(post).toHaveBeenCalledWith("/sessions/s9/messages", { text: "Hello there", attachments: [] });
+  });
+
+  it("attaches files with the paperclip and sends them with the first message", async () => {
+    await mount();
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(screen.getByLabelText("Attach files")).toBeTruthy();
+    const file = new File(["png"], "shot.png", { type: "image/png" });
+    await act(async () => { fireEvent.change(input, { target: { files: [file] } }); });
+    expect(upload).toHaveBeenCalledWith(file, undefined); // no session yet
+    expect(screen.getByLabelText("Remove shot.png")).toBeTruthy();
+    await act(async () => { fireEvent.change(box(), { target: { value: "What's wrong here?" } }); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Send" })); });
+    expect(post).toHaveBeenNthCalledWith(2, "/sessions/s9/messages", { text: "What's wrong here?",
+      attachments: [{ path: "/up/shot.png", name: "shot.png", mime: "image/png", size: 3 }] });
+  });
+
+  it("keeps the attachments of a first message that failed as the session's draft", async () => {
+    const s = ses("s9", null, 1, { harness: "claude_code" });
+    post.mockResolvedValueOnce(s).mockRejectedValueOnce(new Error("Message failed"));
+    const att = { path: "/up/shot.png", name: "shot.png", mime: "image/png" };
+    expect(await sessionActions.start({ text: "", attachments: [att], folder: null, model: "claude-opus-5-5", effort: "medium", mode: "ask" })).toBe(false);
+    render(<Composer session={s} running={false} />);
+    await act(async () => {});
+    expect(screen.getByLabelText("Remove shot.png")).toBeTruthy();
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("");
   });
 
   it("shows the login notice when Claude Code is logged out", async () => {
