@@ -17,7 +17,7 @@ jobs:
   backend:
     name: Backend tests (Python)
     # The backend is POSIX/macOS-only (process groups, PTYs, Keychain), like the app itself.
-    runs-on: macos-14
+    runs-on: macos-latest
     timeout-minutes: 25
     env:
       UV_PYTHON: "3.13"
@@ -34,7 +34,7 @@ jobs:
 
   frontend:
     name: Frontend typecheck and tests
-    runs-on: macos-14
+    runs-on: macos-latest
     timeout-minutes: 15
     defaults:
       run:
