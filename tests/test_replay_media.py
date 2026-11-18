@@ -661,8 +661,8 @@ class TestFfmpegPaths:
                 _ffmpeg_paths(ffmpeg=None)
 
     def test_resolves_from_env(self):
-        ff, fp = _ffmpeg_paths()
         if FFMPEG:
+            ff, fp = _ffmpeg_paths()
             assert ff and fp
         else:
             with pytest.raises(ReplayMediaError):
