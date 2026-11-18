@@ -20,6 +20,8 @@ import sys
 import time
 from pathlib import Path
 
+from ..procs import NEW_GROUP, SIGKILL, kill_group
+
 CLONE_ENV = "GDW_UNITY_CLONES"
 SYNC_DIRS = ("Assets", "Packages", "ProjectSettings")
 MARKER = ".gdw-clone.json"
@@ -62,14 +64,14 @@ async def _exec(argv: list[str], timeout_s: float) -> tuple[int | None, str]:
     """Run argv (no shell); (exit code or None on timeout, output tail). Tests replace this."""
     try:
         p = await asyncio.create_subprocess_exec(*argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-                                                 stdin=asyncio.subprocess.DEVNULL, start_new_session=True)
+                                                 stdin=asyncio.subprocess.DEVNULL, **NEW_GROUP)
     except OSError as e:
         return 127, str(e)
     try:
         out, _ = await asyncio.wait_for(p.communicate(), timeout_s)
     except (asyncio.TimeoutError, asyncio.CancelledError) as e:
         try:
-            os.killpg(p.pid, signal.SIGKILL)
+            kill_group(p.pid, SIGKILL)
         except OSError:
             pass
         await p.wait()

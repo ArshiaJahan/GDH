@@ -331,4 +331,50 @@ class ChildProcesses:
         return {"terminated": sorted(groups), "killed": sorted(killed), "left": sorted(alive)}
 
 
-CHILDREN = ChildProcesses()
+
+class _WindowsChildProcesses:
+    """Windows: no sessions or process groups to read, so the registry is the children's pids and
+    quitting ends each tree with taskkill /T /F (procs.kill_group). A pid is only killed while it
+    still runs and was registered by this process."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._pids: dict[int, str] = {}
+
+    def track(self, pid: int, label: str) -> None:
+        from .procs import pid_exists
+
+        if pid_exists(pid):
+            with self._lock:
+                self._pids[pid] = label
+
+    def release(self, pid: int) -> None:
+        with self._lock:
+            self._pids.pop(pid, None)
+
+    def groups(self) -> dict[int, str]:
+        with self._lock:
+            return dict(self._pids)
+
+    def terminate_all(self, grace: float = TERM_GRACE_S, kill_wait: float = KILL_WAIT_S) -> dict:
+        from .procs import SIGKILL, kill_group, pid_exists
+
+        with self._lock:
+            pids = {p: lbl for p, lbl in self._pids.items() if pid_exists(p)}
+            self._pids.clear()
+        for pid in pids:
+            try:
+                kill_group(pid, SIGKILL)
+            except (ProcessLookupError, OSError):
+                pass
+        deadline = time.monotonic() + kill_wait
+        left = [p for p in pids if pid_exists(p)]
+        while left and time.monotonic() < deadline:
+            time.sleep(POLL_S)
+            left = [p for p in left if pid_exists(p)]
+        if left:
+            log.error("child processes still alive after taskkill: %s", ", ".join(map(str, left)))
+        return {"terminated": sorted(pids), "killed": sorted(pids), "left": sorted(left)}
+
+
+CHILDREN = _WindowsChildProcesses() if os.name == "nt" else ChildProcesses()

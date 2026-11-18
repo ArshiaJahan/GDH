@@ -36,6 +36,9 @@ class PtyManager:
         if len(self.ptys) >= MAX_TABS:
             self.app.bus.publish("terminal.output", {"tab": tab, "data": "\r\n[too many terminal tabs open]\r\n"})
             return
+        if os.name == "nt":  # ptyprocess and add_reader are POSIX-only; ConPTY support isn't built yet
+            self.app.bus.publish("terminal.output", {"tab": tab, "data": "\r\n[The terminal isn't available on Windows yet.]\r\n"})
+            return
         from ptyprocess import PtyProcess
 
         d = Path(cwd).expanduser() if cwd else Path.home()

@@ -37,6 +37,8 @@ def data_dir() -> Path:
         p = Path(env)
     elif sys.platform == "darwin":
         p = Path.home() / "Library" / "Application Support" / "GameDevWorkstation"
+    elif os.name == "nt":
+        p = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / "GameDevWorkstation"
     else:
         p = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "gamedevworkstation"
     p.mkdir(parents=True, exist_ok=True)

@@ -22,6 +22,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ..procs import NEW_GROUP
+
 ENV_NAMES = {"PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TERM", "TMPDIR", "TZ",
              "SSH_AUTH_SOCK", "__CF_USER_TEXT_ENCODING"}
 PROXY_NAMES = {"http_proxy", "https_proxy", "no_proxy", "all_proxy"}
@@ -85,7 +87,7 @@ def _scrub(d: Any) -> Any:
 
 async def _run(argv: list[str], timeout: float = 15.0) -> tuple[int, str, str]:
     proc = await asyncio.create_subprocess_exec(*argv, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
-                                                stderr=asyncio.subprocess.PIPE, env=child_env(), start_new_session=True)
+                                                stderr=asyncio.subprocess.PIPE, env=child_env(), **NEW_GROUP)
     try:
         out, err = await asyncio.wait_for(proc.communicate(), timeout)
     except asyncio.TimeoutError:

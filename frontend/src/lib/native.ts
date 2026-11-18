@@ -130,7 +130,7 @@ export async function downloadFile(apiPath: string, suggestedName: string): Prom
 
 /** Download a local file the backend serves (artifacts, media, attachments). */
 export function downloadPath(path: string, name?: string): Promise<void> {
-  return downloadFile(`/file?${new URLSearchParams({ path, download: "1" })}`, name ?? path.split("/").pop() ?? "download");
+  return downloadFile(`/file?${new URLSearchParams({ path, download: "1" })}`, name ?? path.split(/[\\/]/).pop() ?? "download");
 }
 
 /**
@@ -162,7 +162,7 @@ export function installNativeGuards(): void {
       e.preventDefault();
       if (download) {
         url.searchParams.delete("token"); // the shell authenticates itself
-        const name = a.getAttribute("download") || url.searchParams.get("path")?.split("/").pop() || "download";
+        const name = a.getAttribute("download") || url.searchParams.get("path")?.split(/[\\/]/).pop() || "download";
         void downloadFile(url.pathname.slice(4) + url.search, name);
       } else {
         void openExternal(url.href); // never reaches the browser: files open locally, see openExternal

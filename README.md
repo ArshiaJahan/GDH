@@ -8,6 +8,7 @@
 
 [![CI](https://github.com/ArshiaJahan/GDH/actions/workflows/ci.yml/badge.svg)](https://github.com/ArshiaJahan/GDH/actions/workflows/ci.yml)
 [![macOS](https://img.shields.io/badge/macOS-13%2B%20·%20Apple%20Silicon-000000?logo=apple&logoColor=white)](#quick-start)
+[![Windows](https://img.shields.io/badge/Windows-x64%20·%20experimental-0078D6?logo=windows&logoColor=white)](#windows-experimental)
 [![Unity](https://img.shields.io/badge/Unity-6-222222?logo=unity&logoColor=white)](#built-for-unity)
 [![Version](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FArshiaJahan%2FGDH%2Fmain%2Fpyproject.toml&query=%24.project.version&label=version&color=4c1)](VERSION)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -38,8 +39,10 @@ is marked done, and keeps your project's taste and past mistakes in front of the
 Everything runs locally; the backend listens on `127.0.0.1` only.
 
 > [!IMPORTANT]
-> **macOS only.** GameDevWorkstation runs on macOS 13 or later on Apple Silicon. The backend relies on
-> POSIX process groups, PTYs and the macOS Keychain; Windows and Linux are not supported yet.
+> **Built for macOS.** GameDevWorkstation targets macOS 13 or later on Apple Silicon. A
+> [Windows x64 build](#windows-experimental) is experimental: CI builds its installer on every push and
+> checks that the bundled backend starts and serves sessions, but the desktop app hasn't been tested by
+> hand on Windows, and the built-in terminal and in-app updates are macOS-only. Linux is not supported.
 
 ## Demo
 
@@ -318,6 +321,23 @@ click around without keys, run with `GDW_FAKE_PROVIDERS=1`.
 | `make release` | Bump the version and publish to the local updates folder |
 | `make test` | Backend tests, UI type check and UI tests |
 
+### Windows (experimental)
+
+Every CI run on `main` uploads a `GameDevWorkstation-windows-x64` artifact with an NSIS installer
+(unsigned, so SmartScreen warns on first run): open the latest
+[CI run](https://github.com/ArshiaJahan/GDH/actions/workflows/ci.yml), download the artifact and run
+the `-setup.exe`. To build it yourself on Windows with Node 20+, uv, Rust (MSVC) and the Visual Studio
+C++ build tools:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1   # dist\GameDevWorkstation-<version>-x64-setup.exe
+```
+
+On Windows, data lives in `%APPDATA%\GameDevWorkstation`, API keys in Windows Credential Manager, agent
+commands run in PowerShell, and cancelling a job ends its process tree (`taskkill /T`). The terminal
+drawer and in-app updates are not available there yet, and the Unity MCP and CLI routes haven't been
+tried on Windows.
+
 **For Unity:** install `com.coplaydev.unity-mcp` in your project, run
 `uvx --from mcpforunityserver==10.3.0 mcp-for-unity` once while online to cache the server, open
 the Editor, and invoke `unity-router` from the composer's skill button or with `/skill unity-router`.
@@ -366,7 +386,8 @@ make app-test                             # build, launch and check the app
 ```
 
 [GitHub Actions](https://github.com/ArshiaJahan/GDH/actions/workflows/ci.yml) runs the backend tests and the UI
-type check and tests on macOS for every push to `main` and every pull request.
+type check and tests on macOS for every push to `main` and every pull request, and builds the Windows
+installer and smoke-tests its bundled backend on Windows.
 
 The unit tests run against recorded provider fixtures and fakes (a fake `codex` binary, a fake
 Unity bridge), so they need no keys. Live API paths have not yet been exercised end to end;

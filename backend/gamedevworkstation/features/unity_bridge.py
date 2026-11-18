@@ -64,6 +64,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
+from ..procs import shell_argv
 from ..skills import builtin_skills_dir
 from . import unity_cli as uc
 from . import unity_clone as uclone
@@ -977,7 +978,7 @@ class UnityBridge:
         t = timeout_s or self.batch_timeout()
         from ..services import default_shell  # the login shell, as run_command (the user's UNITY_PATH etc.)
 
-        run = await self.runner.run(session, [default_shell(), "-lc", cmd], project=root, label=label, timeout_s=t,
+        run = await self.runner.run(session, shell_argv(cmd, default_shell()), project=root, label=label, timeout_s=t,
                                     grace_s=0, cancel=cancel, merge=True)
         if run.exit_code is None:
             return None, run.stderr_tail, "", "cancelled" if run.cancelled else (run.error or "didn't run"), run.started_at

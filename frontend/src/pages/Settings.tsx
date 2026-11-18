@@ -613,7 +613,7 @@ function BgEditor({ theme, bg, update, release, reload }: { theme: "light" | "da
         <div className="flex gap-2 items-center">
           <button className="btn" onClick={() => inp.current?.click()}>{bg.path ? "Replace…" : "Choose…"}</button>
           <input ref={inp} type="file" hidden accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/quicktime,video/webm" onChange={(e) => e.target.files?.[0] && uploadBg(e.target.files[0])} />
-          {bg.path && <span className="text-[12.5px] text-muted truncate">{bg.path.split("/").pop()} · {bg.kind}</span>}
+          {bg.path && <span className="text-[12.5px] text-muted truncate">{bg.path.split(/[\\/]/).pop()} · {bg.kind}</span>}
           {bg.path && <button className="btn btn-ghost btn-danger" onClick={async () => { await del(`/settings/background/${theme}`); reload(); actions.refreshState(); }}>Remove</button>}
         </div>
       </Row>

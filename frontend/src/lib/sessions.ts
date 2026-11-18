@@ -110,7 +110,7 @@ export function buildSections(sessions: Session[], groups: Group[], p: Prefs, vi
     for (const s of rest) by.set(s.folder ?? "", [...(by.get(s.folder ?? "") ?? []), s]);
     const keys = [...by.keys()].sort((a, b) => (a === "" ? 1 : b === "" ? -1 : 0) || activity(by.get(b)![0]) - activity(by.get(a)![0]));
     for (const k of keys) {
-      const name = k ? k.split("/").filter(Boolean).pop() ?? k : "No folder";
+      const name = k ? k.split(/[\\/]/).filter(Boolean).pop() ?? k : "No folder";
       out.push({ key: `f:${k}`, kind: "folder", title: name, hint: k || "Chat only (no folder)", sessions: by.get(k)!, collapsed: col(`f:${k}`) });
     }
   } else {

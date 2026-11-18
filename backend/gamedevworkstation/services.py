@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .procs import NEW_GROUP, SIGTERM, WINDOWS, kill_group, shell_argv
 from .children import CHILDREN
 from .config import data_dir
 from .core.types import new_id
@@ -21,11 +22,15 @@ from .events import EventBus
 
 
 def default_shell() -> str:
+    if WINDOWS:
+        return "powershell.exe"
     return os.environ.get("SHELL") or ("/bin/zsh" if sys.platform == "darwin" else "/bin/bash")
 
 
 def login_shell_path() -> str | None:
     """GUI apps on macOS don't inherit the shell's PATH; ask the login shell for it."""
+    if WINDOWS:
+        return None  # Windows apps get the user's PATH from the environment
     shell = default_shell()
     try:
         out = subprocess.run([shell, "-lic", 'echo "__PATH__=$PATH"'], capture_output=True, text=True,
@@ -40,6 +45,8 @@ def login_shell_path() -> str | None:
 
 def fix_path() -> str:
     """Merge the login shell's PATH (and Homebrew) into this process's PATH."""
+    if WINDOWS:
+        return os.environ.get("PATH", "")
     parts: list[str] = []
     for src in ((login_shell_path() or ""), os.environ.get("PATH", ""),
                 "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"):
@@ -163,7 +170,7 @@ class Jobs:
 
 def _kill_tree(p: asyncio.subprocess.Process) -> None:
     try:
-        os.killpg(p.pid, 15)
+        kill_group(p.pid, SIGTERM)
     except (ProcessLookupError, PermissionError, OSError):
         try:
             p.terminate()
@@ -193,7 +200,7 @@ class Commands:
         self.jobs, self.bus = jobs, bus
 
     async def run(self, jid: str, cmd: str, cwd: Path, timeout: int = 120) -> tuple[int, str]:
-        code, text, _ = await self.run_exec(jid, [default_shell(), "-lc", cmd], cwd, timeout, display=cmd)
+        code, text, _ = await self.run_exec(jid, shell_argv(cmd, default_shell()), cwd, timeout, display=cmd)
         return code, text
 
     async def run_exec(self, jid: str, argv: list[str], cwd: Path, timeout: float = 120, *,
@@ -212,7 +219,7 @@ class Commands:
             proc = await asyncio.create_subprocess_exec(
                 *argv, cwd=str(cwd), stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE if capture_stdout else asyncio.subprocess.STDOUT,
-                stdin=asyncio.subprocess.DEVNULL, start_new_session=True,
+                stdin=asyncio.subprocess.DEVNULL, **NEW_GROUP,
                 env=env if env is not None else {**os.environ, "TERM": "dumb", "NO_COLOR": "1"})
         except OSError as e:  # the program or the folder is gone: the job must not stay "running"
             self.jobs.finish(jid, "failed", error=str(e)[:300])

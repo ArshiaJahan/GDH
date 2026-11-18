@@ -15,6 +15,7 @@ import logging
 import logging.handlers
 import os
 import secrets
+import signal
 import socket
 import sys
 import threading
@@ -39,6 +40,10 @@ def _watch_parent(pid: int) -> None:
     is left to SIGKILL us if that hangs, so after WATCHDOG_DEADLINE_S the watchdog ends the
     children itself and exits hard."""
     def gone() -> bool:
+        if os.name == "nt":
+            from .procs import pid_exists
+
+            return not pid_exists(pid)
         try:
             os.kill(pid, 0)
         except ProcessLookupError:
@@ -51,7 +56,10 @@ def _watch_parent(pid: int) -> None:
         while not gone():
             time.sleep(WATCHDOG_POLL_S)
         logging.getLogger("gamedevworkstation").warning("parent %s is gone; shutting down", pid)
-        os.kill(os.getpid(), 15)  # SIGTERM → uvicorn shuts down cleanly
+        if os.name == "nt":
+            signal.raise_signal(signal.SIGINT)  # Ctrl+C handler → uvicorn shuts down cleanly
+        else:
+            os.kill(os.getpid(), 15)  # SIGTERM → uvicorn shuts down cleanly
         time.sleep(WATCHDOG_DEADLINE_S)
         from .children import CHILDREN
 

@@ -14,7 +14,7 @@ export const EFFORTS = ["none", "low", "medium", "high", "xhigh", "max"];
 export const NEW_SESSION_MODES: [string, string][] = [["plan", "Plan only"], ["ask", "Ask before edits"], ["accept_edits", "Accept edits"]];
 
 /** "/Users/me/Games/Forklift" → "Forklift". */
-export const folderName = (f: string) => f.replace(/\/+$/, "").split("/").pop() || f;
+export const folderName = (f: string) => f.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || f;
 export const tilde = (f: string) => f.replace(/^\/Users\/[^/]+/, "~");
 
 /** A borderless dropdown that reads as text with a chevron (a native <select> underneath). */

@@ -46,7 +46,12 @@ fn random_token() -> String {
 }
 
 fn home() -> PathBuf {
-    PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()))
+    if cfg!(windows) {
+        if let Ok(p) = std::env::var("USERPROFILE") {
+            return PathBuf::from(p);
+        }
+    }
+    PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()))
 }
 
 fn data_dir() -> PathBuf {
@@ -55,6 +60,12 @@ fn data_dir() -> PathBuf {
     }
     if cfg!(target_os = "macos") {
         home().join("Library/Application Support/GameDevWorkstation")
+    } else if cfg!(windows) {
+        // Same folder as the backend's config.data_dir on Windows: %APPDATA%\GameDevWorkstation.
+        std::env::var("APPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| home().join("AppData").join("Roaming"))
+            .join("GameDevWorkstation")
     } else {
         home().join(".local/share/gamedevworkstation")
     }
@@ -124,7 +135,7 @@ fn spawn_backend(app: &AppHandle, port: u16, token: &str) -> std::io::Result<Chi
             .resource_dir()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e.to_string()))?
             .join("backend")
-            .join("gamedevworkstation-backend");
+            .join(format!("gamedevworkstation-backend{}", std::env::consts::EXE_SUFFIX));
         let mut c = Command::new(exe);
         c.args(&args);
         c
@@ -136,7 +147,48 @@ fn spawn_backend(app: &AppHandle, port: u16, token: &str) -> std::io::Result<Chi
         use std::os::unix::process::CommandExt;
         cmd.process_group(0); // own group, so quitting can stop everything it started
     }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // No console window for the backend; its own process group, ended as a tree on quit.
+        cmd.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
+    }
     cmd.spawn()
+}
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+#[cfg(windows)]
+const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+
+/// Ask the backend to shut down cleanly (SIGTERM). Windows has no SIGTERM for a windowless
+/// process, so there the tree is ended at once (kill_group); the backend's children go with it.
+fn terminate(pid: i32) {
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(pid, libc::SIGTERM);
+    }
+    #[cfg(windows)]
+    kill_group(pid);
+}
+
+/// End the backend's whole process group (Unix) or process tree (Windows).
+fn kill_group(pid: i32) {
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(-pid, libc::SIGKILL);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+    }
 }
 
 fn stop_backend(app: &AppHandle) {
@@ -145,9 +197,7 @@ fn stop_backend(app: &AppHandle) {
     if let Some(mut child) = guard.take() {
         let pid = child.id() as i32;
         // SIGTERM lets the backend close PTYs, subagents, Codex CLI runs and MCP servers.
-        unsafe {
-            libc::kill(pid, libc::SIGTERM);
-        }
+        terminate(pid);
         let start = Instant::now();
         while start.elapsed() < Duration::from_secs(12) {
             if let Ok(Some(_)) = child.try_wait() {
@@ -156,9 +206,7 @@ fn stop_backend(app: &AppHandle) {
             std::thread::sleep(Duration::from_millis(100));
         }
         // Anything left in its process group gets killed.
-        unsafe {
-            libc::kill(-pid, libc::SIGKILL);
-        }
+        kill_group(pid);
         let _ = child.kill();
         let _ = child.wait();
     }
@@ -250,9 +298,7 @@ fn poll_exit(app: &AppHandle) -> Option<BackendExit> {
         _ => return None,
     };
     let pid = child.id() as i32;
-    unsafe {
-        libc::kill(-pid, libc::SIGKILL); // leftovers in its group; it can't clean up after a crash
-    }
+    kill_group(pid); // leftovers in its group; it can't clean up after a crash
     guard.take();
     drop(guard);
     let how = match status.code() {
@@ -319,9 +365,7 @@ async fn restart_backend(app: AppHandle, state: tauri::State<'_, Backend>) -> Re
                 return Ok(());
             }
             let pid = child.id() as i32;
-            unsafe {
-                libc::kill(-pid, libc::SIGKILL);
-            }
+            kill_group(pid);
         }
         rotate_log(&logs_dir().join(STDOUT_LOG), LOG_KEEP, LOG_CAP_BYTES);
         let child = spawn_backend(&app, state.port, &state.token).map_err(|e| format!("Couldn't start the backend: {e}"))?;

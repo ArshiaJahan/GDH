@@ -239,7 +239,6 @@ class _FileLock:
         self.path, self.timeout, self.fd = path, timeout, None
 
     def __enter__(self) -> "_FileLock":
-        import fcntl
         try:
             self.fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o644)
         except OSError:
@@ -247,7 +246,14 @@ class _FileLock:
         deadline = time.monotonic() + self.timeout
         while True:
             try:
-                fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(self.fd, msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 return self
             except OSError:
                 if time.monotonic() >= deadline:

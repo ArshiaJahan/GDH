@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable
 
 from fastapi import APIRouter, FastAPI
 
+from ..procs import NEW_GROUP
 from ..agent.tools import GIT_WRITE_REFUSED, in_git_metadata
 from ..config import get_key, sessions_dir
 from ..core.types import (Message, TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock, Usage,
@@ -376,7 +377,7 @@ class Harnesses:
         jid = app.jobs.start(sid, "codex_cli", f"Codex CLI turn · {app.config.label(model, tier)}",
                              {"model": model, "tier": tier})
         proc = await asyncio.create_subprocess_exec(*args, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                                                    stderr=asyncio.subprocess.PIPE, env=env, start_new_session=True,
+                                                    stderr=asyncio.subprocess.PIPE, env=env, **NEW_GROUP,
                                                     limit=2**24)
         app.jobs.procs[jid] = proc
         assert proc.stdin and proc.stdout and proc.stderr

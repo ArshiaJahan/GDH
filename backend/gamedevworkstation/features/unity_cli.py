@@ -39,6 +39,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+from ..procs import NEW_GROUP, SIGKILL, SIGTERM, kill_group
+
 if TYPE_CHECKING:
     from ..app import AppState
     from .unity_bridge import BridgeResult
@@ -621,7 +623,7 @@ def _alive(pid: int) -> bool:
 
 def _group_alive(pgid: int) -> bool:
     try:
-        os.killpg(pgid, 0)
+        kill_group(pgid, 0)
         return True
     except ProcessLookupError:
         return False
@@ -654,14 +656,14 @@ class UnityRunner:
         try:
             p = await asyncio.create_subprocess_exec(*argv, cwd=str(cwd) if cwd else None, stdout=asyncio.subprocess.PIPE,
                                                      stderr=asyncio.subprocess.PIPE, stdin=asyncio.subprocess.DEVNULL,
-                                                     env=cli_env(), start_new_session=True)
+                                                     env=cli_env(), **NEW_GROUP)
         except OSError as e:
             return CliRun(None, None, started_at=t0, argv=argv, error=str(e))
         try:
             out, err = await asyncio.wait_for(p.communicate(), timeout_s)
         except (asyncio.TimeoutError, asyncio.CancelledError) as e:
             try:
-                os.killpg(p.pid, signal.SIGKILL)
+                kill_group(p.pid, SIGKILL)
             except OSError:
                 pass
             if isinstance(e, asyncio.CancelledError):
@@ -757,7 +759,7 @@ class UnityRunner:
         GUI Editor and its import workers are never touched)."""
         if pgid:
             try:
-                os.killpg(pgid, signal.SIGTERM)
+                kill_group(pgid, SIGTERM)
             except OSError:
                 pass
             t_end = time.monotonic() + self.KILL_WAIT_S
@@ -765,7 +767,7 @@ class UnityRunner:
                 await asyncio.sleep(0.2)
             if _group_alive(pgid):
                 try:
-                    os.killpg(pgid, signal.SIGKILL)
+                    kill_group(pgid, SIGKILL)
                 except OSError:
                     pass
         if not sweep:

@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, FastAPI, HTTPException
 
+from ..procs import NEW_GROUP
 from ..agent.tools import Tool, ToolContext, ToolOutput, obj
 from ..config import data_dir, get_key
 from ..core.effort import EffortApprovalRequired, check_effort
@@ -393,7 +394,7 @@ class SubagentManager:
         if key := get_key("openai", sub.profile):
             env["CODEX_API_KEY"] = key  # only on this process; never logged
         proc = await asyncio.create_subprocess_exec(*cmd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                                                    stderr=asyncio.subprocess.PIPE, env=env, start_new_session=True,
+                                                    stderr=asyncio.subprocess.PIPE, env=env, **NEW_GROUP,
                                                     limit=2**24)
         app.jobs.procs[sub.job_id] = proc
         assert proc.stdin and proc.stdout

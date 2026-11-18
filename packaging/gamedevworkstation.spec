@@ -11,7 +11,8 @@ hiddenimports = (
     collect_submodules("gamedevworkstation")  # features are imported by name at startup
     + collect_submodules("uvicorn")
     + collect_submodules("apscheduler")
-    + ["keyring.backends.macOS", "keyring.backends.fail", "ptyprocess"]
+    + (["keyring.backends.Windows", "keyring.backends.fail"] if sys.platform == "win32"
+       else ["keyring.backends.macOS", "keyring.backends.fail", "ptyprocess"])
 )
 for pkg in ("anthropic", "openai", "elevenlabs", "mcp", "httpx2", "pypdf", "claude_agent_sdk"):
     try:

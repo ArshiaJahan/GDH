@@ -64,6 +64,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Body, FastAPI, HTTPException
 
+from ..procs import NEW_GROUP, SIGKILL, SIGTERM, kill_group
 from ..children import CHILDREN
 from ..config import data_dir, sessions_dir
 from ..core.media import cap_media
@@ -358,7 +359,7 @@ class Proc:
         finally:
             # EOF can leave CLI descendants alive in its dedicated group, holding pipes open.
             try:
-                os.killpg(self.proc.pid, signal.SIGTERM)
+                kill_group(self.proc.pid, SIGTERM)
             except (ProcessLookupError, PermissionError):
                 pass
             self.mgr.mcp.revoke(self.sid, self.token)
@@ -682,7 +683,7 @@ class Proc:
                 await asyncio.wait_for(self.proc.wait(), 3)
             except asyncio.TimeoutError:
                 try:
-                    os.killpg(self.proc.pid, signal.SIGKILL)
+                    kill_group(self.proc.pid, SIGKILL)
                 except (ProcessLookupError, PermissionError, OSError):
                     pass
         try:
@@ -946,7 +947,7 @@ class ClaudeCode:
                               setting_sources=str(c.get("setting_sources") or ""), strict_mcp=not c.get("load_user_mcp"))
             proc = await asyncio.create_subprocess_exec(*argv, cwd=str(cwd), stdin=asyncio.subprocess.PIPE,
                                                         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                                                        env=child_env(), start_new_session=True, limit=2**24)
+                                                        env=child_env(), **NEW_GROUP, limit=2**24)
             CHILDREN.track(proc.pid, "claude_code")
             billing = "api" if (self.probe.cached() or {}).get("bills_api") else "subscription"
             p = Proc(self, sid, proc, sig, cc_session, mcp_file, resumed=bool(resume), token=token, billing=billing)
