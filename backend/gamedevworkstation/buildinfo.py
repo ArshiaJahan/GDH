@@ -29,6 +29,8 @@ def version_info() -> dict:
         try:
             data = json.loads(BUILD_INFO.read_text())
             info.update({k: data.get(k) for k in ("git_commit", "git_dirty", "built_at")})
+            if data.get("channel"):  # set by CI release builds (scripts/version.py build-info)
+                info.update(channel=data["channel"], repo=data.get("repo"))
         except (OSError, ValueError):
             pass
         return info

@@ -42,7 +42,7 @@ Everything runs locally; the backend listens on `127.0.0.1` only.
 > **Built for macOS.** GameDevWorkstation targets macOS 13 or later on Apple Silicon. A
 > [Windows x64 build](#windows-experimental) is experimental. CI builds its installer on every push and
 > checks that the bundled backend starts and serves sessions, but the desktop app hasn't been tested by
-> hand on Windows, and the built-in terminal and in-app updates are macOS-only. Linux is not supported.
+> hand on Windows, and the built-in terminal is macOS-only. Linux is not supported.
 
 ## Demo
 
@@ -82,7 +82,7 @@ Code reply is a real run.</sub>
 | **Cost control** | Daily and per-session spend limits, job budgets, approval for high effort, and a My usage page per model. |
 | **Trailer maker** | Brief → beat sheet → scripted Play Mode capture (Unity Recorder) → ffmpeg edit from a JSON edit list → ElevenLabs music cut to the beat sheet → three reviewers → Steam, YouTube and vertical exports. |
 | **ElevenLabs** | Speech, transcription, sound effects and music (including composition plans with exact section lengths), in chat and on their own page. |
-| **Native shell, local updates** | Tauri v2 app with a frozen FastAPI backend, keys in the macOS Keychain and in-app updates from a local folder. |
+| **Native shell, local updates** | Tauri v2 app with a frozen FastAPI backend, keys in the macOS Keychain and in-app updates from GitHub Releases or a local folder. |
 
 ### Claude Code sessions
 
@@ -298,6 +298,15 @@ reconnect. Config and data live under `~/Library/Application Support/GameDevWork
 
 ## Quick start
 
+**Download:** [the latest release](https://github.com/ArshiaJahan/GDH/releases/latest) has the macOS
+app (`-macos-arm64.dmg`) and the Windows installer (`-x64-setup.exe`). Neither is notarized or signed
+by a vendor: on macOS, right-click the app and choose Open the first time; on Windows, SmartScreen
+warns on first run. Release builds update themselves: they check for a newer release now and then,
+download it, and install it once no session is running (`[updates] auto_install = false` turns that
+off, and Settings still offers Install & restart).
+
+To build from source:
+
 **Prerequisites:** macOS 13+ on Apple Silicon, Xcode Command Line Tools, Node 20+,
 [uv](https://docs.astral.sh/uv/) (Python 3.11+), Rust stable (for the desktop app), and
 optionally the Codex CLI (`npm i -g @openai/codex`).
@@ -318,15 +327,14 @@ click around without keys, run with `GDW_FAKE_PROVIDERS=1`.
 | `make live` | The desktop window from this checkout, with UI hot reload |
 | `make app` | Build `dist/GameDevWorkstation.app` and `dist/GameDevWorkstation.dmg` (ad-hoc signed) |
 | `make install` | Copy the built app to `/Applications` |
-| `make release` | Bump the version and publish to the local updates folder |
+| `make release` | Bump the version and publish to the local updates folder (the running app installs it when idle) |
 | `make test` | Backend tests, UI type check and UI tests |
 
 ### Windows (experimental)
 
-Every CI run on `main` uploads a `GameDevWorkstation-windows-x64` artifact with an NSIS installer
-(unsigned, so SmartScreen warns on first run): open the latest
-[CI run](https://github.com/ArshiaJahan/GDH/actions/workflows/ci.yml), download the artifact and run
-the `-setup.exe`. To build it yourself on Windows with Node 20+, uv, Rust (MSVC) and the Visual Studio
+Each [release](https://github.com/ArshiaJahan/GDH/releases/latest) has an NSIS installer, and every CI
+run on `main` also uploads one as the `GameDevWorkstation-windows-x64` artifact. It's unsigned, so
+SmartScreen warns on first run. To build it yourself on Windows with Node 20+, uv, Rust (MSVC) and the Visual Studio
 C++ build tools:
 
 ```powershell
@@ -334,9 +342,9 @@ powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1   # dist\Game
 ```
 
 On Windows, data lives in `%APPDATA%\GameDevWorkstation`, API keys in Windows Credential Manager, agent
-commands run in PowerShell, and cancelling a job ends its process tree (`taskkill /T`). The terminal
-drawer and in-app updates are not available there yet, and the Unity MCP and CLI routes haven't been
-tried on Windows.
+commands run in PowerShell, and cancelling a job ends its process tree (`taskkill /T`). Updates run
+the new installer silently and restart the app; rollback is macOS-only. The terminal drawer isn't
+available there yet, and the Unity MCP and CLI routes haven't been tried on Windows.
 
 **For Unity:** install `com.coplaydev.unity-mcp` in your project, run
 `uvx --from mcpforunityserver==10.3.0 mcp-for-unity` once while online to cache the server, open

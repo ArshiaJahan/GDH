@@ -15,6 +15,8 @@ export type UpdatesStatus = {
   previous: { version: string; app_path: string } | null;
   install_supported: boolean; reason: string | null; bundle_path: string | null;
   installing: { version: string } | null; busy_sessions: number; log_path: string;
+  auto_install?: boolean;
+  github?: { repo: string; last_check: number | null; last_seen: string | null; error: string | null } | null;
 };
 export type Release = { version: string; built_at: string | null; git_commit: string | null; notes: string; app_path: string };
 

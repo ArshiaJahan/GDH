@@ -83,6 +83,12 @@ default_harness = "claude_code"
 dir = "~/GameDevWorkstationUpdates"
 check_interval_s = 30               # how often the app looks at latest.json (one stat call)
 keep = 3                            # versions `make release` keeps; older ones are pruned
+auto_install = true                 # install a new version by itself once no session is running (each version once)
+# Builds from the GitHub release workflow also download new versions from the repository's
+# Releases into `dir`. Local builds don't, unless you set github = true here.
+# github = true
+# github_repo = "ArshiaJahan/GDH"
+github_interval_s = 3600            # how often a release build asks GitHub (at least 300)
 
 [mcp.presets.unity]
 # Built-in MCP servers. Each is added to Skills & MCP once (off by default for sessions); a

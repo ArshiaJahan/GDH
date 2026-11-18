@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import re
 import subprocess
 import sys
@@ -191,6 +192,11 @@ def build_info(root: Path) -> dict:
         "git_dirty": bool(_git(root, "status", "--porcelain")),
         "built_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(),
     }
+    # Release builds from CI set GDW_UPDATE_CHANNEL=github: those builds update themselves from the
+    # repository's GitHub Releases. Local builds leave it unset and keep the local updates folder.
+    if channel := os.environ.get("GDW_UPDATE_CHANNEL", "").strip():
+        info["channel"] = channel
+        info["repo"] = os.environ.get("GDW_UPDATE_REPO", "").strip() or "ArshiaJahan/GDH"
     out = root / "backend" / "gamedevworkstation" / "_build_info.json"
     out.write_text(json.dumps(info, indent=2) + "\n")
     return info

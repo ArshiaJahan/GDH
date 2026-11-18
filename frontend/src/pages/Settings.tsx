@@ -692,6 +692,8 @@ function About() {
         </button>
       </div>
       {!u.install_supported && u.reason && <p className="text-[12.5px] text-muted mt-2"><Inline text={u.reason} /></p>}
+      {u.install_supported && u.auto_install && <p className="text-[12.5px] text-muted mt-2">New versions install by themselves once no session is running. Set <code className="font-mono">[updates] auto_install = false</code> to only install from here.</p>}
+      {u.github && <p className="text-[12.5px] text-muted mt-2">Also checks <span className="font-mono">{u.github.repo}</span> releases{u.github.last_seen ? ` (latest: v${u.github.last_seen})` : ""}.{u.github.error ? ` Last download failed: ${u.github.error}` : ""}</p>}
       <div className="mt-8 mb-2 font-medium text-[13px]">Release history</div>
       {!u.history.length && <p className="text-[13px] text-muted">No releases in the folder yet. Run <code className="font-mono">make release</code> in the repo.</p>}
       {u.history.map((r) => (

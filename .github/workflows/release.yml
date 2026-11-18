@@ -1,0 +1,150 @@
+# Builds the macOS app and the Windows installer and publishes them as a GitHub Release
+# when main has a version that has no release yet (bump it with scripts/version.py set X.Y.Z).
+# Release builds carry the "github" update channel, so the installed app finds the next
+# release by itself, downloads it and installs it once no session is running.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild and replace the release for the current version
+        type: boolean
+        default: false
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  GDW_UPDATE_CHANNEL: github
+  GDW_UPDATE_REPO: ${{ github.repository }}
+
+jobs:
+  plan:
+    name: Is there a new version?
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      build: ${{ steps.v.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ inputs.force || false }}
+        run: |
+          v=$(tr -d '[:space:]' < VERSION)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if gh release view "v$v" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 && [ "$FORCE" != "true" ]; then
+            echo "Release v$v exists; nothing to build."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Building release v$v."
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  macos:
+    name: macOS app (Apple Silicon)
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      UV_PYTHON: "3.13"
+      GDW_ALLOW_ADHOC: "1"  # no certificate in CI; first launch needs right-click > Open
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Build
+        run: ./scripts/build_mac.sh
+      - name: Package
+        run: |
+          v="${{ needs.plan.outputs.version }}"
+          mkdir -p out
+          ditto -c -k --keepParent dist/GameDevWorkstation.app "out/GameDevWorkstation-$v-macos-arm64.zip"
+          cp dist/GameDevWorkstation.dmg "out/GameDevWorkstation-$v-macos-arm64.dmg"
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: out/*
+          if-no-files-found: error
+
+  windows:
+    name: Windows installer (x64)
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      UV_PYTHON: "3.13"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Build
+        shell: pwsh
+        run: ./scripts/build_windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: dist/*-setup.exe
+          if-no-files-found: error
+
+  publish:
+    name: Publish the release
+    needs: [plan, macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="${{ needs.plan.outputs.version }}"
+          ls -la assets
+          cat > notes.md <<EOF
+          GameDevWorkstation $v, built from ${GITHUB_SHA::7}.
+
+          - **macOS (Apple Silicon):** \`GameDevWorkstation-$v-macos-arm64.dmg\`. The app isn't notarized: the first time, right-click it in Applications and choose Open (or run \`xattr -cr /Applications/GameDevWorkstation.app\`).
+          - **Windows x64 (experimental):** \`GameDevWorkstation-$v-x64-setup.exe\`. It isn't signed, so SmartScreen warns on first run.
+
+          Installed release builds update themselves: they check this repository's latest release, download it, and install it once no session is running.
+          EOF
+          if gh release view "v$v" >/dev/null 2>&1; then
+            gh release upload "v$v" assets/* --clobber
+          else
+            gh release create "v$v" assets/* --target "$GITHUB_SHA" --title "GameDevWorkstation $v" --notes-file notes.md --generate-notes
+          fi
