@@ -8,7 +8,7 @@ import os
 import plistlib
 import time
 import zipfile
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 from fastapi import HTTPException
@@ -114,10 +114,10 @@ def test_not_newer_or_wrong_size_downloads_nothing(tmp_path):
 
 
 def test_windows_helper_script_quotes_paths():
-    s = U.windows_helper_script(app_pid=12, backend_pid=34, installer=Path("C:/Users/O'Neil/x-setup.exe"),
-                                app_exe=Path("C:/Apps/GameDevWorkstation.exe"))
+    s = U.windows_helper_script(app_pid=12, backend_pid=34, installer=PureWindowsPath(r"C:\Users\O'Neil\x-setup.exe"),
+                                app_exe=PureWindowsPath(r"C:\Apps\GameDevWorkstation.exe"))
     assert "$AppPid = 12" in s and "$BackendPid = 34" in s
-    assert "'C:/Users/O''Neil/x-setup.exe'" in s and "-ArgumentList '/S' -Wait" in s
+    assert r"'C:\Users\O''Neil\x-setup.exe'" in s and "-ArgumentList '/S' -Wait" in s
     assert "Start-Process -FilePath $AppExe" in s
 
 
