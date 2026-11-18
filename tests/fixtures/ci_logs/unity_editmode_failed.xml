@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<test-run id="2" testcasecount="5" result="Failed(Child)" total="5" passed="4" failed="1" inconclusive="0" skipped="0" asserts="4" engine-version="3.5.0.0" clr-version="4.0.30319.42000" start-time="2026-11-18 09:14:00Z" end-time="2026-11-18 09:14:09Z" duration="9.4">
+  <test-suite type="TestSuite" id="1000" name="Game.Tests.EditMode.dll" fullname="Game.Tests.EditMode.dll" runstate="Runnable" testcasecount="5" result="Failed(Child)" site="Child" start-time="2026-11-18 09:14:00Z" end-time="2026-11-18 09:14:09Z" duration="9.4" total="5" passed="4" failed="1" warnings="0" inconclusive="0" skipped="0" asserts="4">
+    <test-suite type="Assembly" id="1001" name="Game.Tests.EditMode.dll" fullname="/github/workspace/Library/ScriptAssemblies/Game.Tests.EditMode.dll" runstate="Runnable" testcasecount="5" result="Failed(Child)" site="Child" total="5" passed="4" failed="1" warnings="0" inconclusive="0" skipped="0" asserts="4">
+      <properties>
+        <property name="platform" value="EditMode" />
+      </properties>
+      <test-suite type="TestSuite" id="1002" name="Game" fullname="Game" runstate="Runnable" testcasecount="5" result="Failed(Child)" site="Child" total="5" passed="4" failed="1">
+        <test-suite type="TestFixture" id="1003" name="InventoryTests" fullname="Game.Tests.EditMode.InventoryTests" classname="Game.Tests.EditMode.InventoryTests" runstate="Runnable" testcasecount="5" result="Failed(Child)" site="Child" total="5" passed="4" failed="1" asserts="4">
+          <test-case id="1001" name="AddItem_IncreasesCount" fullname="Game.Tests.EditMode.InventoryTests.AddItem_IncreasesCount" methodname="AddItem_IncreasesCount" classname="Game.Tests.EditMode.InventoryTests" runstate="Runnable" seed="1037" result="Passed" start-time="2026-11-18 09:14:01Z" end-time="2026-11-18 09:14:01Z" duration="0.003" asserts="1"></test-case>
+          <test-case id="1002" name="RemoveItem_DecreasesCount" fullname="Game.Tests.EditMode.InventoryTests.RemoveItem_DecreasesCount" methodname="RemoveItem_DecreasesCount" classname="Game.Tests.EditMode.InventoryTests" runstate="Runnable" seed="1074" result="Passed" start-time="2026-11-18 09:14:02Z" end-time="2026-11-18 09:14:02Z" duration="0.003" asserts="1"></test-case>
+          <test-case id="1003" name="StackLimit_IsEnforced" fullname="Game.Tests.EditMode.InventoryTests.StackLimit_IsEnforced" methodname="StackLimit_IsEnforced" classname="Game.Tests.EditMode.InventoryTests" runstate="Runnable" seed="1111" result="Failed" start-time="2026-11-18 09:14:03Z" end-time="2026-11-18 09:14:03Z" duration="0.012" asserts="0">
+            <failure>
+              <message><![CDATA[  Expected: 99
+  But was:  100
+]]></message>
+              <stack-trace><![CDATA[at Game.Tests.EditMode.InventoryTests.StackLimit_IsEnforced () [0x0002a] in /github/workspace/Assets/Tests/EditMode/InventoryTests.cs:42]]></stack-trace>
+            </failure>
+            <output><![CDATA[  Expected: 99
+]]></output>
+          </test-case>
+          <test-case id="1004" name="Clear_EmptiesInventory" fullname="Game.Tests.EditMode.InventoryTests.Clear_EmptiesInventory" methodname="Clear_EmptiesInventory" classname="Game.Tests.EditMode.InventoryTests" runstate="Runnable" seed="1148" result="Passed" start-time="2026-11-18 09:14:04Z" end-time="2026-11-18 09:14:04Z" duration="0.003" asserts="1"></test-case>
+          <test-case id="1005" name="Serialize_RoundTrips" fullname="Game.Tests.EditMode.InventoryTests.Serialize_RoundTrips" methodname="Serialize_RoundTrips" classname="Game.Tests.EditMode.InventoryTests" runstate="Runnable" seed="1185" result="Passed" start-time="2026-11-18 09:14:05Z" end-time="2026-11-18 09:14:05Z" duration="0.003" asserts="1"></test-case>
+        </test-suite>
+      </test-suite>
+    </test-suite>
+  </test-suite>
+</test-run>

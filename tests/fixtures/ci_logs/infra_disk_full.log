@@ -1,0 +1,12 @@
+Build Linux64	Build player	﻿2026-11-18T09:12:03.1234567Z ##[group]Run game-ci/unity-builder@v4
+Build Linux64	Build player	2026-11-18T09:12:03.1242486Z ##[endgroup]
+Build Linux64	Build player	2026-11-18T09:12:04.1250405Z Building target StandaloneLinux64 with Unity 2022.3.21f1
+Build Linux64	Build player	2026-11-18T09:12:04.1258324Z Build started: Library/Bee/artifacts/Linux64
+Build Linux64	Build player	2026-11-18T09:12:05.1266243Z Compressing Library/il2cpp_cache/linux64/libil2cpp.a
+Build Linux64	Build player	2026-11-18T09:12:06.1274162Z Writing Build/StandaloneLinux64/GameAssembly.so
+Build Linux64	Build player	2026-11-18T09:12:06.1282081Z IOException: No space left on device
+Build Linux64	Build player	2026-11-18T09:12:06.1290000Z   at System.IO.FileStream.WriteInternal (System.Byte[] src, System.Int32 offset, System.Int32 count) [0x00000] in <00000000000000000000000000000000>:0
+Build Linux64	Build player	2026-11-18T09:12:10.1297919Z   at Unity.IL2CPP.Building.Linker.Link () [0x00000] in /github/workspace/Library/PackageCache/com.unity.ide.visualstudio@2.0.22/Editor/Link.cs:88
+Build Linux64	Build player	2026-11-18T09:12:10.1305838Z Build failed: Error: No space left on device
+Build Linux64	Build player	2026-11-18T09:12:11.1313757Z System.IO.IOException: No space left on device : '/github/workspace/Build/StandaloneLinux64/GameAssembly.so'
+Build Linux64	Build player	2026-11-18T09:12:12.1321676Z ##[error]Process completed with exit code 1.

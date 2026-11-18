@@ -1,0 +1,28 @@
+Rust crate	Run cargo test	2026-11-18T10:41:07.0110000Z ##[group]Run cargo test
+Rust crate	Run cargo test	2026-11-18T10:41:07.1480000Z ^[[36;1mcargo test^[[0m
+Rust crate	Run cargo test	2026-11-18T10:41:07.2850000Z shell: /usr/bin/bash -e {0}
+Rust crate	Run cargo test	2026-11-18T10:41:07.4220000Z ##[endgroup]
+Rust crate	Run cargo test	2026-11-18T10:41:07.5590000Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s
+Rust crate	Run cargo test	2026-11-18T10:41:07.6960000Z      Running unittests src/lib.rs (target/debug/deps/demo-cdb95a0d8adbb28f)
+Rust crate	Run cargo test	2026-11-18T10:41:07.8330000Z 
+Rust crate	Run cargo test	2026-11-18T10:41:07.9700000Z running 1 test
+Rust crate	Run cargo test	2026-11-18T10:41:08.1070000Z test tests::adds_two_numbers ... FAILED
+Rust crate	Run cargo test	2026-11-18T10:41:08.2440000Z 
+Rust crate	Run cargo test	2026-11-18T10:41:08.3810000Z failures:
+Rust crate	Run cargo test	2026-11-18T10:41:08.5180000Z 
+Rust crate	Run cargo test	2026-11-18T10:41:08.6550000Z ---- tests::adds_two_numbers stdout ----
+Rust crate	Run cargo test	2026-11-18T10:41:08.7920000Z 
+Rust crate	Run cargo test	2026-11-18T10:41:08.9290000Z thread 'tests::adds_two_numbers' (48121) panicked at src/lib.rs:11:9:
+Rust crate	Run cargo test	2026-11-18T10:41:09.0660000Z assertion `left == right` failed
+Rust crate	Run cargo test	2026-11-18T10:41:09.2030000Z   left: -1
+Rust crate	Run cargo test	2026-11-18T10:41:09.3400000Z  right: 5
+Rust crate	Run cargo test	2026-11-18T10:41:09.4770000Z note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+Rust crate	Run cargo test	2026-11-18T10:41:09.6140000Z 
+Rust crate	Run cargo test	2026-11-18T10:41:09.7510000Z 
+Rust crate	Run cargo test	2026-11-18T10:41:09.8880000Z failures:
+Rust crate	Run cargo test	2026-11-18T10:41:10.0250000Z     tests::adds_two_numbers
+Rust crate	Run cargo test	2026-11-18T10:41:10.1620000Z 
+Rust crate	Run cargo test	2026-11-18T10:41:10.2990000Z test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+Rust crate	Run cargo test	2026-11-18T10:41:10.4360000Z 
+Rust crate	Run cargo test	2026-11-18T10:41:10.5730000Z error: test failed, to rerun pass `--lib`
+Rust crate	Run cargo test	2026-11-18T10:41:10.7100000Z ##[error]Process completed with exit code 101.

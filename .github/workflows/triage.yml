@@ -1,0 +1,36 @@
+# Explains why a CI run failed: classifies the failed logs with rules (no model key) and writes
+# the result to the job summary and, for pull requests, a comment.
+# workflow_run runs in the base repo with a write token, so this workflow never checks out or
+# runs code from the pull request: it checks out the default branch and only reads the failed
+# run's logs through the GitHub API.
+name: CI triage
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: triage-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    name: Triage the failed run
+    if: github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/triage
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          # Empty for pushes (and for fork PRs, where GitHub leaves pull_requests empty).
+          comment-pr: ${{ github.event.workflow_run.pull_requests[0].number }}

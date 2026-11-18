@@ -1,0 +1,80 @@
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4288884Z  + jaraco-context==6.1.2
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4290025Z  + jaraco-functools==4.6.0
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4294292Z  + jiter==0.18.0
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4294608Z  + jsonschema==4.26.0
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4295986Z  + jsonschema-specifications==2025.9.1
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4296455Z  + keyring==25.7.0
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4298096Z  + mcp==2.3.0
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4299484Z  + mcp-types==2.3.0
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4300584Z  + more-itertools==11.2.1
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4302203Z  + openai==3.46.0
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4303560Z  + opentelemetry-api==1.45.2
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4304214Z  + packaging==26.3
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4306076Z  + pefile==2024.8.26
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4307404Z  + pluggy==1.7.0
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4320879Z  + ptyprocess==0.7.0
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4322125Z  + pycparser==3.12
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4322667Z  + pydantic==2.14.3
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4323176Z  + pydantic-core==2.50.4
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4323683Z  + pygments==2.21.0
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4324028Z  + pyinstaller==6.22.3
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4324445Z  + pyinstaller-hooks-contrib==2026.9
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4324877Z  + pyjwt==2.15.1
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4325191Z  + pypdf==6.21.4
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4325490Z  + pytest==9.2.0
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4325837Z  + pytest-asyncio==1.4.1.post1
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4326245Z  + python-dotenv==1.2.4
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4326602Z  + python-multipart==0.0.33
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4326968Z  + pywin32==312
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4327288Z  + pywin32-ctypes==0.2.3
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4327622Z  + pyyaml==6.0.3
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4327935Z  + referencing==0.37.0
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4328275Z  + requests==2.34.2
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4328577Z  + respx==0.23.1
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4328879Z  + rpds-py==2026.9.1
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4329200Z  + setuptools==84.2.1
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4329547Z  + sniffio==1.3.1
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4329838Z  + sse-starlette==3.6.0
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4330186Z  + starlette==1.10.0
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4330491Z  + tomli-w==1.2.0
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4331031Z  + truststore==0.10.5
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4331581Z  + typing-extensions==4.16.0
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4334864Z  + typing-inspection==0.4.5
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4335350Z  + tzdata==2026.6
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4336386Z  + tzlocal==5.4.5
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4337839Z  + urllib3==2.8.0
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4339084Z  + uvicorn==0.54.0
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4339839Z  + watchfiles==1.3.0
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:57:57.4341583Z  + websockets==17.4
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:08.6926949Z .........F...                                                            [100%]
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:08.6927619Z ================================== FAILURES ===================================
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:08.6928293Z ___________________ test_windows_helper_script_quotes_paths ___________________
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:08.6928661Z 
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:08.6928855Z     def test_windows_helper_script_quotes_paths():
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:08.6929619Z         s = U.windows_helper_script(app_pid=12, backend_pid=34, installer=Path("C:/Users/O'Neil/x-setup.exe"),
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:08.6930347Z                                     app_exe=Path("C:/Apps/GameDevWorkstation.exe"))
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:08.6930907Z         assert "$AppPid = 12" in s and "$BackendPid = 34" in s
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:08.6931570Z >       assert "'C:/Users/O''Neil/x-setup.exe'" in s and "-ArgumentList '/S' -Wait" in s
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:08.6933493Z E       assert ("'C:/Users/O''Neil/x-setup.exe'" in "# GameDevWorkstation update helper (generated by the backend). Runs detached from the app.\n$ErrorActionPreference = ...xecutable is missing; start GameDevWorkstation from the Start menu' }\nif ($p.ExitCode -ne 0) { exit 1 }\nLog 'done'\n")
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:08.6934753Z 
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:08.6934954Z tests\test_release_feed.py:120: AssertionError
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:08.6935463Z =========================== short test summary info ===========================
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:08.6938757Z FAILED tests/test_release_feed.py::test_windows_helper_script_quotes_paths - assert ("'C:/Users/O''Neil/x-setup.exe'" in "# GameDevWorkstation update helper (generated by the backend). Runs detached from the app.\n$ErrorActionPreference = ...xecutable is missing; start GameDevWorkstation from the Start menu' }\nif ($p.ExitCode -ne 0) { exit 1 }\nLog 'done'\n")
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:08.6940505Z 1 failed, 12 passed in 8.75s
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:09.2057820Z ##[error]Process completed with exit code 1.
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:09.2312410Z Post job cleanup.
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:09.4227396Z [command]"C:\Program Files\Git\bin\git.exe" version
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:09.4674611Z git version 2.56.0.windows.4
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:09.4739840Z Temporarily overriding HOME='D:\a\_temp\0c479496-7faa-42d2-a315-ba72dc610496' before making global git config changes
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:09.4741223Z Adding repository directory to the temporary git global config as a safe directory
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:09.4751472Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\GDH\GDH
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:09.5130484Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:09.5539603Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:10.1265013Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:10.1596890Z http.https://github.com/.extraheader
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:10.1640293Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all http.https://github.com/.extraheader
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:10.2017515Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:10.7689850Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:10.8065921Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:11.3809971Z Cleaning up orphan processes
+Windows build (installer + backend smoke test)	UNKNOWN STEP	2026-11-18T06:58:11.3923316Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-node@v4, astral-sh/setup-uv@v6. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

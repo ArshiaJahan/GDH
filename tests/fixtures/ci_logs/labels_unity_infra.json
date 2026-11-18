@@ -1,0 +1,110 @@
+[
+  {
+    "file": "unity_editor_compile.log",
+    "category": "compile",
+    "path": "Assets/Scripts/Player/PlayerController.cs",
+    "line": 27,
+    "test": null,
+    "origin": "handwritten",
+    "note": "Raw Editor.log excerpt, 3 CS errors; primary is the first one"
+  },
+  {
+    "file": "unity_editmode_failed.xml",
+    "category": "test",
+    "path": "Assets/Tests/EditMode/InventoryTests.cs",
+    "line": 42,
+    "test": "Game.Tests.EditMode.InventoryTests.StackLimit_IsEnforced",
+    "origin": "handwritten",
+    "note": "UTF NUnit3 EditMode results, 1 failed of 5; frame in /github/workspace/Assets"
+  },
+  {
+    "file": "unity_playmode_timeout.xml",
+    "category": "timeout",
+    "path": "Assets/Tests/PlayMode/SpawnerTests.cs",
+    "line": 77,
+    "test": "Game.Tests.PlayMode.SpawnerTests.Player_ReachesGoal",
+    "origin": "handwritten",
+    "note": "UTF PlayMode results, label=Timeout case; first stack frame is in Library/PackageCache so the Assets/ frame is used"
+  },
+  {
+    "file": "unity_license.log",
+    "category": "infra",
+    "path": null,
+    "line": null,
+    "test": null,
+    "origin": "handwritten",
+    "note": "game-ci runner log, Unity licence activation failure (no source location)"
+  },
+  {
+    "file": "unity_package_resolve.log",
+    "category": "dependency",
+    "path": null,
+    "line": null,
+    "test": null,
+    "origin": "handwritten",
+    "note": "Editor.log Package Manager: com.unity.cinemachine@2.99.9 not in registry"
+  },
+  {
+    "file": "unity_cs_in_actions.log",
+    "category": "compile",
+    "path": "Assets/Scripts/Combat/DamageSystem.cs",
+    "line": 112,
+    "test": null,
+    "origin": "handwritten",
+    "note": "gh run view --log-failed shape, game-ci CompilerOutput with CS1503 then CS0165"
+  },
+  {
+    "file": "infra_runner_shutdown.log",
+    "category": "infra",
+    "path": null,
+    "line": null,
+    "test": null,
+    "origin": "handwritten",
+    "note": "Tests running (a test line appears) then runner shutdown signal; infra not test"
+  },
+  {
+    "file": "infra_disk_full.log",
+    "category": "infra",
+    "path": null,
+    "line": null,
+    "test": null,
+    "origin": "handwritten",
+    "note": "IL2CPP build, No space left on device (an IOException stack frame is present but it is not a code bug)"
+  },
+  {
+    "file": "infra_network.log",
+    "category": "infra",
+    "path": null,
+    "line": null,
+    "test": null,
+    "origin": "handwritten",
+    "note": "curl download: Could not resolve host, ECONNRESET, HTTP 503"
+  },
+  {
+    "file": "infra_job_timeout.log",
+    "category": "timeout",
+    "path": null,
+    "line": null,
+    "test": null,
+    "origin": "handwritten",
+    "note": "Job exceeded maximum execution time of 60 minutes, then operation canceled"
+  },
+  {
+    "file": "unity_test_mentions_timeout.xml",
+    "category": "test",
+    "path": "Assets/Tests/EditMode/NetClientTests.cs",
+    "line": 31,
+    "test": "Game.Tests.EditMode.NetClientTests.Config_DefaultTimeoutIsThirtySeconds",
+    "origin": "handwritten",
+    "note": "Tricky: assertion failure whose message mentions 'timeout' in passing; not a timeout"
+  },
+  {
+    "file": "unity_flaky_rerun.log",
+    "category": "flaky",
+    "path": "Assets/Tests/PlayMode/PhysicsTests.cs",
+    "line": 58,
+    "test": "Game.Tests.PlayMode.PhysicsTests.Ball_BouncesOffWall",
+    "origin": "handwritten",
+    "note": "Test failed in attempt 1 and passed on retry in the same log"
+  }
+]

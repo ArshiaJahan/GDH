@@ -1,0 +1,28 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.5, pytest-8.3.4, pluggy-1.5.0
+rootdir: /home/runner/work/demo/demo
+plugins: anyio-4.15.1
+collected 1 item
+
+tests/test_calc.py F                                                     [100%]
+
+=================================== FAILURES ===================================
+_____________________________ test_helper_failure ______________________________
+
+    def test_helper_failure():
+>       check_invariant(50, 10)
+
+tests/test_calc.py:14: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+value = 50, limit = 10
+
+    def check_invariant(value, limit):
+        if value > limit:
+>           raise ValueError(f"value {value} exceeds limit {limit}")
+E           ValueError: value 50 exceeds limit 10
+
+app/helpers.py:3: ValueError
+=========================== short test summary info ============================
+FAILED tests/test_calc.py::test_helper_failure - ValueError: value 50 exceeds...
+============================== 1 failed in 0.02s ===============================

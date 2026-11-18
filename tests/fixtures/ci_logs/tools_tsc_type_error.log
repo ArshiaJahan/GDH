@@ -1,0 +1,7 @@
+Frontend	Typecheck	2026-11-18T10:41:07.0110000Z ##[group]Run npx tsc --noEmit -p .
+Frontend	Typecheck	2026-11-18T10:41:07.1480000Z ^[[36;1mnpx tsc --noEmit -p .^[[0m
+Frontend	Typecheck	2026-11-18T10:41:07.2850000Z shell: /usr/bin/bash -e {0}
+Frontend	Typecheck	2026-11-18T10:41:07.4220000Z ##[endgroup]
+Frontend	Typecheck	2026-11-18T10:41:07.5590000Z src/price.ts(7,9): error TS2322: Type 'string' is not assignable to type 'number'.
+Frontend	Typecheck	2026-11-18T10:41:07.6960000Z src/price.ts(11,41): error TS2322: Type 'string' is not assignable to type 'number'.
+Frontend	Typecheck	2026-11-18T10:41:07.8330000Z ##[error]Process completed with exit code 2.

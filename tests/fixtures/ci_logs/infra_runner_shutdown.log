@@ -1,0 +1,9 @@
+build-and-test	Run tests	﻿2026-11-18T09:12:03.1234567Z ##[group]Run game-ci/unity-test-runner@v4
+build-and-test	Run tests	2026-11-18T09:12:03.1242486Z ##[endgroup]
+build-and-test	Run tests	2026-11-18T09:12:04.1250405Z Starting docker run for tests
+build-and-test	Run tests	2026-11-18T09:12:04.1258324Z [Physics] Ran 120 tests
+build-and-test	Run tests	2026-11-18T09:12:05.1266243Z Running Game.Tests.PlayMode.SpawnerTests.Spawner_CreatesEnemy ... Passed
+build-and-test	Run tests	2026-11-18T09:12:06.1274162Z Running Game.Tests.PlayMode.SpawnerTests.Player_ReachesGoal ...
+build-and-test	Run tests	2026-11-18T09:12:06.1282081Z ##[error]The runner has received a shutdown signal. This can happen when the runner service is stopped, or a manually started runner is canceled.
+build-and-test	Run tests	2026-11-18T09:12:06.1290000Z Error: The operation was canceled.
+build-and-test	Run tests	2026-11-18T09:12:10.1297919Z ##[error]The hosted runner lost communication with the server. Anything in your workflow that terminates the runner process, starves it for CPU/Memory, or blocks its network access can cause this error.

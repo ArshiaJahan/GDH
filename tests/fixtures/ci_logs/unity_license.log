@@ -1,0 +1,21 @@
+Unity Tests (EditMode)	Run game-ci/unity-test-runner	﻿2026-11-18T09:12:03.1234567Z ##[group]Run game-ci/unity-test-runner@v4
+Unity Tests (EditMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:03.1242486Z with:
+Unity Tests (EditMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:04.1250405Z   unityVersion: 2022.3.21f1
+Unity Tests (EditMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:04.1258324Z   testMode: editmode
+Unity Tests (EditMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:05.1266243Z   githubToken: ***
+Unity Tests (EditMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:06.1274162Z env:
+Unity Tests (EditMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:06.1282081Z   UNITY_LICENSE: ***
+Unity Tests (EditMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:06.1290000Z ##[endgroup]
+Unity Tests (EditMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:10.1297919Z Pulling docker image unityci/editor:ubuntu-2022.3.21f1-base-3 ...
+Unity Tests (EditMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:10.1305838Z Starting docker run for tests
+Unity Tests (EditMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:11.1313757Z Unity Editor version: 2022.3.21f1 (1c7a22b5f6c5)
+Unity Tests (EditMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:12.1321676Z [Licensing::Module] Trying to connect to existing licensing client channel...
+Unity Tests (EditMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:12.1329595Z [Licensing::Client] Successfully resolved entitlement
+Unity Tests (EditMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:12.1337514Z [Licensing::Module] Licensing Background thread has ended after 0.43s
+Unity Tests (EditMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:12.1345433Z Unable to find a valid license for this machine. Unity will quit.
+Unity Tests (EditMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:13.1353352Z [Licensing::Module] Error: Access token is unavailable; failed to update
+Unity Tests (EditMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:13.1361271Z LICENSE SYSTEM [2026-11-18 09:12:41] Next license update check is after 2026-11-18T09:42:41
+Unity Tests (EditMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:17.1369190Z Error: Failed to activate license: invalid or expired Unity license (UNITY_LICENSE secret is empty or malformed)
+Unity Tests (EditMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:18.1377109Z BatchMode Quit: No valid Unity Editor license found. Please activate a license for this machine.
+Unity Tests (EditMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:18.1385028Z ##[error]Unity exited with code 1
+Unity Tests (EditMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:18.1392947Z ##[error]Process completed with exit code 1.

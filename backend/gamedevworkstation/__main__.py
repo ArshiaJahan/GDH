@@ -83,6 +83,10 @@ def _setup_logging() -> None:
 
 
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "triage":  # `gdw triage ...`: CI failure triage, no server
+        from .features import ci_triage
+
+        raise SystemExit(ci_triage.cli(sys.argv[2:]))
     ap = argparse.ArgumentParser(prog="gamedevworkstation")
     ap.add_argument("--port", type=int, default=int(os.environ.get("GDW_PORT", "8765")),
                     help="0 = pick a random free port")

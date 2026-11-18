@@ -1,0 +1,25 @@
+Backend tests	Run pytest	2026-11-18T10:41:07.0110000Z ##[group]Run python -m pytest -p no:cacheprovider
+Backend tests	Run pytest	2026-11-18T10:41:07.1480000Z ^[[36;1mpython -m pytest -p no:cacheprovider^[[0m
+Backend tests	Run pytest	2026-11-18T10:41:07.2850000Z shell: /usr/bin/bash -e {0}
+Backend tests	Run pytest	2026-11-18T10:41:07.4220000Z ##[endgroup]
+Backend tests	Run pytest	2026-11-18T10:41:07.5590000Z ============================= test session starts ==============================
+Backend tests	Run pytest	2026-11-18T10:41:07.6960000Z platform darwin -- Python 3.13.5, pytest-8.3.4, pluggy-1.5.0
+Backend tests	Run pytest	2026-11-18T10:41:07.8330000Z rootdir: /home/runner/work/demo/demo
+Backend tests	Run pytest	2026-11-18T10:41:07.9700000Z plugins: anyio-4.15.1
+Backend tests	Run pytest	2026-11-18T10:41:08.1070000Z collected 1 item
+Backend tests	Run pytest	2026-11-18T10:41:08.2440000Z 
+Backend tests	Run pytest	2026-11-18T10:41:08.3810000Z tests/test_calc.py F                                                     [100%]
+Backend tests	Run pytest	2026-11-18T10:41:08.5180000Z 
+Backend tests	Run pytest	2026-11-18T10:41:08.6550000Z =================================== FAILURES ===================================
+Backend tests	Run pytest	2026-11-18T10:41:08.7920000Z __________________________________ test_total __________________________________
+Backend tests	Run pytest	2026-11-18T10:41:08.9290000Z 
+Backend tests	Run pytest	2026-11-18T10:41:09.0660000Z     def test_total():
+Backend tests	Run pytest	2026-11-18T10:41:09.2030000Z >       assert total([{"price": 3, "qty": 2}]) == 7
+Backend tests	Run pytest	2026-11-18T10:41:09.3400000Z E       AssertionError: assert 6 == 7
+Backend tests	Run pytest	2026-11-18T10:41:09.4770000Z E        +  where 6 = total([{'price': 3, 'qty': 2}])
+Backend tests	Run pytest	2026-11-18T10:41:09.6140000Z 
+Backend tests	Run pytest	2026-11-18T10:41:09.7510000Z tests/test_calc.py:6: AssertionError
+Backend tests	Run pytest	2026-11-18T10:41:09.8880000Z =========================== short test summary info ============================
+Backend tests	Run pytest	2026-11-18T10:41:10.0250000Z FAILED tests/test_calc.py::test_total - AssertionError: assert 6 == 7
+Backend tests	Run pytest	2026-11-18T10:41:10.1620000Z ============================== 1 failed in 0.02s ===============================
+Backend tests	Run pytest	2026-11-18T10:41:10.2990000Z ##[error]Process completed with exit code 1.

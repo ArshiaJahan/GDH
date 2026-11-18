@@ -1,0 +1,12 @@
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	﻿2026-11-18T10:02:11.1234567Z ##[group]Run game-ci/unity-test-runner@v4
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T10:02:11.1242486Z ##[endgroup]
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T10:02:12.1250405Z Starting docker run for tests
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T10:02:12.1258324Z Failed : Game.Tests.PlayMode.PhysicsTests.Ball_BouncesOffWall
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T10:02:13.1266243Z   Expected: greater than 0.5f
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T10:02:14.1274162Z   But was:  0.4871f
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T10:02:14.1282081Z   at Game.Tests.PlayMode.PhysicsTests+<Ball_BouncesOffWall>d__3.MoveNext () [0x0004c] in /github/workspace/Assets/Tests/PlayMode/PhysicsTests.cs:58
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T10:02:14.1290000Z Test Run Summary: 12 total, 11 passed, 1 failed
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T10:02:18.1297919Z Retrying failed tests (attempt 2 of 2)
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T10:02:18.1305838Z Running Game.Tests.PlayMode.PhysicsTests.Ball_BouncesOffWall ... Passed
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T10:02:19.1313757Z Test Run Summary: 1 total, 1 passed, 0 failed
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T10:02:20.1321676Z All tests passed on retry

@@ -1,0 +1,11 @@
+Unity Tests (EditMode)	Download Unity editor	﻿2026-11-18T09:12:03.1234567Z ##[group]Run curl -fSL https://download.unity3d.com/download_unity/1c7a22b5f6c5/LinuxEditorInstaller/Unity.tar.xz -o Unity.tar.xz
+Unity Tests (EditMode)	Download Unity editor	2026-11-18T09:12:03.1242486Z ##[endgroup]
+Unity Tests (EditMode)	Download Unity editor	2026-11-18T09:12:04.1250405Z   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+Unity Tests (EditMode)	Download Unity editor	2026-11-18T09:12:04.1258324Z                                  Dload  Upload   Total   Spent    Left  Speed
+Unity Tests (EditMode)	Download Unity editor	2026-11-18T09:12:05.1266243Z   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+Unity Tests (EditMode)	Download Unity editor	2026-11-18T09:12:06.1274162Z curl: (6) Could not resolve host: download.unity3d.com
+Unity Tests (EditMode)	Download Unity editor	2026-11-18T09:12:06.1282081Z Retrying in 5 seconds...
+Unity Tests (EditMode)	Download Unity editor	2026-11-18T09:12:06.1290000Z curl: (56) OpenSSL SSL_read: Connection reset by peer, errno 104
+Unity Tests (EditMode)	Download Unity editor	2026-11-18T09:12:10.1297919Z Error: connect ECONNRESET 185.199.108.133:443
+Unity Tests (EditMode)	Download Unity editor	2026-11-18T09:12:10.1305838Z curl: (22) The requested URL returned error: 503
+Unity Tests (EditMode)	Download Unity editor	2026-11-18T09:12:11.1313757Z ##[error]Process completed with exit code 22.

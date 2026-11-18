@@ -1,0 +1,15 @@
+[Package Manager] Resolving packages...
+[Package Manager] Server::Start -- Port 59812
+An error occurred while resolving packages:
+  Project has invalid dependencies:
+    com.unity.cinemachine: Package [com.unity.cinemachine@2.99.9] cannot be found
+
+A re-import of the project may be required to fix the issue or a manual modification of /github/workspace/Packages/manifest.json file.
+[Package Manager] Cannot connect to Unity Package Manager local server
+Error resolving packages: Unable to add package [com.unity.cinemachine@2.99.9]:
+  No 'com.unity.cinemachine' version matches '2.99.9' in registry https://packages.unity.com (available: 2.9.7, 2.10.0, 3.0.1)
+Assertion failed on expression: 'ret == 0'
+Aborting batchmode due to failure:
+Packages could not be resolved.
+
+Exiting batchmode with failure code.

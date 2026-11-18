@@ -1,0 +1,17 @@
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	﻿2026-11-18T09:12:03.1234567Z ##[group]Run game-ci/unity-test-runner@v4
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:03.1242486Z with:
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:04.1250405Z   unityVersion: 2022.3.21f1
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:04.1258324Z   testMode: playmode
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:05.1266243Z ##[endgroup]
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:06.1274162Z Starting docker run for tests
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:06.1282081Z Unity Editor version: 2022.3.21f1 (1c7a22b5f6c5)
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:06.1290000Z Importing assets from /github/workspace ...
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:10.1297919Z -----CompilerOutput:-stdout--exitcode: 1--compilationhadfailure: True--outfile: Library/Bee/artifacts/1900b0aE.dag/Game.dll
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:10.1305838Z Assets/Scripts/Combat/DamageSystem.cs(112,40): error CS1503: Argument 1: cannot convert from 'int' to 'float'
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:11.1313757Z Assets/Scripts/Combat/DamageSystem.cs(140,21): error CS0165: Use of unassigned local variable 'result'
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:12.1321676Z -----EndCompilerOutput---------------
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:12.1329595Z Scripts have compiler errors.
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:12.1337514Z Aborting batchmode due to failure:
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:12.1345433Z Scripts have compiler errors.
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:13.1353352Z ##[error]Unity exited with code 1
+Unity Tests (PlayMode)	Run game-ci/unity-test-runner	2026-11-18T09:12:13.1361271Z ##[error]Process completed with exit code 1.

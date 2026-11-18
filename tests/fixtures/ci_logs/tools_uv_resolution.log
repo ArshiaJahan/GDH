@@ -1,0 +1,10 @@
+Backend tests	Install dependencies	2026-11-18T10:41:07.0110000Z ##[group]Run uv sync
+Backend tests	Install dependencies	2026-11-18T10:41:07.1480000Z ^[[36;1muv sync^[[0m
+Backend tests	Install dependencies	2026-11-18T10:41:07.2850000Z shell: /usr/bin/bash -e {0}
+Backend tests	Install dependencies	2026-11-18T10:41:07.4220000Z ##[endgroup]
+Backend tests	Install dependencies	2026-11-18T10:41:07.5590000Z Using CPython 3.13.5 interpreter at: /opt/hostedtoolcache/Python/3.13.5/x64/bin/python3
+Backend tests	Install dependencies	2026-11-18T10:41:07.6960000Z   × No solution found when resolving dependencies:
+Backend tests	Install dependencies	2026-11-18T10:41:07.8330000Z   ╰─▶ Because pytest==8.3.4 depends on pluggy>=1.5,<2 and your project depends on pytest==8.3.4, we can conclude that your project depends on pluggy>=1.5,<2.
+Backend tests	Install dependencies	2026-11-18T10:41:07.9700000Z       And because your project depends on pluggy==1.0.0, we can conclude that your project's requirements are unsatisfiable.
+Backend tests	Install dependencies	2026-11-18T10:41:08.1070000Z help: If you want to add the package regardless of the failed resolution, provide the `--frozen` flag to skip locking and syncing.
+Backend tests	Install dependencies	2026-11-18T10:41:08.2440000Z ##[error]Process completed with exit code 1.

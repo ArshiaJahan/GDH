@@ -1,0 +1,128 @@
+[
+  {
+    "file": "tools_pytest_assert.log",
+    "category": "test",
+    "path": "tests/test_calc.py",
+    "line": 6,
+    "test": "tests/test_calc.py::test_total",
+    "origin": "generated",
+    "note": "plain assert failure inside the test body"
+  },
+  {
+    "file": "tools_pytest_helper.log",
+    "category": "test",
+    "path": "tests/test_calc.py",
+    "line": 14,
+    "test": "tests/test_calc.py::test_helper_failure",
+    "origin": "generated",
+    "note": "exception raised in app/helpers.py:3 called from the test; developer should open the test frame first"
+  },
+  {
+    "file": "tools_pytest_import.log",
+    "category": "dependency",
+    "path": "tests/test_import.py",
+    "line": 1,
+    "test": null,
+    "origin": "generated",
+    "note": "ModuleNotFoundError for a third-party module at collection time"
+  },
+  {
+    "file": "tools_pytest_syntax.log",
+    "category": "compile",
+    "path": "app/broken.py",
+    "line": 2,
+    "test": null,
+    "origin": "generated",
+    "note": "SyntaxError in a source module surfaces as a collection error"
+  },
+  {
+    "file": "tools_tsc_type_error.log",
+    "category": "compile",
+    "path": "src/price.ts",
+    "line": 7,
+    "test": null,
+    "origin": "generated",
+    "note": "two TS2322 errors; first is src/price.ts(7,9)"
+  },
+  {
+    "file": "tools_vitest_assert.log",
+    "category": "test",
+    "path": "src/math.test.mjs",
+    "line": 6,
+    "test": "src/math.test.mjs > math > adds numbers",
+    "origin": "generated",
+    "note": "vitest AssertionError with code frame"
+  },
+  {
+    "file": "tools_vitest_timeout.log",
+    "category": "timeout",
+    "path": "src/slow.test.mjs",
+    "line": 3,
+    "test": "src/slow.test.mjs > waits for the socket",
+    "origin": "generated",
+    "note": "vitest 'Test timed out in 300ms'; timeout outranks test"
+  },
+  {
+    "file": "tools_cargo_build.log",
+    "category": "compile",
+    "path": "src/lib.rs",
+    "line": 2,
+    "test": null,
+    "origin": "generated",
+    "note": "rustc E0308 mismatched types"
+  },
+  {
+    "file": "tools_cargo_test_panic.log",
+    "category": "test",
+    "path": "src/lib.rs",
+    "line": 11,
+    "test": "tests::adds_two_numbers",
+    "origin": "generated",
+    "note": "assert_eq! panic in a cargo test"
+  },
+  {
+    "file": "tools_uv_resolution.log",
+    "category": "dependency",
+    "path": "pyproject.toml",
+    "line": null,
+    "test": null,
+    "origin": "handwritten",
+    "note": "uv real message format for incompatible pins; offline run could not reproduce an unsatisfiable resolution"
+  },
+  {
+    "file": "tools_npm_ci_lockfile.log",
+    "category": "dependency",
+    "path": "package-lock.json",
+    "line": null,
+    "test": null,
+    "origin": "handwritten",
+    "note": "npm ci lockfile out of sync with package.json; offline run only reached ENOTCACHED"
+  },
+  {
+    "file": "tools_pytest_flaky_rerun.log",
+    "category": "flaky",
+    "path": "tests/test_sync.py",
+    "line": null,
+    "test": "tests/test_sync.py::test_worker_flush",
+    "origin": "handwritten",
+    "note": "failed twice then passed on rerun in the same run (pytest-rerunfailures not installable offline)"
+  },
+  {
+    "file": "gdh_pytest_docs_assert.log",
+    "category": "test",
+    "path": "tests/test_claude_code.py",
+    "line": 1281,
+    "test": "tests/test_claude_code.py::test_claude_code_docs_describe_verification_isolation_and_billing",
+    "origin": "real-gdh-ci",
+    "note": "real GDH CI failure: assertion in the test body at line 1281 (README text check)"
+  },
+  {
+    "file": "gdh_windows_path_assert.log",
+    "category": "test",
+    "path": "tests/test_release_feed.py",
+    "line": 120,
+    "test": "tests/test_release_feed.py::test_windows_helper_script_quotes_paths",
+    "origin": "real-gdh-ci",
+    "note": "real GDH CI failure on Windows: path-quoting assertion in the test body; step name is UNKNOWN STEP"
+  }
+]

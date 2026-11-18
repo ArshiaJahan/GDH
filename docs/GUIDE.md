@@ -22,6 +22,7 @@ transcription, sound and music. Everything runs locally; the backend listens on 
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [How delegation works](#how-delegation-works)
 - [Built-in skills](#built-in-skills) (and [Unity: MCP or CLI](#unity-mcp-or-cli))
+- [CI failure triage](#ci-failure-triage)
 - [Building the app](#building-the-app)
 - [Versions & updates](#versions--updates)
 - [Upgrading from Workspace 0.4](#upgrading-from-workspace-04) <!-- rename:keep -->
@@ -1164,6 +1165,73 @@ tools to GameDevWorkstation's: `Agent`/`Task` to `spawn_subagent` (opus is `clau
 own files (`references/`, `templates/`, `scripts/`). Skills written for GameDevWorkstation say
 `runtime: gamedevworkstation` in their frontmatter and get no note; `delegation` is native too.
 
+## CI failure triage
+
+`gdw triage` reads a failed CI run's logs, puts each failure in a category and names the file and
+line to look at. The categories are compile error, test failure, flaky test, infra/runner,
+dependency, timeout and unknown.
+
+```bash
+gdw triage 1234567890 --repo owner/name      # a GitHub Actions run (uses your `gh` login)
+gdw triage build.log Editor.log results.xml  # local logs, merged into one report
+gdw triage logs/ --json                      # a folder of *.log / *.txt / *.xml, as JSON
+```
+
+**What it reads:** GitHub Actions logs (`gh run view --log-failed` or raw), pytest, vitest and jest,
+tsc, cargo, uv and pip, npm, dotnet, Unity `Editor.log` compile errors and Unity Test Framework
+NUnit XML from EditMode and PlayMode runs. JUnit XML works too.
+
+**How it classifies:** rules come first (`backend/gamedevworkstation/features/triage_rules.py`),
+and when a failure has a higher-precedence cause, that cause wins. For example, a test killed by a
+runner shutdown is reported as infra, not as a test failure. A suggested fix appears only for
+clear cases such as CS0103 or CS0246, a missing Python module, an npm lockfile out of sync, a full
+disk or a job timeout.
+
+**The model fallback:** steps that fail without matching any rule are reported as `unknown`.
+`--llm` sends those steps (at most 5 per report) to `claude.fast` at low effort through the
+provider layer. Effort goes through the same gate as every other model call, and the log text is
+wrapped as untrusted data. Each report ends with a line saying how many failing steps the rules
+classified.
+
+**Options:**
+- `--summary` appends the report to `$GITHUB_STEP_SUMMARY`.
+- `--comment N` posts it on pull request N, and updates that comment when the run is retried.
+- In the app, `POST /api/triage` takes `text`, `path` or `run_id`. It saves the report as an item
+  (`file` / `ci_triage`).
+
+**As a GitHub Action:** `.github/workflows/triage.yml` runs after the CI workflow fails. It writes
+a job summary and comments on the pull request. It uses rules only, so it needs no model key. It
+runs from the default branch and never checks out or runs pull-request code. Its permissions are
+`actions: read`, `contents: read` and `pull-requests: write`. Runs from fork pull requests get the
+job summary but no comment. Another repository can use the composite action:
+
+```yaml
+- uses: ArshiaJahan/GDH/.github/actions/triage@main
+  with:
+    run-id: ${{ github.event.workflow_run.id }}
+    comment-pr: ${{ github.event.workflow_run.pull_requests[0].number }}
+```
+
+**Accuracy:** `tests/test_triage_fixtures.py` checks the rules against 26 labelled failed logs in
+`tests/fixtures/ci_logs/`. They break down as:
+- 2 real failures from this repository's CI
+- 9 made by running the real tools on small failing examples
+- 15 written by hand where a tool couldn't be run here: Unity, runner and network failures, uv,
+  npm, and a flaky rerun
+
+The fixtures were written by different agents from the rules, and the rules author never saw them.
+
+| Run (2026-11-18) | Category | File and line | Classified by rules |
+| --- | --- | --- | --- |
+| First run, fixtures unseen | 24/26 | 18/20 | 96% |
+| After fixing the two rule gaps it found | 26/26 | 19/20 | 100% |
+
+The first run's misses were:
+- a Unity test retried and then passing, which should be flaky
+- an assertion whose message only mentions "timeout"
+
+The remaining miss is a uv resolution failure, which names no file.
+
 ## Building the app
 
 ```bash
@@ -1368,6 +1436,14 @@ parameters). They also cover:
   install refused from source, and the swap helper against a fake signed bundle. The swap test
   covers install, a failed launch that restores the old app, and rollback. `version.py`
   bumping every file is tested too.
+- CI failure triage:
+  - `tests/test_triage_rules.py`: each rule and log format, precedence, NUnit limits, slow-regex
+    inputs, and the Markdown escaping, so a log can't add mentions or links to a PR comment.
+  - `tests/test_triage_fixtures.py`: accuracy against the labelled logs.
+  - `tests/test_ci_triage.py`: the CLI, the route, and the model fallback with a fake provider,
+    including the effort gate.
+  - `tests/test_triage_workflow.py`: the workflow's trigger and permissions, and that it never
+    checks out pull-request code.
 
 ## Where things live
 

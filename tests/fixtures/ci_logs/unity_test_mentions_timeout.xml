@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<test-run id="2" testcasecount="3" result="Failed(Child)" total="3" passed="2" failed="1" inconclusive="0" skipped="0" asserts="2" engine-version="3.5.0.0" clr-version="4.0.30319.42000" start-time="2026-11-18 09:14:00Z" end-time="2026-11-18 09:14:09Z" duration="9.4">
+  <test-suite type="TestSuite" id="1000" name="Game.Tests.EditMode.dll" fullname="Game.Tests.EditMode.dll" runstate="Runnable" testcasecount="3" result="Failed(Child)" site="Child" start-time="2026-11-18 09:14:00Z" end-time="2026-11-18 09:14:09Z" duration="9.4" total="3" passed="2" failed="1" warnings="0" inconclusive="0" skipped="0" asserts="2">
+    <test-suite type="Assembly" id="1001" name="Game.Tests.EditMode.dll" fullname="/github/workspace/Library/ScriptAssemblies/Game.Tests.EditMode.dll" runstate="Runnable" testcasecount="3" result="Failed(Child)" site="Child" total="3" passed="2" failed="1" warnings="0" inconclusive="0" skipped="0" asserts="2">
+      <properties>
+        <property name="platform" value="EditMode" />
+      </properties>
+      <test-suite type="TestSuite" id="1002" name="Game" fullname="Game" runstate="Runnable" testcasecount="3" result="Failed(Child)" site="Child" total="3" passed="2" failed="1">
+        <test-suite type="TestFixture" id="1003" name="NetClientTests" fullname="Game.Tests.EditMode.NetClientTests" classname="Game.Tests.EditMode.NetClientTests" runstate="Runnable" testcasecount="3" result="Failed(Child)" site="Child" total="3" passed="2" failed="1" asserts="2">
+          <test-case id="1001" name="Connect_UsesDefaultPort" fullname="Game.Tests.EditMode.NetClientTests.Connect_UsesDefaultPort" methodname="Connect_UsesDefaultPort" classname="Game.Tests.EditMode.NetClientTests" runstate="Runnable" seed="1037" result="Passed" start-time="2026-11-18 09:14:01Z" end-time="2026-11-18 09:14:01Z" duration="0.003" asserts="1"></test-case>
+          <test-case id="1002" name="Config_DefaultTimeoutIsThirtySeconds" fullname="Game.Tests.EditMode.NetClientTests.Config_DefaultTimeoutIsThirtySeconds" methodname="Config_DefaultTimeoutIsThirtySeconds" classname="Game.Tests.EditMode.NetClientTests" runstate="Runnable" seed="1074" result="Failed" start-time="2026-11-18 09:14:02Z" end-time="2026-11-18 09:14:02Z" duration="0.008" asserts="0">
+            <failure>
+              <message><![CDATA[  Expected: 30.0f
+  But was:  3.0f
+  Config.RequestTimeout (timeout in seconds) should default to 30
+]]></message>
+              <stack-trace><![CDATA[at Game.Tests.EditMode.NetClientTests.Config_DefaultTimeoutIsThirtySeconds () [0x00011] in /github/workspace/Assets/Tests/EditMode/NetClientTests.cs:31]]></stack-trace>
+            </failure>
+            <output><![CDATA[  Expected: 30.0f
+]]></output>
+          </test-case>
+          <test-case id="1003" name="Retry_BackoffGrows" fullname="Game.Tests.EditMode.NetClientTests.Retry_BackoffGrows" methodname="Retry_BackoffGrows" classname="Game.Tests.EditMode.NetClientTests" runstate="Runnable" seed="1111" result="Passed" start-time="2026-11-18 09:14:03Z" end-time="2026-11-18 09:14:03Z" duration="0.003" asserts="1"></test-case>
+        </test-suite>
+      </test-suite>
+    </test-suite>
+  </test-suite>
+</test-run>
