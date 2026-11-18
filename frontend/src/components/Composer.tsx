@@ -33,7 +33,7 @@ type SkillInfo = { name: string; description: string; featured?: boolean };
 /** Short menu blurbs for the built-in skills pinned at the top of the skills menu. */
 const FEATURED: Record<string, string> = {
   graphify: "Turn a folder, repo or docs into a queryable knowledge graph",
-  "grill-me": "A relentless interview to sharpen a plan or design",
+  grilling: "A relentless interview to sharpen a plan or design",
   "claude-handoff": "Hand this conversation to a fresh background agent",
   "game-designer": "Design, critique and balance games and game features",
   "cost-effective-claude-delegation": "Do a task at the lowest total cost",

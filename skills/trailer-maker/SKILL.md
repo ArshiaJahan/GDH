@@ -40,7 +40,7 @@ Pinned: Unity 6000.3, Unity Recorder 5.1 (`com.unity.recorder`), MCP for Unity 1
    captions and REPORT.md are committed.
 
 ## Procedure (the `trailer` workflow: one phase per step)
-1. **Brief.** Interview the user (grill-me style, few questions at a time) and write `T/brief.md`. Freeze the pass
+1. **Brief.** Interview the user (grilling style, few questions at a time) and write `T/brief.md`. Freeze the pass
    score. The user approves the brief before anything is captured.
 2. **Beat sheet.** Pick the type's template (references/beat-sheets.md), write `T/beats.json`; the hook lands by
    10 s. `python3 <skills>/trailer-maker/scripts/trailer_edl.py check --beats T/beats.json` → `RESULT: OK`.

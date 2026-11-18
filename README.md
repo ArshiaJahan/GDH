@@ -105,7 +105,7 @@ and whether to work through the Editor (MCP) or batchmode.
 | [`postmortem`](skills/postmortem) | Writes `POSTMORTEMS.md` entries and proposes how to enforce the lesson |
 | [`trailer-maker`](skills/trailer-maker/SKILL.md) | Brief → capture (Unity Recorder) → ffmpeg edit → ElevenLabs music/VO → platform exports |
 
-General skills ship too: `delegation` (on by default), `game-designer`, `graphify`, `grill-me`,
+General skills ship too: `delegation` (on by default), `game-designer`, `graphify`, `grilling`,
 `claude-handoff` and two Claude delegation strategies.
 
 ### Unity: MCP or CLI

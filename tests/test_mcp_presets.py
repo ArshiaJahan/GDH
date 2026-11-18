@@ -178,7 +178,7 @@ def test_invoking_a_unity_skill_enables_unity_for_the_session(env, connects):
     # A skill without MCP servers enables none.
     sid2 = c.post("/api/sessions", json={}, headers=H).json()["id"]
     fake.script = [text_response("ok")]
-    c.post(f"/api/sessions/{sid2}/messages", json={"text": "x", "skill": "grill-me"}, headers=H)
+    c.post(f"/api/sessions/{sid2}/messages", json={"text": "x", "skill": "grilling"}, headers=H)
     wait_idle(c, sid2)
     assert s.store.get(sid2)["settings"]["connectors"] == {} and not notices(seen, sid2)
 
@@ -231,5 +231,5 @@ def test_config_maps_every_unity_skill_to_unity(cfg):
 
     for name in UNITY_PACK:
         assert cfg.skill_mcp_servers(name) == ["unity"], name
-    assert cfg.skill_mcp_servers("grill-me") == []
+    assert cfg.skill_mcp_servers("grilling") == []
     assert cfg.mcp_presets()["unity"]["args"] == UNITY_ARGS

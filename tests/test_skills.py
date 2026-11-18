@@ -30,7 +30,7 @@ REPO = Path(__file__).resolve().parents[1]
 BUILTINS = {
     "delegation": "Plan and delegate jobs across Claude and Codex subagents",
     "graphify": "Use for any question about a codebase, its architecture",
-    "grill-me": "A relentless interview to sharpen a plan or design.",
+    "grilling": "Grill the user relentlessly about a plan, decision, or idea.",
     "claude-handoff": "Hand the current conversation off to a fresh background agent",
     "game-designer": "Expert game design partner with 15+ years of applied craft.",
     "cost-effective-claude-delegation": "Do a task in any project at the lowest total cost",
@@ -63,7 +63,7 @@ def test_builtin_skills_listed_with_names_and_descriptions():
         assert s["source"] == "builtin" and s["description"].startswith(desc), name
         assert Path(s["path"]).parent.name == name  # folder name = frontmatter name
         assert s["featured"] == (name in sk.FEATURED_SKILLS)
-    assert listed["grilling"]["source"] == "builtin"  # grill-me hands off to it
+    assert "grill-me" not in listed  # the old alias was dropped; grilling is the skill
     assert listed["graphify"]["description"].endswith("query/path/explain tools.")  # quoted value, unquoted
     assert listed["claude-handoff"]["argument_hint"] == "What will the next session be used for?"
     assert {n for n, s in listed.items() if s["native"]} >= {"delegation", "high-performance-claude-delegation"}
@@ -106,9 +106,9 @@ def test_tool_mapping_note_only_for_non_native_skills():
     native = sk.skills_prompt(["delegation", "high-performance-claude-delegation"])
     assert '<skill name="delegation">' in native and sk.TOOL_MAPPING_NOTE not in native
     assert "runtime:" not in native  # frontmatter isn't injected
-    mixed = sk.skills_prompt(["delegation", "grill-me", "graphify"])
+    mixed = sk.skills_prompt(["delegation", "grilling", "graphify"])
     assert mixed.startswith(sk.TOOL_MAPPING_NOTE) and mixed.count(sk.TOOL_MAPPING_NOTE) == 1
-    assert '<skill name="grill-me" runtime="claude-code" folder="' in mixed
+    assert '<skill name="grilling" runtime="claude-code" folder="' in mixed
     for real in ("spawn_subagent", "run_command", "read_file", "list_dir", "search", "write_file", "edit_file",
                  "web_search", "web_fetch", "read_skill", "claude.deep", "claude.standard", "claude.fast"):
         assert real in sk.TOOL_MAPPING_NOTE
@@ -134,21 +134,21 @@ def test_invoking_a_skill_on_send_enables_it_and_reaches_the_prompt(env):
     s.config.skills["disclosure"] = "full"  # legacy sessions; progressive: tests/test_skill_disclosure.py
     fake.script = [text_response("Q1 …"), text_response("Q2 …")]
     sid = c.post("/api/sessions", json={}, headers=H).json()["id"]
-    r = c.post(f"/api/sessions/{sid}/messages", json={"text": "my launch plan", "skill": "grill-me"}, headers=H)
+    r = c.post(f"/api/sessions/{sid}/messages", json={"text": "my launch plan", "skill": "grilling"}, headers=H)
     assert r.status_code == 200
     wait_idle(c, sid)
-    assert s.store.get(sid)["settings"]["skills"] == ["delegation", "grill-me"]
+    assert s.store.get(sid)["settings"]["skills"] == ["delegation", "grilling"]
     user = c.get(f"/api/sessions/{sid}/messages", headers=H).json()[0]
-    assert user["meta"]["invoked_skill"] == "grill-me"
-    assert user["content"][0]["text"] == "Use the grill-me skill.\n\nmy launch plan"
+    assert user["meta"]["invoked_skill"] == "grilling"
+    assert user["content"][0]["text"] == "Use the grilling skill.\n\nmy launch plan"
     system = "\n".join(fake.calls[-1].system)
-    assert '<skill name="grill-me" runtime="claude-code"' in system and sk.TOOL_MAPPING_NOTE in system
+    assert '<skill name="grilling" runtime="claude-code"' in system and sk.TOOL_MAPPING_NOTE in system
     assert c.get(f"/api/sessions/{sid}", headers=H).json()["title"] == "my launch plan"
     # A follow-up turn without the chip keeps the skill on; enabling twice doesn't duplicate it.
-    c.post(f"/api/sessions/{sid}/messages", json={"text": "next", "skill": "grill-me"}, headers=H)
+    c.post(f"/api/sessions/{sid}/messages", json={"text": "next", "skill": "grilling"}, headers=H)
     wait_idle(c, sid)
-    assert s.store.get(sid)["settings"]["skills"] == ["delegation", "grill-me"]
-    assert '<skill name="grill-me"' in "\n".join(fake.calls[-1].system)
+    assert s.store.get(sid)["settings"]["skills"] == ["delegation", "grilling"]
+    assert '<skill name="grilling"' in "\n".join(fake.calls[-1].system)
 
 
 def test_invoking_a_skill_without_text_and_unknown_skills(env):
@@ -249,8 +249,8 @@ def test_user_skill_cant_shadow_another_skill_by_its_frontmatter_name(env):
     assert r.status_code == 200 and r.json()["name"] == "notes"
     assert sk.get_skill("delegation")["source"] == "builtin"
     # Intended: a user skill in a built-in's folder still overrides it.
-    sk.save_skill("grill-me", "---\nname: grill-me\ndescription: Mine.\n---\nMine")
-    assert sk.get_skill("grill-me")["source"] == "user"
+    sk.save_skill("grilling", "---\nname: grilling\ndescription: Mine.\n---\nMine")
+    assert sk.get_skill("grilling")["source"] == "user"
 
 
 def test_unknown_models_are_rejected(env):

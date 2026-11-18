@@ -435,7 +435,7 @@ async def test_one_time_offer_card(app, proj):
     other = proj.parent / "Other"
     (other / "ProjectSettings").mkdir(parents=True)
     (other / "ProjectSettings/ProjectVersion.txt").write_text("x")
-    s3 = session(app, other, skills=["grill-me"])
+    s3 = session(app, other, skills=["grilling"])
     await turn(app, s3["id"])
     assert app.approvals.pending() == []
 

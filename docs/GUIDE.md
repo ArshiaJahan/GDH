@@ -941,7 +941,7 @@ others turn on when you invoke them.
 |---|---|
 | `delegation` | Cost-aware routing across Claude, Codex and ElevenLabs (on by default) |
 | `graphify` | Turns a folder, repo or docs into a knowledge graph you can query |
-| `grill-me` | A relentless interview to sharpen a plan or design (uses `grilling`) |
+| `grilling` | A relentless interview to sharpen a plan or design, a round of questions at a time |
 | `claude-handoff` | Writes a handoff summary and starts a fresh background agent with it |
 | `game-designer` | Game design partner, with references, templates and a calculator script |
 | `cost-effective-claude-delegation` | Does a task at the lowest total cost, step by step |

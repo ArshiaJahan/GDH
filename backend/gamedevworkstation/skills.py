@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 # Built-in skills shown first in the composer's skill menu (in this order).
-FEATURED_SKILLS = ["graphify", "grill-me", "claude-handoff", "game-designer",
+FEATURED_SKILLS = ["graphify", "grilling", "claude-handoff", "game-designer",
                    "cost-effective-claude-delegation", "high-performance-claude-delegation", "unity-router"]
 NATIVE_BY_NAME = {"delegation"}
 MAX_SKILL_FILE = 200_000

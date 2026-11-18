@@ -57,7 +57,7 @@ def add_read(app, sid, name, *, path="", error=False):
     return result
 
 
-@pytest.mark.parametrize("names", [[], ["delegation"], ["delegation", "graphify", "grill-me"]])
+@pytest.mark.parametrize("names", [[], ["delegation"], ["delegation", "graphify", "postmortem"]])
 def test_legacy_system_segments_are_byte_equal(names):
     before = sk.skills_prompt(names)
     expected = ["Enabled skills:\n\n" + before] if before else []
@@ -184,28 +184,28 @@ def test_invoking_inserts_once_before_user_and_reloads_after_clear(env, monkeypa
     app.fake.script = [text_response("first"), text_response("again"), text_response("after clear")]
     initial = app.runner.system_segments(app.store.get(sid))
     for _ in range(2):
-        r = c.post(f"/api/sessions/{sid}/messages", json={"text": "my plan", "skill": "grill-me"}, headers=H)
+        r = c.post(f"/api/sessions/{sid}/messages", json={"text": "my plan", "skill": "postmortem"}, headers=H)
         assert r.status_code == 200
         wait_idle(c, sid)
     messages = app.store.messages(sid)
     loads = [m for m in messages if m.meta.get("skill_load")]
     assert len(loads) == 1 and messages[0] == loads[0]
-    assert loads[0].role == "user" and loads[0].meta["skill_load"] == "grill-me"
-    assert loads[0].text() == sk.skill_load_text("grill-me")
-    assert messages[1].meta["invoked_skill"] == "grill-me"
-    assert messages[1].text() == "Use the grill-me skill.\n\nmy plan"
+    assert loads[0].role == "user" and loads[0].meta["skill_load"] == "postmortem"
+    assert loads[0].text() == sk.skill_load_text("postmortem")
+    assert messages[1].meta["invoked_skill"] == "postmortem"
+    assert messages[1].text() == "Use the postmortem skill.\n\nmy plan"
     settings = app.store.get(sid)["settings"]
-    assert settings["loaded_skills"] == ["grill-me"] and settings["skills"] == ["delegation", "grill-me"]
-    assert enabled == ["grill-me", "grill-me"]
+    assert settings["loaded_skills"] == ["postmortem"] and settings["skills"] == ["delegation", "postmortem"]
+    assert enabled == ["postmortem", "postmortem"]
     assert all(call.system == initial for call in app.fake.calls)
     assert app.store.get(sid)["title"] == "my plan"
     app.store.clear(sid)
-    c.post(f"/api/sessions/{sid}/messages", json={"skill": "grill-me"}, headers=H)
+    c.post(f"/api/sessions/{sid}/messages", json={"skill": "postmortem"}, headers=H)
     wait_idle(c, sid)
-    assert [m.meta["skill_load"] for m in app.runner.model_history(sid) if m.meta.get("skill_load")] == ["grill-me"]
+    assert [m.meta["skill_load"] for m in app.runner.model_history(sid) if m.meta.get("skill_load")] == ["postmortem"]
 
 
-@pytest.mark.parametrize("skill", ["grill-me", "high-performance-claude-delegation"])
+@pytest.mark.parametrize("skill", ["postmortem", "high-performance-claude-delegation"])
 def test_legacy_invocation_has_no_load_and_keeps_full_system_prompt(env, skill):
     c, app = env
     app.config.skills["disclosure"] = "full"
@@ -234,14 +234,14 @@ async def test_system_is_byte_identical_across_every_model_call_when_skills_are_
     s = app.store.create(**PROGRESSIVE)
     initial = app.runner.system_segments(s)
     app.fake.script = [tool_response("read_skill", {"name": n}) for n in
-                       ("graphify", "grilling", "game-designer", "grill-me", "graphify", "delegation")]
+                       ("graphify", "grilling", "game-designer", "postmortem", "graphify", "delegation")]
     app.fake.script.append(text_response("done"))
     app.store.add_message(s["id"], Message.user("follow these protocols"))
     await app.runner.start(s["id"])
     assert len(app.fake.calls) == 7
     assert all(call.system == initial for call in app.fake.calls)
     settings = app.store.get(s["id"])["settings"]
-    assert settings["loaded_skills"] == ["game-designer", "grill-me", "graphify"]
+    assert settings["loaded_skills"] == ["game-designer", "postmortem", "graphify"]
     assert settings["skills"] == ["delegation"]
     updates = [e["data"] for e in app.bus.replay(0, s["id"]) if e["type"] == "session.updated"]
     assert any(e["settings"].get("loaded_skills") == settings["loaded_skills"] for e in updates)
@@ -282,16 +282,16 @@ async def test_read_skill_only_tracks_successful_main_agent_full_reads(app):
     app.config.skills["max_loaded"] = 2
     s = app.store.create(**PROGRESSIVE)
     ctx = ToolContext(app=app, session=s, run_id="main:skills")
-    for n in ("grilling", "graphify", "grill-me", "graphify"):
+    for n in ("grilling", "graphify", "postmortem", "graphify"):
         assert not (await app.tools.run(ctx, "read_skill", {"name": n})).is_error
-    assert app.store.get(s["id"])["settings"]["loaded_skills"] == ["grill-me", "graphify"]
+    assert app.store.get(s["id"])["settings"]["loaded_skills"] == ["postmortem", "graphify"]
     for args in ({"name": "game-designer", "path": "templates/one-page-concept.md"},
                  {"name": "missing"}, {"name": "game-designer", "path": "missing"}):
         await app.tools.run(ctx, "read_skill", args)
     for role in ("subagent", "hook"):
         child = ToolContext(app=app, session=s, run_id=role + ":skills", role=role)
         await app.tools.run(child, "read_skill", {"name": "game-designer"})
-    assert app.store.get(s["id"])["settings"]["loaded_skills"] == ["grill-me", "graphify"]
+    assert app.store.get(s["id"])["settings"]["loaded_skills"] == ["postmortem", "graphify"]
     app.config.skills["disclosure"] = "full"
     legacy = app.store.create()
     app.config.skills["disclosure"] = "progressive"
@@ -368,10 +368,10 @@ async def test_compaction_reinjects_each_lru_skill_once_in_order_and_drops_evict
 
 
 async def test_compaction_leaves_latest_kept_loads_alone_and_ignores_failed_reads(app):
-    s = app.store.create(**{**PROGRESSIVE, "loaded_skills": ["grilling", "grill-me", "game-designer"]})
+    s = app.store.create(**{**PROGRESSIVE, "loaded_skills": ["grilling", "postmortem", "game-designer"]})
     sid = s["id"]
     app.store.add_message(sid, load_message("grilling"))
-    add_read(app, sid, "grill-me")
+    add_read(app, sid, "postmortem")
     add_read(app, sid, "game-designer", error=True)
     cut = len(app.runner.model_history(sid))
     app.store.add_message(sid, Message.user("keep this turn"))
@@ -379,8 +379,8 @@ async def test_compaction_leaves_latest_kept_loads_alone_and_ignores_failed_read
     app.fake.script = [text_response("summary")]
     await cx.compact_messages(app, sid, app.runner.model_history(sid), cut)
     active = app.runner.model_history(sid)
-    assert active[0].meta.get("summary") and active[1].meta.get("skill_load") == "grill-me"
-    assert [m.meta["skill_load"] for m in active if m.meta.get("skill_load")] == ["grill-me"]
+    assert active[0].meta.get("summary") and active[1].meta.get("skill_load") == "postmortem"
+    assert [m.meta["skill_load"] for m in active if m.meta.get("skill_load")] == ["postmortem"]
     assert "grilling" in cx.skill_load_positions(active) and "game-designer" not in cx.skill_load_positions(active)
     assert cx._pairs_intact(active)
 
@@ -446,7 +446,7 @@ def test_context_breakdown_splits_system_and_history_skills_without_double_count
     sid = s["id"]
     app.store.add_message(sid, Message.user("do the work"))
     app.store.add_message(sid, load_message("grilling"))
-    result = add_read(app, sid, "grill-me")
+    result = add_read(app, sid, "postmortem")
     ctx = context_breakdown(app, sid)
     split = ctx["skill_parts"]
     assert split["pinned"] == cx.est("Enabled skills:\n\n" + sk.skill_load_text("delegation"))
