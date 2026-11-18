@@ -1,0 +1,19 @@
+{
+    "name": "Gdw.Replay.Editor",
+    "rootNamespace": "Gdw.Replay.Editor",
+    "references": [
+        "Gdw.Replay.Runtime",
+        "Gdw.Replay.InputSystem"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

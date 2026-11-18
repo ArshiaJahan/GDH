@@ -27,6 +27,7 @@ from ..agent.tools import ToolContext, ToolOutput, obj, wrap_untrusted
 from . import unity_cli as uc
 from . import unity_clone as uclone
 from . import unity_harness as uh
+from .replay import run_replay_op
 from .unity_bridge import BACKENDS, ROUTE_LABELS, SHOT_DIR, BridgeResult, get_bridge, is_unity_project
 
 if TYPE_CHECKING:
@@ -39,8 +40,12 @@ log = logging.getLogger(__name__)
 PRESET = "unity-router"
 _BG: set[asyncio.Future] = set()  # fire-and-forget state publishes
 OPS = ["status", "compile", "test", "build", "import", "exec", "menu", "eval", "command", "commands", "screenshot",
-       "play", "log", "open_editor", "close_editor", "install_pipeline", "install_harness"]
+       "play", "log", "open_editor", "close_editor", "install_pipeline", "install_harness",
+       "replay_install", "record", "replay", "replay_verify", "replay_render", "replay_stop", "replay_status"]
 ACTIONS = ("install_pipeline", "install_harness", "close_editor", "open_editor", "use_mcp_once", "use_clone", "update_cli")
+# Tool op names → replay.run_replay_op ops (contract §7).
+_REPLAY_TOOL_OPS = {"record": "record", "replay": "replay", "replay_verify": "verify", "replay_render": "render",
+                    "replay_stop": "stop", "replay_status": "status"}
 
 TOOL_DESCRIPTION = (
     "Drive Unity for this project through the harness. The route is chosen by the Unity backend setting: "
@@ -80,6 +85,27 @@ SCHEMA = obj({
     "timeout_s": {"type": "integer", "minimum": 10, "maximum": 3600},
     "route": {"type": "string", "enum": ["auto", "live", "batch"],
               "description": "require a live or batch route; only when the user asked"},
+    "run_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{7,63}$",
+               "description": "replay run id (record picks rr_<16 hex> when omitted)"},
+    "replay_path": {"type": "string",
+                    "description": "project-relative .gdwreplay path (default Logs/harness/replay/<run_id>/run.gdwreplay)"},
+    "seed": {"type": "integer", "minimum": 0, "maximum": 4294967295,
+             "description": "uint32 seed for deterministic RNG"},
+    "fixed_dt": {"type": "number", "exclusiveMinimum": 0, "maximum": 1,
+                 "description": "fixed timestep in seconds (0.001-1.0)"},
+    "capture": {"type": "object", "additionalProperties": False, "required": ["formats"],
+                "description": "render needs it; formats mp4|gif",
+                "properties": {
+                    "formats": {"type": "array", "minItems": 1,
+                                "items": {"type": "string", "enum": ["mp4", "gif"]}},
+                    "backend": {"type": "string", "enum": ["auto", "recorder", "png"], "default": "auto"},
+                    "start_frame": {"type": "integer", "minimum": 0},
+                    "end_frame_exclusive": {"type": "integer", "minimum": 1},
+                    "width": {"type": "integer", "minimum": 16, "maximum": 1920},
+                    "height": {"type": "integer", "minimum": 16, "maximum": 1080},
+                    "fps": {"type": "integer", "minimum": 1, "maximum": 60}}},
+    "subjects": {"type": "array", "items": {"type": "string"}, "maxItems": 32,
+                 "description": "provider ids or scene paths to record/replay"},
 }, ["op"])
 
 
@@ -219,6 +245,9 @@ async def run_op(app: "AppState", session: dict, a: dict, cancel: asyncio.Event 
     want = a.get("route") or "auto"
     if op == "status":
         return ToolOutput(_state_text(await br.full_state(session)))
+    if op in _REPLAY_TOOL_OPS:
+        # run_replay_op owns validation, the Plan gate (verify follows test consent) and the report.
+        return await run_replay_op(app, session, _REPLAY_TOOL_OPS[op], a, cancel=cancel)
     cls = br.op_class("eval" if op == "menu" else op, str(a.get("name") or "") or None)
     if session.get("mode") == "plan" and cls not in ("read", "verify"):
         return ToolOutput(f"Plan only mode: Unity {op} isn't run (only status, compile and tests are). "
@@ -288,6 +317,8 @@ async def run_op(app: "AppState", session: dict, a: dict, cancel: asyncio.Event 
         return _last_log(root, int(a.get("lines") or 200))
     elif op in ("open_editor", "close_editor", "install_pipeline", "install_harness"):
         r = await setup_action(app, session, op)
+    elif op == "replay_install":
+        r = await run_replay_tool_op(app, session, op, a, br, consent)
     else:
         return ToolOutput(f"Unknown op {op!r}. ops: {', '.join(OPS)}", is_error=True)
     if op not in ("commands",):
@@ -394,6 +425,14 @@ async def setup_action(app: "AppState", session: dict, action: str) -> BridgeRes
                         report=run.stderr_tail[-3000:], evidence={"cmd": run.cmd, "exit_code": run.exit_code})
 
 
+async def run_replay_tool_op(app: "AppState", session: dict, op: str, a: dict, br,
+                             consent: dict) -> BridgeResult:
+    """The unity tool's replay_install (the replay ops go through replay.run_replay_op)."""
+    if op != "replay_install":
+        raise ValueError(f"{op} isn't a replay_install call")
+    return await br.replay_install(session, consent=consent)
+
+
 def install(S: "AppState") -> None:
     """Register the `unity` tool (idempotent; tests call this on a bare AppState)."""
     get_bridge(S)
@@ -492,5 +531,5 @@ def register(app_: "FastAPI", api: "APIRouter", S: "AppState") -> None:
         return {"cancelled": await S.jobs.cancel(job_id)}
 
 
-__all__ = ["ACTIONS", "OPS", "gate_consent", "install", "install_harness_action", "record_evidence", "register", "run_op",
-           "setup_action"]
+__all__ = ["ACTIONS", "OPS", "gate_consent", "install", "install_harness_action", "record_evidence", "register",
+           "run_op", "run_replay_tool_op", "setup_action"]

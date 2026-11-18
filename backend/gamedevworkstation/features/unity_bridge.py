@@ -104,6 +104,15 @@ OP_ROUTES: dict[str, tuple[str, ...]] = {
     "command": ("cli_live",),
     "screenshot": ("mcp", "cli_live", "cli_batch", "raw_batch"),  # batch: unity.sh → HarnessCli.Screenshot
     "play": ("cli_live",),
+    # record/stop/status are live only (contract §7): they drive ReplayCommands in the open Editor.
+    "record": ("mcp", "cli_live"),
+    "stop": ("mcp", "cli_live"),
+    "status": ("mcp", "cli_live"),
+    # replay/verify/render run the PlayMode verification test in a batch Editor.
+    "replay": ("cli_batch", "raw_batch"),
+    "verify": ("cli_batch", "raw_batch"),
+    "render": ("cli_batch", "raw_batch"),
+    "replay_install": ("files",),
 }
 # Approval classes (unity tool + gates): read never asks; verify asks unless consented (and runs in
 # Plan only mode); change / code / setup always ask unless allowlisted and never run in Plan mode.
@@ -115,6 +124,7 @@ SETUP_OPS = {"install_pipeline", "open_editor", "close_editor", "self_update", "
 READ_COMMANDS = {"editor_status", "recompile_status", "test_status", "test status", "test list", "list_tests",
                  "get_scene_hierarchy", "find_gameobjects", "list_build_targets", "wait_status"}
 ACTION_ORDER = ("install_pipeline", "use_mcp_once", "use_clone", "close_editor", "install_harness")
+REPLAY_OPS = {"record", "stop", "status", "replay", "verify", "render"}
 CLONE_OPS = {"compile", "test", "screenshot"}  # ops that may run on a copy of the project while the Editor holds it
 CLONE_ACTION_OPS = {"compile", "test"}  # the chip's use_clone action (it compiles on the copy)
 SHOT_HARNESS_VERSION = 3  # HarnessCli.Screenshot
@@ -462,7 +472,7 @@ class UnityBridge:
         self.app.db.kv_set(ALLOW_KEY + project_key(project), cur)
 
     @staticmethod
-    def op_class(op: str, name: str | None = None) -> str:
+    def op_class(op: str, name: str | None = None, *, capture: bool = False) -> str:
         if op in READ_OPS:
             return "read"
         if op in VERIFY_OPS:
@@ -471,20 +481,26 @@ class UnityBridge:
             return "code"
         if op in SETUP_OPS:
             return "setup"
+        if op == "replay_install":
+            return "setup"
+        if op == "verify":
+            # Contract §7: verify follows test consent, except a capture run writes exports.
+            return "change" if capture else "verify"
         if op == "command" and name and name.strip() in READ_COMMANDS:
             return "read"
         return "change"
 
     async def ensure_allowed(self, session: dict, op: str, key: str, *, route: str, argv: list[str] | None = None,
                              consent: dict | None = None, detail: str = "", code: str | None = None,
-                             name: str | None = None) -> str | None:
+                             name: str | None = None, capture: bool = False) -> str | None:
         """None when the op may run, else the refusal text. Plan only mode: read and verify ops only.
         Verify ops pass with gate consent or the project's "always allow"; everything else asks with a
-        `unity` approval card (eval always shows its code; its allow is per session and per code)."""
+        `unity` approval card (eval always shows its code; its allow is per session and per code).
+        `capture` makes a verify op a change (it writes capture files into the project)."""
         session = self.app.store.get(session["id"])
         if session is None:
             return "The session no longer exists."
-        cls = self.op_class(op, name)
+        cls = self.op_class(op, name, capture=capture)
         mode = session.get("mode", "ask")
         if cls == "read":
             return None
@@ -958,7 +974,8 @@ class UnityBridge:
 
     async def _raw(self, session: dict, op: str, args: list[str], consent: dict | None, *, source: str,
                    key: str, label: str, timeout_s: int | None = None, cancel: asyncio.Event | None = None,
-                   root: Path | None = None, detail: str = "") -> tuple[int | None, str, str, str, float]:
+                   root: Path | None = None, detail: str = "",
+                   capture: bool = False) -> tuple[int | None, str, str, str, float]:
         """Run `bash unity.sh <args> --project P`. Gates: as a run_command job under the hook context
         (consent = the exact command line, as before). The unity tool: after a `unity` approval, as a
         Unity job (Plan only mode may run compile/test). (code, output, RESULT line, refusal, started).
@@ -973,7 +990,7 @@ class UnityBridge:
             code, body, res, refused = await self._run(session, cmd, consent)
             return code, body, res, refused, t0
         if why := await self.ensure_allowed(session, op, key, route="raw_batch", argv=argv, consent=consent,
-                                            detail=detail):
+                                            detail=detail, capture=capture):
             return None, "", "", why, t0
         t = timeout_s or self.batch_timeout()
         from ..services import default_shell  # the login shell, as run_command (the user's UNITY_PATH etc.)
@@ -1651,6 +1668,168 @@ class UnityBridge:
             return r
         return await self.editor_command(session, "editor_play", {}, consent=consent, op="play", key="play", timeout_s=60)
 
+    # ------------------------------------------------------------ replay
+
+    async def run_replay(self, session: dict, op: str, request: dict, *,
+                         consent: dict | None = None,
+                         cancel: asyncio.Event | None = None) -> BridgeResult:
+        """Run one replay op through the Unity bridge.
+
+        record is live-only: it calls `Gdw.Replay.Editor.ReplayCommands.Start(request.json)` in the
+        open Editor (MCP execute_code or the CLI live eval), never the batch test. replay/verify/render
+        run the PlayMode verification test `LogMatchesCheckpoints` in a batch Editor with
+        `-gdwReplayRequest`. Approval class per contract §7: render (and verify with capture) is a
+        change, verify without capture follows test consent, record is a change showing the code."""
+        if op == "record":
+            return await self._replay_live_eval(
+                session, 'return Gdw.Replay.Editor.ReplayCommands.Start(%s);'
+                         % json.dumps(str(request.get("_request_path") or "")),
+                op="record", key="record", label="Unity replay · record · live",
+                consent=consent, cancel=cancel,
+                detail="Starts a recording in the open Editor; writes Logs/harness/replay/<run_id>/.")
+        if op not in ("replay", "verify", "render"):
+            return BridgeResult("error", f"unknown replay op {op!r}")
+        st, root = await self._route(session, op)
+        if st.mode == "unavailable":
+            return self._skip(st)
+        request_path = str(request.get("_request_path") or "")
+        platform = "playmode"
+        cfg = self.cfg()
+        t = uc.cfg_int(cfg, "test_timeout_s", 30, 4 * 3600)
+        capture = bool(request.get("capture"))
+        change = op in ("replay", "render") or (op == "verify" and capture)
+        gate_op, gate_key = ("replay", "replay:" + op) if change else ("test", self.op_key("test", platform))
+        detail = ("Writes capture files into Logs/harness/replay/<run_id>/capture/ with ffmpeg."
+                  if capture else "")
+        if st.mode == "cli_batch":
+            cli = await self._cli_info()
+            editor, problem = await self._editor_arg(root, cli)
+            if problem:
+                return BridgeResult("skipped", problem, "cli_batch")
+            xml = self._paths(root, f"replay-{op}", "xml")
+            extra_args = ["-gdwReplayRequest", request_path] if request_path else []
+            try:
+                argv = uc.argv_test_batch(cli, root, platform, xml, t,
+                                          test_filter="Gdw.Replay.Tests.ReplayVerificationTests.LogMatchesCheckpoints",
+                                          nographics=False, editor_path=editor, extra=extra_args)
+            except ValueError as e:
+                return BridgeResult("error", str(e), "cli_batch")
+            if why := await self.ensure_allowed(session, gate_op, gate_key, route="cli_batch", argv=argv,
+                                                consent=consent, capture=capture, detail=detail):
+                return BridgeResult("skipped", f"replay didn't run: {why}", "cli_batch")
+            log_path = xml.with_suffix(".log")
+            run = await self.runner.run(session, argv, project=root,
+                                        label=f"Unity replay · {op} · CLI batch",
+                                        timeout_s=t, log_path=log_path, cancel=cancel)
+            r = uc.result_from_test_batch(run, xml, platform)
+            r.evidence.update({"replay_op": op, "started_at": run.started_at,
+                               "log": str(log_path), "job_id": run.job_id})
+            return r
+        if st.mode == "raw_batch":
+            args = ["test", "playmode", "--filter", "Gdw.Replay.Tests.ReplayVerificationTests.LogMatchesCheckpoints"]
+            if request_path:
+                args += ["--", "-gdwReplayRequest", request_path]
+            code, body, res, refused, t0 = await self._raw(
+                session, gate_op, args, consent, source="tool", key=gate_key, capture=capture, detail=detail,
+                label=f"Unity replay · {op} · unity.sh", cancel=cancel)
+            r = _raw_result("replay", code, body, res, refused, t0)
+            r.evidence["replay_op"] = op
+            return r
+        return BridgeResult("skipped", f"replay needs a batch route (now {st.mode})", st.mode)
+
+    async def _replay_live_eval(self, session: dict, code: str, *, op: str, key: str, label: str,
+                                consent: dict | None, cancel: asyncio.Event | None,
+                                detail: str = "") -> BridgeResult:
+        """Run one ReplayCommands call in the open Editor (MCP execute_code or CLI live eval)."""
+        st, _root = await self._route(session, op)
+        if st.mode not in ("mcp", "cli_live"):
+            if st.mode == "unavailable":
+                return self._skip(st)
+            return BridgeResult("skipped", f"replay {op} needs the open Editor (now {st.mode}); "
+                                           "record, stop and status are live-only.", st.mode)
+        t0 = time.time()
+        if st.mode == "mcp":
+            if why := await self.ensure_allowed(session, op, key, route="mcp", code=code, consent=consent,
+                                                detail=detail):
+                return BridgeResult("skipped", why, "mcp", evidence={"route": "mcp"})
+            ev: dict[str, Any] = {"route": "mcp", "replay_op": op, "started_at": t0}
+            try:
+                ok, text = await self._mcp(session, "execute_code", {"action": "execute", "code": code},
+                                           consent, self.gate_timeout())
+            except asyncio.TimeoutError:
+                return BridgeResult("skipped", f"MCP execute_code timed out during replay {op}", "mcp", evidence=ev)
+            if not ok:
+                return BridgeResult("error", f"Unity couldn't run replay {op}: {text[:300]}", "mcp",
+                                    report=text[:3000], evidence=ev)
+            data = _json(text)
+            if isinstance(data, dict):
+                ev["data"] = data
+                inner = data.get("result") if isinstance(data.get("result"), dict) else data
+                if inner.get("ok") is False or inner.get("error"):
+                    return BridgeResult("error", f"Unity replay {op} failed: {str(inner.get('error'))[:300]}",
+                                        "mcp", report=text[:3000], evidence=ev)
+            return BridgeResult("pass", f"Replay {op} started in the Editor", "mcp", report=text[:3000], evidence=ev)
+        r = await self.editor_command(session, "eval", {"code": code}, consent=consent, op=op, key=key,
+                                      code=code, label=label, cancel=cancel)
+        ev = dict(r.evidence or {})
+        ev["replay_op"] = op
+        data = ev.get("data")
+        if isinstance(data, dict):
+            inner = data.get("result") if isinstance(data.get("result"), dict) else data
+            if inner.get("ok") is False or inner.get("error"):
+                return BridgeResult("error", f"Unity replay {op} failed: {str(inner.get('error'))[:300]}",
+                                    r.mode, report=r.report, evidence=ev)
+        r.evidence = ev
+        return r
+
+    async def replay_cancel(self, session: dict, *, consent: dict | None = None) -> BridgeResult:
+        """Cancel the active Editor replay session (ReplayCommands.Cancel)."""
+        return await self._replay_live_eval(
+            session, "return Gdw.Replay.Editor.ReplayCommands.Cancel();", op="stop", key="stop",
+            label="Unity replay · stop · live", consent=consent, cancel=None,
+            detail="Stops the active replay/record session in the open Editor.")
+
+    async def replay_status(self, session: dict, *, consent: dict | None = None) -> BridgeResult:
+        """The active Editor replay session's state (ReplayCommands.Status; read-only)."""
+        return await self._replay_live_eval(
+            session, "return Gdw.Replay.Editor.ReplayCommands.Status();", op="status", key="status",
+            label="Unity replay · status · live", consent=consent, cancel=None)
+
+    async def replay_install(self, session: dict, *,
+                             project: Path | None = None,
+                             consent: dict | None = None) -> BridgeResult:
+        """Install the replay package (replay_install.py) through the files route."""
+        from . import replay_install as ri
+
+        root = (project or Path(session["folder"])).expanduser().resolve()
+        st = await asyncio.to_thread(ri.replay_package_status, root)
+        if st.get("modified"):
+            return BridgeResult("fail",
+                                f"Not installing: {', '.join(st['modified'])} in {ri.PACKAGE_DIR} "
+                                "was changed in this project. Merge by hand or move it away first.",
+                                "files", evidence={"package": st})
+        manifest_missing = st.get("missing_dependencies") or []
+        if st.get("complete") and not st.get("outdated") and not manifest_missing:
+            return BridgeResult("pass",
+                                f"The replay package is already installed (version {st['version']})",
+                                "files", evidence={"package": st})
+        what = (f"Updates com.gdw.replay {st['version']} → {ri.PACKAGE_VERSION}" if st.get("outdated")
+                else "Copies the com.gdw.replay package")
+        detail = (f"{what} into **{ri.PACKAGE_DIR}/**"
+                  + (f" and adds {', '.join(manifest_missing)} to Packages/manifest.json (existing pins kept)"
+                     if manifest_missing else "")
+                  + ". Needed to record, replay, verify and render sessions.")
+        if why := await self.ensure_allowed(session, "replay_install", "replay_install", route="files", detail=detail):
+            return BridgeResult("skipped", why, "files")
+        try:
+            res = await asyncio.to_thread(ri.install_replay_package, root, allow_upgrade=True,
+                                          allow_dependencies=True)
+        except ValueError as e:
+            return BridgeResult("error", str(e), "files")
+        return BridgeResult("pass" if res["ok"] else "fail", res["message"], "files",
+                            evidence={"package": res.get("package"), "written": res.get("written"),
+                                      "status": res.get("status")})
+
 
 def _raw_result(op: str, code: int | None, body: str, res: str, refused: str, t0: float) -> BridgeResult:
     ev = {"route": "raw_batch", "exit_code": code, "result": res, "started_at": t0}
@@ -1916,7 +2095,27 @@ class FakeUnityBridge(UnityBridge):
             r.evidence["screenshot"] = str(out)
         return r
 
+    async def run_replay(self, session: dict, op: str, request: dict, *,
+                         consent: dict | None = None,
+                         cancel: asyncio.Event | None = None) -> BridgeResult:
+        self.calls.append((f"replay:{op}", session["id"], consent))
+        return BridgeResult("pass", f"replay {op} ok", "fake", evidence={"replay_op": op})
 
-__all__ = ["BACKENDS", "ROUTES", "SHOT_DIR", "BridgeResult", "EditorState", "FakeUnityBridge", "UnityBridge",
-           "editor_has_project", "get_bridge", "is_unity_project", "live_shot_code", "load_script", "parse_compile_output",
-           "unwrap_untrusted", "UNITY_SERVER"]
+    async def replay_cancel(self, session: dict, *, consent: dict | None = None) -> BridgeResult:
+        self.calls.append(("replay:stop", session["id"], consent))
+        return BridgeResult("pass", "replay cancelled", "fake")
+
+    async def replay_status(self, session: dict, *, consent: dict | None = None) -> BridgeResult:
+        self.calls.append(("replay:status", session["id"], consent))
+        return BridgeResult("pass", '{"status":"idle"}', "fake")
+
+    async def replay_install(self, session: dict, *,
+                             project: Path | None = None,
+                             consent: dict | None = None) -> BridgeResult:
+        self.calls.append(("replay_install", session["id"], consent))
+        return BridgeResult("pass", "replay package installed", "files")
+
+
+__all__ = ["BACKENDS", "REPLAY_OPS", "ROUTES", "SHOT_DIR", "BridgeResult", "EditorState", "FakeUnityBridge",
+           "UnityBridge", "editor_has_project", "get_bridge", "is_unity_project", "live_shot_code", "load_script",
+           "parse_compile_output", "unwrap_untrusted", "UNITY_SERVER"]

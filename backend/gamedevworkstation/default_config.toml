@@ -208,6 +208,18 @@ screenshot_tier = "claude.standard" # its model tier (Sonnet); any tier or model
 screenshot_max_turns = 12           # its turn budget
 screenshot_timeout_s = 900          # bounds the whole request, including the side agent and batch render
 
+[unity.replay]
+# Record/replay defaults. Recorded overrides take precedence.
+fixed_dt = 0.016666667              # 1/60 s; the canonical simulation timestep
+max_seconds = 600                   # maximum recording length in seconds
+max_trace_mb = 256                  # InputEventTrace memory limit before recording stops
+max_archive_mb = 512                # maximum .gdwreplay archive size
+capture_max_seconds = 120           # maximum render/export length in seconds
+gif_max_seconds = 8                 # GIF export length limit
+gif_fps = 15                        # GIF frame rate
+gif_width = 480                     # GIF width in pixels
+warn_total_mb = 2048                # warn when replay output exceeds this total
+
 [claude_code]
 # "Claude Code (subscription)" sessions: your own `claude` CLI, logged in with your own Claude
 # account (`claude auth login` in a terminal). GameDevWorkstation never reads your tokens and

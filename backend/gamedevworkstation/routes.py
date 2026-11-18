@@ -24,6 +24,7 @@ def _feature_modules() -> list:
         # Hooks & gates, quality ladder, campaigns, fleet: added by later work packages; a module
         # that doesn't exist yet is skipped below.
         "hooks", "ladder", "campaigns", "fleet",
+        "replay",  # record/replay/verify/render routes
         "unity_tool", "ci_triage",  # the agent's `unity` tool and /api/unity (Unity backend: MCP or the Unity CLI)
         # Media files a command announced (TRAILER_OUTPUT: / ARTIFACT: lines) indexed as items.
         "media_out",

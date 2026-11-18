@@ -12,7 +12,7 @@ Tools are MCP for Unity 10.3 tools; your client may prefix them (e.g. `mcp__Unit
 
 ## When to use / not to use
 - Use for criteria whose Test column is `play-verify` or `PlayMode`, for smoke runs after a feature lands, and for screenshots a human or the next agent must see.
-- Not for compile errors (compile-fix-loop first), pure logic (EditMode tests), performance budgets (perf-pass owns profiling; check_criteria.py still evaluates `metric:` rows against its `[PERF] kind=summary` keys, e.g. `frame_ms_p95`, `gc_alloc_avg`), or builds (build-ship).
+- Not for compile errors (compile-fix-loop first), pure logic (EditMode tests), performance budgets (perf-pass owns profiling; check_criteria.py still evaluates `metric:` rows against its `[PERF] kind=summary` keys, e.g. `frame_ms_p95`, `gc_alloc_avg`), builds (build-ship), or frame-by-frame replay of a recorded run (replay skill owns that; it checks registered state in the same environment, not acceptance criteria).
 
 ## Inputs
 - `BACKLOG.md` and the IDs in scope (`M1-S02`, `M1-S02-AC2`). Rows look like `| M1-S02-AC2 | Given/When/Then | play-verify | log:"[Combat] hit target=Enemy"; screenshot:M1-S02-hit shows the white hit flash |`.

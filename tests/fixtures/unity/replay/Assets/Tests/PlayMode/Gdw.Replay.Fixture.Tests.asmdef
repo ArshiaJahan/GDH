@@ -1,0 +1,25 @@
+{
+    "name": "Gdw.Replay.Fixture.Tests",
+    "rootNamespace": "Gdw.Replay.Fixture.Tests",
+    "references": [
+        "Gdw.Replay.Runtime",
+        "Gdw.Replay.InputSystem",
+        "Gdw.Replay.Fixture",
+        "Unity.InputSystem",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

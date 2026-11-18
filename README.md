@@ -68,7 +68,7 @@ Code reply is a real run.</sub>
 | | |
 |---|---|
 | **Orchestrator + subagents** | Claude plans the job and delegates units to Claude and OpenAI subagents (API or Codex CLI), choosing model tier and effort per unit, with parallel git worktrees for code. |
-| **Unity skill pack** | 17 Unity 6 skills behind a router: compile/fix loops, Play Mode verification, headless builds, safe scene/prefab edits, perf and game-feel passes, trailers, shipping. |
+| **Unity skill pack** | 18 Unity 6 skills behind a router: compile/fix loops, Play Mode verification, record and replay, headless builds, safe scene/prefab edits, perf and game-feel passes, trailers, shipping. |
 | **Unity: MCP or CLI** | Drive Unity through MCP for Unity or the official Unity CLI (live Editor via `com.unity.pipeline`, or batch when it's closed), switchable per project and session, with a status chip and one `unity` tool for the agent. |
 | **Hooks and gates** | A hooks engine runs checks at fixed points of a turn: compile before finishing, tests in verify phases, blocked edits to generated files. |
 | **Quality ladder L1-L4** | Stories reach `done` only with fresh, app-observed evidence: compile, tests, play evidence and screenshots, design critique. |
@@ -82,6 +82,7 @@ Code reply is a real run.</sub>
 | **CI failure triage** | `gdw triage <run-id\|log>` sorts a failed CI run's failures into compile, test, flaky, infra, dependency and timeout, and names the file and line. It reads GitHub Actions, pytest, vitest, tsc, cargo, npm and uv logs, plus Unity Editor.log and NUnit XML. Rules come first, and a model handles only what the rules can't place. A GitHub Action posts the report on failed PRs. On 26 labelled failed logs the rules got 24/26 categories right before tuning and 26/26 after. See [CI failure triage](docs/GUIDE.md#ci-failure-triage). |
 | **Cost control** | Daily and per-session spend limits, job budgets, approval for high effort, and a My usage page per model. |
 | **Trailer maker** | Brief → beat sheet → scripted Play Mode capture (Unity Recorder) → ffmpeg edit from a JSON edit list → ElevenLabs music cut to the beat sheet → three reviewers → Steam, YouTube and vertical exports. |
+| **Record and replay** | Record instrumented Unity sessions in the open Editor, replay them with frame-by-frame checkpoint verification (SHA-256 state hashes), and export silent gameplay GIF/MP4. Input System only; the guarantee is same-environment repeatability for the state you register, and a mismatch is reported, not refused. |
 | **ElevenLabs** | Speech, transcription, sound effects and music (including composition plans with exact section lengths), in chat and on their own page. |
 | **Native shell, local updates** | Tauri v2 app with a frozen FastAPI backend, keys in the macOS Keychain and in-app updates from GitHub Releases or a local folder. |
 
@@ -131,6 +132,7 @@ and whether to work through the Editor (MCP) or batchmode.
 | [`unity-mcp-orchestrator`](skills/unity-mcp-orchestrator) | MCP for Unity tool reference and workflows |
 | [`design-critique`](skills/design-critique) | L4 review by three independent reviewers against `TASTE.md` |
 | [`postmortem`](skills/postmortem) | Writes `POSTMORTEMS.md` entries and proposes how to enforce the lesson |
+| [`replay`](skills/replay/SKILL.md) | Record and replay instrumented sessions (same environment, Input System only), verify frame hashes, export silent GIF/MP4 |
 | [`trailer-maker`](skills/trailer-maker/SKILL.md) | Brief → capture (Unity Recorder) → ffmpeg edit → ElevenLabs music/VO → platform exports |
 
 General skills ship too: `delegation` (on by default), `game-designer`, `graphify`, `grilling`,

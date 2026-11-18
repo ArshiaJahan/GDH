@@ -1,0 +1,11 @@
+{
+    "name": "com.gdw.replay",
+    "version": "0.1.0",
+    "displayName": "GDW Replay",
+    "description": "Deterministic record/replay runtime for GameDevWorkstation. Runtime core (no Input System dependency here).",
+    "unity": "6000.3",
+    "dependencies": {
+        "com.unity.inputsystem": "1.20.1",
+        "com.unity.modules.physics2d": "1.0.0"
+    }
+}

@@ -18,7 +18,10 @@ Pinned: Unity 6000.3, Unity Recorder 5.1 (`com.unity.recorder`), MCP for Unity 1
 - Use for a Steam/announce/launch/festival/social trailer, gameplay capture for marketing, b-roll, vertical cuts,
   press-kit loops, or re-cutting an existing capture to music.
 - Not for: generated "gameplay" footage (never), store screenshots (play-verify screenshots), in-game cutscenes
-  (Timeline work), or fixing the game feel itself (game-feel-pass first: a trailer can't hide a flat game).
+  (Timeline work), fixing the game feel itself (game-feel-pass first: a trailer can't hide a flat game),
+  or record/replay verification and evidence GIF/MP4 of a recorded run (replay skill owns that; its
+  exports are silent and default to PNG capture; trailer-maker still uses the Recorder for
+  high-quality captures).
 
 ## Inputs
 - The brief, filled with the user from `templates/brief.template.md` → `T/brief.md`: type, one-sentence core

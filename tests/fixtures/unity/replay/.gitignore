@@ -1,0 +1,8 @@
+# Unity fixture project — ignore generated/transient files
+Library/
+Temp/
+Logs/
+UserSettings/
+obj/
+*.csproj
+*.sln

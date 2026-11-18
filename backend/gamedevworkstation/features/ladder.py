@@ -909,13 +909,40 @@ class Ladder:
             if len(got) == len(names):
                 cands.append((min(h[0] for h in got), all(h[1] for h in got), [h[2] for h in got],
                               "; ".join(h[3] for h in got if not h[1]) or "tests passed"))
+        # Replay-verified evidence for headless ACs with replay verification tests.
+        if any("ReplayVerificationTests" in n or "LogMatchesCheckpoints" in n for n in names):
+            for r in rows:
+                d = r["detail"]
+                if d.get("kind") != "replay_verified":
+                    continue
+                if ac.id not in r.get("subjects", []):
+                    continue  # unscoped
+                if r["observed"] != "tool":
+                    continue  # forged (not tool-observed)
+                report = d.get("report", {}) or {}
+                if report.get("status") != "pass":
+                    continue  # not a passing report
+                frames = report.get("frames", {}) or {}
+                if frames.get("expected") != frames.get("compared"):
+                    continue  # incomplete frame comparison
+                console = report.get("console", {}) or {}
+                if console.get("errors", -1) != 0:
+                    continue  # console errors
+                if not report.get("log_sha256") or not report.get("replay_sha256"):
+                    continue  # missing immutable digests
+                env = report.get("environment", "matched")
+                detail = "replay_verified pass"
+                if env == "differs":
+                    detail += " (environment differs)"
+                cands.append((r["ts"], True, [r], detail))
         return cands
 
     def _ac_level(self, ac: AC, story: Story, rows: list[dict], content: tuple[float, str | None], lv: Level,
                   how: str) -> str:
         cands = self._test_candidates(ac, story.milestone, rows)
-        if lv.level == "L3":  # L3 counts check_criteria; test runs only for test-only headless criteria
-            cands = [c for c in cands if c[3].startswith("check_criteria") or ac.kinds() <= {"test"}]
+        if lv.level == "L3":  # L3 counts check_criteria and replay_verified; test runs only for test-only headless criteria
+            cands = [c for c in cands if c[3].startswith("check_criteria") or c[3].startswith("replay_verified")
+                     or ac.kinds() <= {"test"}]
         if not cands:
             lv.missing.append(f"{ac.id}: no observed {'test run' if lv.level == 'L2' else 'check_criteria pass'}; "
                               f"{how}")

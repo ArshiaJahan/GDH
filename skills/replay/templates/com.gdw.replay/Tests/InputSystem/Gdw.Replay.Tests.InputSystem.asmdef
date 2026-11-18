@@ -1,0 +1,25 @@
+{
+    "name": "Gdw.Replay.Tests.InputSystem",
+    "rootNamespace": "Gdw.Replay.Tests",
+    "references": [
+        "Gdw.Replay.Runtime",
+        "Gdw.Replay.InputSystem",
+        "Unity.InputSystem",
+        "Unity.InputSystem.TestFramework",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -74,6 +74,11 @@ DEFAULTS: dict[str, Any] = {
     "extra_editor_args": [], "clone_when_open": "ask", "eval": "ask", "harness_scripts": "ask",
     "harness_git_exclude": True, "mcp_server": "unity",
     "screenshot_tier": "claude.standard", "screenshot_max_turns": 12, "screenshot_timeout_s": 900,
+    "replay": {
+        "fixed_dt": 0.016666667, "max_seconds": 600, "max_trace_mb": 256, "max_archive_mb": 512,
+        "capture_max_seconds": 120, "gif_max_seconds": 8, "gif_fps": 15, "gif_width": 480,
+        "warn_total_mb": 2048,
+    },
 }
 BACKENDS = ("auto", "mcp", "cli")
 
@@ -89,6 +94,8 @@ def unity_cfg(app: "AppState | Any") -> dict:
         out["batch_timeout_s"] = hooks["batchmode_timeout_s"]  # the older key, when [unity] keeps the default
     if out.get("backend") not in BACKENDS:
         out["backend"] = "auto"
+    user_replay = u.get("replay")
+    out["replay"] = {**DEFAULTS["replay"], **(user_replay if isinstance(user_replay, dict) else {})}
     return out
 
 

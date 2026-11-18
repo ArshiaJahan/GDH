@@ -1,0 +1,17 @@
+{
+    "name": "Gdw.Replay.InputSystem",
+    "rootNamespace": "Gdw.Replay",
+    "references": [
+        "Gdw.Replay.Runtime",
+        "Unity.InputSystem"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -21,7 +21,7 @@ transcription, sound and music. Everything runs locally; the backend listens on 
 - [Claude Code sessions](#claude-code-sessions)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [How delegation works](#how-delegation-works)
-- [Built-in skills](#built-in-skills) (and [Unity: MCP or CLI](#unity-mcp-or-cli))
+- [Built-in skills](#built-in-skills) (and [Record and replay](#record-and-replay), [Unity: MCP or CLI](#unity-mcp-or-cli))
 - [CI failure triage](#ci-failure-triage)
 - [Building the app](#building-the-app)
 - [Versions & updates](#versions--updates)
@@ -969,6 +969,7 @@ others turn on when you invoke them.
 | `compile-fix-loop`, `play-verify`, `headless-ops`, `scene-prefab-safety`, `gdd-to-backlog`, `project-memory`, `architecture-patterns`, `asset-pipeline`, `perf-pass`, `game-feel-pass`, `build-ship`, `vcs-hygiene` | The rest of the Unity 6 game-creation pack: compile/fix, Play Mode checks, headless builds and tests, safe scene/prefab edits, GDD to backlog, project memory, architecture templates, asset pipeline, performance, game feel, shipping and git hygiene (with scripts, templates and references) |
 | `unity-mcp-orchestrator` | MCP for Unity tool reference and workflows, used by the Unity pack |
 | `trailer-maker` | Game trailers from real gameplay: brief, beat sheet, shot list captured in Play Mode with the Unity Recorder, an ffmpeg edit from a JSON edit list, ElevenLabs music/VO/SFX cut to the beat sheet, three reviewers, and Steam/YouTube/vertical exports; see [`skills/trailer-maker`](../skills/trailer-maker/SKILL.md) |
+| `replay` | Record and replay instrumented Unity sessions (same-environment, Input System only), verify frame-by-frame checkpoint hashes, and export silent gameplay GIF/MP4; see [`skills/replay`](../skills/replay/SKILL.md) |
 
 **Unity pack setup.** The Unity skills drive the editor through the MCP for Unity server, and
 GameDevWorkstation sets that up for you: the built-in `unity` server (`uvx --offline --from
@@ -1144,6 +1145,46 @@ from any script) inside the session folder are indexed as items when they are im
 plays inline in Artifacts. The skill ships a `trailer` workflow template (brief → beat sheet → shot list → capture →
 rough cut → music, VO and SFX → trailer review → exports) for the chains engine. The review uses three reviewer
 subagents; the minimum score must reach the brief's pass score (7 by default), two rounds at most, then you decide.
+
+**Record and replay (`replay`).** Record instrumented Unity sessions,
+replay them with frame-by-frame checkpoint verification, and export gameplay GIF or MP4.
+The guarantee is same-environment repeatability, checked against the state you register
+with the package's providers. It is not cross-machine determinism. What it needs beyond the
+Unity pack:
+
+- The `com.gdw.replay` package (installed by `unity op=replay_install`, behind setup consent;
+  it also adds missing test and Input System entries to `Packages/manifest.json` and keeps
+  existing pins).
+- Input System 1.20.1 (the only input path; gameplay that reads the legacy Input Manager is
+  not supported: the Editor refuses to record or replay and names the files and calls). Gameplay RNG
+  should route through `GdwRandom.Stream("name")`.
+- `ffmpeg` and `ffprobe` for GIF/MP4 export (`brew install ffmpeg`). The skill's
+  `replay_media.py doctor` checks readiness.
+- Recording is live-Editor only (MCP or CLI live). Replay, verify and render run in a batch
+  Editor.
+- The PNG-per-frame capture path is the default (`auto` = png). The Unity Recorder is
+  used only when `backend:recorder` is requested and `com.unity.recorder` is already
+  installed (never automatic). MP4 is silent.
+- Replay never refuses on an environment mismatch. The report has `environment: matched` or
+  `differs` plus the differing fields (Unity version, OS, CPU, project id, scene GUID,
+  package versions, package lock). Statuses are `pass`, `diverged`, `incompatible`, `error`
+  and `cancelled`.
+
+Work lives in `<project>/Logs/harness/replay/<run_id>/`: the `.gdwreplay` archive,
+`request.json`, `report.json`, and optional `capture/frames/` and `exports/`. After a
+successful export, that export's own intermediate frame PNGs are deleted. Nothing else is
+deleted automatically. `replay_status` and an export result warn when
+`Logs/harness/replay/` is over `[unity.replay] warn_total_mb` (2048 MiB by default).
+
+The `unity` tool ops are `replay_install`, `record`, `replay`, `replay_verify`,
+`replay_render`, `replay_stop` and `replay_status`. `replay_install` needs setup consent.
+`record`, `replay`, `replay_render`, `replay_stop` and a `replay_verify` with `capture` need
+change permission and don't run in Plan only mode. A `replay_verify` without `capture` follows
+test consent. `replay_status` only reads. The same ops are on REST under
+`/api/sessions/{sid}/replays`: `POST` to `record`, `replay`, `verify` and `render` (each answers
+202 with `job_id`, `run_id` and `status_url`), `POST /{run_id}/stop`, and `GET /{run_id}` for
+the status and report. Limits live in `[unity.replay]` (`max_seconds`, `max_trace_mb`,
+`max_archive_mb`, `capture_max_seconds`, `gif_max_seconds`, `warn_total_mb`).
 
 **Invoking a skill.** Any of these does the same thing:
 
@@ -1444,6 +1485,10 @@ parameters). They also cover:
     including the effort gate.
   - `tests/test_triage_workflow.py`: the workflow's trigger and permissions, and that it never
     checks out pull-request code.
+  - record/replay (`tests/test_replay_*.py`): golden archive parsing, checkpoint comparison with
+    deterministic vectors, ffmpeg argv/ranges, request validation, permissions, route/job fakes,
+    install modified-file refusal, media/gallery deduplication, L3 stale/forged/unscoped evidence
+    rejection. None of it launches Unity.
 
 ## Where things live
 
