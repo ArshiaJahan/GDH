@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend tests (Python)
+    # The backend is POSIX/macOS-only (process groups, PTYs, Keychain), like the app itself.
+    runs-on: macos-14
+    timeout-minutes: 25
+    env:
+      UV_PYTHON: "3.13"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install dependencies (including the optional Agent SDK extra)
+        run: uv sync --frozen --all-extras
+      - name: Run pytest
+        # Live tests hit real provider APIs and skip themselves without keys.
+        run: uv run --frozen pytest -q -p no:cacheprovider -m "not live"
+
+  frontend:
+    name: Frontend typecheck and tests
+    runs-on: macos-14
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Typecheck
+        run: npx tsc -b
+      - name: Run vitest
+        run: npx vitest run

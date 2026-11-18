@@ -6,6 +6,7 @@
 
 **A local AI agent workstation for solo Unity developers, on your Mac.**
 
+[![CI](https://github.com/ArshiaJahan/GDH/actions/workflows/ci.yml/badge.svg)](https://github.com/ArshiaJahan/GDH/actions/workflows/ci.yml)
 [![macOS](https://img.shields.io/badge/macOS-13%2B%20·%20Apple%20Silicon-000000?logo=apple&logoColor=white)](#quick-start)
 [![Unity](https://img.shields.io/badge/Unity-6-222222?logo=unity&logoColor=white)](#built-for-unity)
 [![Version](https://img.shields.io/badge/version-0.4.0-4c1)](VERSION)
@@ -332,12 +333,16 @@ config.example.toml           default configuration with comments
 <summary><b>Development and testing</b></summary>
 
 ```bash
+uv sync --all-extras                      # includes the optional Agent SDK, which its tests need
 uv run pytest -q                          # backend tests; no network
 cd frontend && npx tsc -b && npx vitest run   # UI type check and tests
 make test                                 # both of the above
 make test-live                            # real API smoke tests (skipped without keys)
 make app-test                             # build, launch and check the app
 ```
+
+[GitHub Actions](https://github.com/ArshiaJahan/GDH/actions/workflows/ci.yml) runs the backend tests and the UI
+type check and tests on macOS for every push to `main` and every pull request.
 
 The unit tests run against recorded provider fixtures and fakes (a fake `codex` binary, a fake
 Unity bridge), so they need no keys. Live API paths have not yet been exercised end to end;
