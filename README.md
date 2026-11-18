@@ -16,6 +16,7 @@
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](frontend/package.json)
 [![Tauri](https://img.shields.io/badge/Tauri-v2-24C8DB?logo=tauri&logoColor=white)](src-tauri/Cargo.toml)
 
+[Demo](#demo) ·
 [Highlights](#highlights) ·
 [Built for Unity](#built-for-unity) ·
 [Campaigns](#campaigns-and-workflows) ·
@@ -35,6 +36,29 @@ parallel, and drives the Unity Editor through MCP. The harness, not the model, d
 when a turn may end: it enforces compile and test gates, asks for fresh evidence before a story
 is marked done, and keeps your project's taste and past mistakes in front of the agent.
 Everything runs locally; the backend listens on `127.0.0.1` only.
+
+> [!IMPORTANT]
+> **macOS only.** GameDevWorkstation runs on macOS 13 or later on Apple Silicon. The backend relies on
+> POSIX process groups, PTYs and the macOS Keychain; Windows and Linux are not supported yet.
+
+## Demo
+
+**A Claude Code session in a Unity project folder.** Pick a folder, describe the task, and Claude Code
+reads the project and answers in the session, with the environment, context use and connectors alongside.
+
+![Starting a folder session: Claude Code reads PlayerController.cs and suggests a jump fix](docs/media/demo-folder-session.gif)
+
+**Skills.** Type `/skill` in the composer to pick one of the built-in skills, or browse and filter them on
+the Skills & MCP page.
+
+![The /skill picker in the composer, then the Skills & MCP page filtered to Unity skills](docs/media/demo-skills.gif)
+
+**Task board.** A Kanban board you and the agent share; tasks get codes like `Task00001`.
+
+![Adding tasks to the Backlog, To do and In progress columns of the task board](docs/media/demo-task-board.gif)
+
+<sub>Recorded from this repository's own UI in a browser, against a small demo Unity folder; the Claude
+Code reply is a real run.</sub>
 
 ## Highlights
 
