@@ -96,6 +96,34 @@ PROMPT_TRUNCATED = "\n\n[GDW CLAUDE.md/skills context truncated to fit the 64 KB
 LOGIN_ERRORS = ("authentication_failed", "oauth_org_not_allowed", "account_on_hold")
 RETRY_ERRORS = ("rate_limit", "overloaded", "server_error")
 LOGIN_TEXT = re.compile(r"not logged in|claude auth login|invalid api key|oauth", re.I)
+# Skipper mode and central-doc mode (both chosen on the new-session screen, kept in session settings).
+# The step texts avoid the fake CLI's scenario keywords (tests/fixtures/fake_claude.py).
+STEP_TIMEOUT_S = 600.0
+DOC_MAX_CHARS = 40_000
+HANDOFF_STEP = (
+    "GameDevWorkstation Skipper handoff. This Claude Code conversation ends after this reply, and a fresh one "
+    "picks up the work from your handoff alone. Reply with only the handoff, as Markdown text (no file edits or "
+    "commands): ## Goal, ## What was done (files changed, commands run, results), ## Current state, "
+    "## Decisions and why, ## Open problems, ## Next step. Be specific: paths, names, numbers.")
+CENTRAL_STEP = (
+    "GameDevWorkstation central doc update. Reply with only the full, updated Markdown text of this session's "
+    "central doc (no file edits or commands). Keep these sections: ## Goal, ## What's happened (one line per "
+    "step, newest last), ## Current state, ## Decisions, ## Open questions, ## Next steps. Keep what is still "
+    "true, add what this turn did, and keep it under about 1,500 words. The current doc:\n\n<<<DOC\n{doc}\nDOC>>>")
+QUIET_DENY = "This is a GameDevWorkstation handoff step: reply with text only, no tools."
+
+
+def docs_dir(s: dict) -> Path:
+    """Where a session's central doc and Skipper handoffs live: <working folder>/.gdw/sessions/<id>/."""
+    return session_cwd(s) / ".gdw" / "sessions" / s["id"]
+
+
+def _read_doc(path: Any, limit: int = DOC_MAX_CHARS) -> str:
+    try:
+        return Path(str(path)).read_text(encoding="utf-8", errors="replace")[-limit:] if path else ""
+    except OSError:
+        return ""
+
 RESUME_FAILED = re.compile(r"no conversation found|could not resume|failed to resume|session .* not found", re.I)
 CONTEXT_HEAD = """You are running inside GameDevWorkstation (a personal agent workstation on the user's Mac) as a
 Claude Code session. GameDevWorkstation's own tools are the mcp__gdw__* tools (task board, Unity, saved
@@ -282,6 +310,8 @@ class Turn:
     pending_results: list[ToolResultBlock] = field(default_factory=list)
     login_error: bool = False
     saw_output: bool = False
+    quiet: bool = False  # a Skipper / central-doc step: text only, nothing shown in the chat
+    texts: list[str] = field(default_factory=list)
 
 
 class Proc:
@@ -497,6 +527,8 @@ class Proc:
             self.app.jobs.log(turn.jid, f"rate limit: {status} {window}\n")
 
     def _on_stream(self, e: dict, turn: Turn | None) -> None:
+        if turn and turn.quiet:
+            return
         bus, sid, et = self.app.bus, self.sid, e.get("type")
         if et == "message_start":
             cli_id = str((e.get("message") or {}).get("id") or "")
@@ -520,6 +552,9 @@ class Proc:
                                                  "name": cb.get("name")}, sid)
 
     def _flush_results(self, turn: Turn | None) -> None:
+        if turn and turn.quiet:
+            turn.pending_results = []
+            return
         if turn and turn.pending_results:
             self.app.store.add_message(self.sid, Message(role="user", content=turn.pending_results,
                                                          meta={"tool_results": True}))
@@ -541,6 +576,10 @@ class Proc:
                 inp = b.get("input") if isinstance(b.get("input"), dict) else {}
                 blocks.append(ToolUseBlock(id=b.get("id") or new_id("toolu_"), name=b.get("name", ""), input=inp))
         if not blocks:
+            return
+        if turn and turn.quiet:  # a handoff / central-doc step: kept for the harness, not shown
+            turn.saw_output = True
+            turn.texts.extend(b.text for b in blocks if isinstance(b, TextBlock))
             return
         cli_id = str(m.get("id") or "")
         model = m.get("model") or (turn.model if turn else None)
@@ -581,6 +620,8 @@ class Proc:
             text = redact(_block_text(b.get("content")), self.token)[:20000]
             err = bool(b.get("is_error"))
             res = ToolResultBlock.text(str(b.get("tool_use_id") or ""), text or "(no output)", is_error=err)
+            if turn and turn.quiet:
+                continue
             if turn:
                 turn.pending_results.append(res)
             else:
@@ -778,6 +819,7 @@ class ClaudeCode:
         mode = {"ask": "Ask before edits", "accept_edits": "Accept edits", "plan": "Plan only (no edits or commands)"}
         where = s.get("folder") or f"none (chat only). Working folder: {cwd}, a private scratch folder for this session"
         seg = [CONTEXT_HEAD, f"Session folder: {where}\nMode: {mode.get(s['mode'], s['mode'])}"]
+        seg.extend(self._mode_notes(s))
         context = turn_skill_segments(s["settings"], app.hooks.turn(s["id"]))
         for fn in getattr(app, "prompt_notes", None) or []:
             try:
@@ -790,6 +832,23 @@ class ClaudeCode:
         if pi := _project_instructions(cwd):
             context.append(pi)
         return _cap_prompt("\n\n".join(x for x in [*seg, *context] if x))
+
+    def _mode_notes(self, s: dict) -> list[str]:
+        """System prompt notes for Skipper mode and central-doc mode."""
+        st, out = s.get("settings") or {}, []
+        if st.get("central_doc"):
+            out.append(f"Central doc mode: GameDevWorkstation keeps this session's central doc (goal, what's happened, "
+                       f"current state, decisions, next steps) at {docs_dir(s) / 'central.md'}. After each of your turns "
+                       "it asks you for the updated doc. Read it when you need the session's history.")
+        if st.get("skipper"):
+            if handoff := _read_doc(st.get("skipper_handoff"), 30_000).strip():
+                out.append("Skipper mode: you are a fresh Claude Code conversation continuing earlier work in this session. "
+                           f"The previous conversation's handoff ({st['skipper_handoff']}) follows. Treat it as your memory "
+                           f"of the work so far and be ready to continue from it.\n\n{handoff}")
+            else:
+                out.append("Skipper mode: after each turn GameDevWorkstation asks you for a handoff and continues the work "
+                           "in a fresh Claude Code conversation that starts from it.")
+        return out
 
     def _signature(self, s: dict, cli: str, model: str, effort: str | None, cwd: Path) -> tuple:
         c = self.cfg
@@ -854,7 +913,8 @@ class ClaudeCode:
                 proc.last_used = time.monotonic()
                 if proc.reader.done():  # it already exited (bad flags, crash at start)
                     proc._finish_turn(exited=True)
-                prompt, last_id = self._prompt(sid, recap=not proc.resumed and not resume)
+                skipped = bool(settings.get("skipper") and settings.get("skipper_handoff"))  # the handoff replaces the recap
+                prompt, last_id = self._prompt(sid, recap=not proc.resumed and not resume and not skipped)
                 try:
                     await proc.send({"type": "user", "message": {"role": "user", "content": prompt},
                                      "parent_tool_use_id": None, "session_id": "default"})
@@ -884,12 +944,91 @@ class ClaudeCode:
                         self._error(sid, f"Claude Code exited ({res.get('code')}): {err[-800:] or 'no output'}")
                     return
                 status = "done"
+                await self._after_turn(sid, proc, model, effort, jid)
                 return
         except asyncio.CancelledError:
             status = "cancelled"
             raise
         finally:
             app.jobs.finish(jid, status)
+
+    async def _quiet_step(self, proc: Proc, model: str, effort: str | None, jid: str | None, text: str) -> str | None:
+        """Send `text` as a hidden turn and return the reply's text (None if it failed or ran out of time)."""
+        sid = proc.sid
+        if not proc.alive or proc.turn is not None or proc.fatal_error:
+            return None
+        turn = Turn(sid=sid, model=model, effort=effort, jid=jid, gate=None, quiet=True)
+        proc.turn = turn
+        proc.last_used = time.monotonic()
+        try:
+            await proc.send({"type": "user", "message": {"role": "user", "content": text},
+                             "parent_tool_use_id": None, "session_id": "default"})
+        except (BrokenPipeError, ConnectionResetError, RuntimeError):
+            pass  # the process is gone; the reader ends the turn
+        try:
+            res = await asyncio.wait_for(asyncio.shield(turn.done), STEP_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            await proc.interrupt(float(self.cfg.get("interrupt_wait_s", 5)))
+            return None
+        except asyncio.CancelledError:
+            self._stopping[sid] = asyncio.create_task(proc.interrupt(float(self.cfg.get("interrupt_wait_s", 5))))
+            raise
+        if res.get("exited"):
+            return None
+        out = "\n\n".join(t for t in turn.texts if t.strip()).strip()
+        return out or None
+
+    async def _after_turn(self, sid: str, proc: Proc, model: str, effort: str | None, jid: str | None) -> None:
+        """Central-doc mode: ask for the updated central doc and save it. Skipper mode: ask for a handoff (the
+        central doc, when both are on), save it, end this Claude Code conversation and start a fresh one that
+        begins from the handoff, ready for the next message."""
+        s = self.app.store.get(sid)
+        if not s or s.get("deleted"):
+            return
+        st = s["settings"]
+        central, skipper = bool(st.get("central_doc")), bool(st.get("skipper"))
+        if not (central or skipper):
+            return
+        d = docs_dir(s)
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            self.notice(sid, "session_docs", f"Couldn't create {d}: {e}")
+            return
+        doc = None
+        if central:
+            path = d / "central.md"
+            cur = _read_doc(path).strip() or "(empty: this is the first update)"
+            if jid:
+                self.app.jobs.log(jid, "central doc update\n")
+            doc = await self._quiet_step(proc, model, effort, jid, CENTRAL_STEP.format(doc=cur))
+            if doc:
+                path.write_text(doc.rstrip() + "\n", encoding="utf-8")
+                self.app.store.update(sid, settings={"central_doc_path": str(path)})
+                self.notice(sid, "central_doc", f"Central doc updated: {path}")
+            else:
+                self.notice(sid, "central_doc", "Central doc: Claude Code didn't send an update this time.")
+        if not skipper:
+            return
+        if jid:
+            self.app.jobs.log(jid, "skipper handoff\n")
+        handoff = doc or await self._quiet_step(proc, model, effort, jid, HANDOFF_STEP)
+        if not handoff:
+            self.notice(sid, "skipper", "Skipper: no handoff came back, so the next message stays in this conversation.")
+            return
+        n = int(st.get("skipper_n") or 0) + 1
+        hp = d / f"handoff-{n:03d}.md"
+        hp.write_text(handoff.rstrip() + "\n", encoding="utf-8")
+        await self.close_session(sid)
+        self.app.store.update(sid, settings={"skipper_handoff": str(hp), "skipper_n": n,
+                                             "claude_code_session": None, "claude_code_totals": None})
+        self.notice(sid, "skipper", f"Skipper: handoff #{n} saved to {hp}. A fresh Claude Code conversation "
+                                    "has started from it, ready for your next message.")
+        if s2 := self.app.store.get(sid):
+            try:
+                await self._ensure(s2, model, effort, None)  # ready now, so the next message starts at once
+            except Exception as e:  # noqa: BLE001 — the next turn starts it instead
+                log.info("claude_code: skipper pre-start for %s failed: %s", sid, e)
 
     async def _ensure(self, s: dict, model: str, effort: str | None, resume: str | None) -> Proc:
         sid = s["id"]
@@ -1029,6 +1168,10 @@ class ClaudeCode:
             if old and old in self._plans[sid]:
                 self._plans[sid] = self._plans[sid].replace(old, inp["new_string"], 1)[:20000]
 
+    def _quiet(self, sid: str) -> bool:
+        p = self.procs.get(sid)
+        return bool(p and p.turn and p.turn.quiet)
+
     def _plan_mode(self, sid: str) -> bool:
         return ((self.app.store.get(sid) or {}).get("mode")) == "plan"
 
@@ -1036,6 +1179,9 @@ class ClaudeCode:
         """The PreToolUse hook callback: GDW's gate for every tool call, like agent_sdk's pre_tool_use."""
         name = str(data.get("tool_name") or data.get("toolName") or "")
         inp = data.get("tool_input") if isinstance(data.get("tool_input"), dict) else (data.get("input") or {})
+        if self._quiet(sid):
+            return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                           "permissionDecisionReason": QUIET_DENY}}
         if name in DEFERRED_SDK_TOOLS:
             return {}  # no say: the CLI's mode rules, then the permission prompt tool (GDW's card)
         if self._plan_mode(sid) and is_plan_file(name, inp):
@@ -1066,6 +1212,8 @@ class ClaudeCode:
     async def decide(self, sid: str, name: str, inp: dict) -> dict:
         app = self.app
         allow = {"behavior": "allow", "updatedInput": inp}
+        if self._quiet(sid):
+            return {"behavior": "deny", "message": QUIET_DENY}
         if name == "AskUserQuestion":
             return await self._ask_question(sid, inp)
         if name == "ExitPlanMode":

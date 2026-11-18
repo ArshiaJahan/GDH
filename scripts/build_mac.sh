@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# Builds dist/GameDevWorkstation.app and dist/GameDevWorkstation.dmg for Apple Silicon, ad-hoc signed.
+# Builds dist/GameDevWorkstation.app and dist/GameDevWorkstation.dmg for Apple Silicon.
+# Signing: the same certificate every build, so macOS remembers "Always Allow" for the Keychain
+# (an ad-hoc signature is a new code identity each build, and the Keychain asks again). The identity
+# is $GDW_SIGN_IDENTITY, else an "Apple Development" certificate, else "GameDevWorkstation Local
+# Signing" (scripts/setup_signing.sh makes it), else ad-hoc with a note.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
@@ -65,9 +69,34 @@ rm_tree "$DIST/GameDevWorkstation.app" "$DIST/GameDevWorkstation.dmg"
 mkdir -p "$DIST"
 cp -R "$BUNDLE/macos/GameDevWorkstation.app" "$DIST/GameDevWorkstation.app"
 
-echo "==> Signing (ad-hoc)"
+# The SHA-1 of the first valid code-signing identity whose name contains $1 (empty if none).
+identity() { security find-identity -v -p codesigning 2>/dev/null | awk -v n="$1" 'index($0, "\"" n) { print $2; exit }'; }
+SIGN="${GDW_SIGN_IDENTITY:-}"
+[[ -n "$SIGN" ]] || SIGN="$(identity "Apple Development")"
+[[ -n "$SIGN" ]] || SIGN="$(identity "GameDevWorkstation Local Signing")"
 xattr -cr "$DIST/GameDevWorkstation.app"
-codesign --force --deep --sign - "$DIST/GameDevWorkstation.app"
+if [[ -n "$SIGN" ]]; then
+  echo "==> Signing ($(security find-identity -v -p codesigning | awk -v h="$SIGN" '$2 == h { $1 = $2 = ""; sub(/^  /, ""); print; exit }'))"
+  # --deep doesn't reach code under Contents/Resources: sign the bundled backend (the process that
+  # reads the Keychain) and its libraries first, inside out. The backend gets a fixed identifier:
+  # PyInstaller's own ad-hoc one changes every build, and the Keychain remembers identifier + certificate.
+  BACKEND_DIR="$DIST/GameDevWorkstation.app/Contents/Resources/backend"
+  while IFS= read -r -d '' f; do
+    if file -b "$f" | grep -q "Mach-O"; then codesign --force --sign "$SIGN" "$f" 2>/dev/null; fi
+  done < <(find "$BACKEND_DIR" -type f ! -name gamedevworkstation-backend -print0)
+  codesign --force --sign "$SIGN" -i dev.local.gamedevworkstation.backend "$BACKEND_DIR/gamedevworkstation-backend"
+  codesign --force --deep --sign "$SIGN" "$DIST/GameDevWorkstation.app"
+  # --deep re-signs nested bundles only; check the backend kept its identifier and certificate.
+  codesign -dr - "$BACKEND_DIR/gamedevworkstation-backend" 2>&1 | grep -q 'identifier "dev.local.gamedevworkstation.backend" and certificate' \
+    || { echo "The backend isn't signed with the stable identity." >&2; exit 1; }
+elif [[ -n "${GDW_ALLOW_ADHOC:-}" ]]; then
+  echo "==> Signing (ad-hoc, GDW_ALLOW_ADHOC: the Keychain will ask again for this build)"
+  codesign --force --deep --sign - "$DIST/GameDevWorkstation.app"
+else
+  echo "No code-signing identity: run scripts/setup_signing.sh once (or set GDW_SIGN_IDENTITY)." >&2
+  echo "An ad-hoc build is a new app to the Keychain, which asks for your password again; GDW_ALLOW_ADHOC=1 builds one anyway." >&2
+  exit 1
+fi
 codesign --verify --deep --strict "$DIST/GameDevWorkstation.app" && echo "    signature OK"
 
 if [[ -n "${GDW_SKIP_DMG:-}" ]]; then echo; echo "Built: $DIST/GameDevWorkstation.app"; exit 0; fi

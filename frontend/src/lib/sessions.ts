@@ -182,6 +182,10 @@ let starting: Promise<boolean> | null = null;
  *  subscription (harness claude_code). No folder = chat only (a private scratch folder). */
 export type NewSessionRequest = {
   text: string; skill?: string | null; attachments?: NewSessionAttachment[]; folder: string | null; model: string; effort: string; mode: string;
+  /** Skipper mode: after each turn a handoff is recorded and a fresh Claude Code conversation continues from it. */
+  skipper?: boolean;
+  /** Central-doc mode: a summary doc of the session (<folder>/.gdw/sessions/<id>/central.md) updated after each turn. */
+  central_doc?: boolean;
 };
 /** A file uploaded on the new-session screen (POST /uploads before the session exists). */
 type NewSessionAttachment = { path: string; name: string; mime: string; item_id?: string; text?: string };
@@ -205,6 +209,7 @@ export const sessionActions = {
       try {
         s = await post<Session>("/sessions", {
           harness: "claude_code", folder: r.folder || null, model: r.model, effort: r.effort, mode: r.mode, ...(group_id ? { group_id } : {}),
+          ...(r.skipper ? { skipper: true } : {}), ...(r.central_doc ? { central_doc: true } : {}),
         });
       } catch (e: any) {
         if (e?.status === 400 && e.message.startsWith("Folder not found")) {

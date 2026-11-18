@@ -37,6 +37,11 @@ const ses = (id: string, folder: string | null, at: number, extra: Partial<Sessi
 const subtitle = () => screen.getByTestId("new-session-subtitle").textContent;
 const box = () => screen.getByLabelText("Describe a task") as HTMLTextAreaElement;
 const select = (label: string) => screen.getByLabelText(label) as HTMLSelectElement;
+const place = () => screen.getByTestId("location").textContent;
+const pickPlace = async (label: string) => {
+  await act(async () => { fireEvent.click(screen.getByTestId("location")); });
+  await act(async () => { fireEvent.click(screen.getByRole("menuitem", { name: new RegExp(`^${label}`) })); });
+};
 const optionValues = (label: string) => Array.from(select(label).options).map((o) => o.value);
 async function mount() {
   render(<NewSession />);
@@ -86,7 +91,7 @@ describe("NewSession", () => {
     await act(async () => { fireEvent.change(box(), { target: { value: "Keep this task" } }); });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Send" })); });
     expect(box().value).toBe("Keep this task");
-    expect(select("Location").value).toBe("chat");
+    expect(place()).toBe("Chat only");
     expect(subtitle()).toContain("Chat only");
     expect(JSON.parse(localStorage.getItem("newSession.prefs")!)).toEqual({ location: "chat", folder: null, model: "claude-sonnet-5-5", effort: "high", mode: "plan" });
     expect(useStore.getState().currentId).toBeNull();
@@ -114,7 +119,7 @@ describe("NewSession", () => {
     await mount();
     await act(async () => { fireEvent.change(box(), { target: { value: "Keep this task" } }); });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Send" })); });
-    expect(select("Location").value).toBe("folder");
+    expect(place()).toBe("kept");
     expect(useStore.getState().draftGroup).toBe("g1");
     expect(box().value).toBe("Keep this task");
   });
@@ -123,7 +128,7 @@ describe("NewSession", () => {
     await mount();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we work on, Arshia J.?");
     expect(box().placeholder).toContain("type / for commands and skills");
-    expect(select("Location").value).toBe("chat");
+    expect(place()).toBe("Chat only");
     // Claude models only, by name (the tier is in the tooltip); Opus (the orchestrator's model) by default.
     expect(optionValues("Model")).toEqual(["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]);
     expect(select("Model").selectedOptions[0].textContent).toBe("Opus 5.5");
@@ -146,21 +151,24 @@ describe("NewSession", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we work on?");
   });
 
-  it("switches between Chat only and Folder", async () => {
+  it("picks Chat only, a recent folder or Choose a folder… from the location menu", async () => {
+    useStore.setState({ sessions: [ses("a", "/Users/me/Apiva", 30)] });
     await mount();
     expect(subtitle()).toBe("Chat only: no folder; Claude Code works in a private scratch folder.");
-    expect(screen.queryByTestId("folder-chip")).toBeNull();
-    await act(async () => { fireEvent.change(select("Location"), { target: { value: "folder" } }); });
-    expect(pickFolder).toHaveBeenCalled(); // no folder yet: the folder picker opens
+    expect(place()).toBe("Chat only");
+    await act(async () => { fireEvent.click(screen.getByTestId("location")); });
+    expect(screen.getAllByRole("menuitem").map((m) => m.textContent)).toEqual([
+      expect.stringContaining("Chat only"), expect.stringContaining("Apiva"), expect.stringContaining("Choose a folder…")]);
+    fireEvent.keyDown(window, { key: "Escape" });
+    await pickPlace("Choose a folder");
+    expect(pickFolder).toHaveBeenCalled();
     expect(subtitle()).toBe("The project stays in Forklift. Claude Code reads, edits and runs commands there.");
-    expect(screen.getByTestId("folder-chip").textContent).toBe("Forklift");
-    // The chip opens the picker again.
-    pickFolder.mockResolvedValueOnce("/Users/me/Games/Apiva");
-    await act(async () => { fireEvent.click(screen.getByTestId("folder-chip")); });
-    expect(screen.getByTestId("folder-chip").textContent).toBe("Apiva");
-    await act(async () => { fireEvent.change(select("Location"), { target: { value: "chat" } }); });
+    expect(place()).toBe("Forklift");
+    await pickPlace("Apiva");
+    expect(place()).toBe("Apiva");
+    await pickPlace("Chat only");
     expect(subtitle()).toContain("Chat only");
-    expect(screen.queryByTestId("folder-chip")).toBeNull();
+    expect(place()).toBe("Chat only");
   });
 
   it("lists recent folders as chips; clicking one selects it", async () => {
@@ -172,7 +180,7 @@ describe("NewSession", () => {
     expect(chips[1].getAttribute("aria-pressed")).toBe("false");
     await act(async () => { fireEvent.click(chips[1]); });
     expect(chips[1].getAttribute("aria-pressed")).toBe("true");
-    expect(select("Location").value).toBe("folder");
+    expect(place()).toBe("Apiva");
     expect(subtitle()).toContain("The project stays in Apiva.");
     expect(screen.getByTestId("new-session-subtitle").querySelector("[title]")?.getAttribute("title")).toBe("~/Apiva");
     expect(pickFolder).not.toHaveBeenCalled();
@@ -192,6 +200,27 @@ describe("NewSession", () => {
     expect(post).toHaveBeenNthCalledWith(2, "/sessions/s9/messages", { text: "Fix the double jump", attachments: [] });
     expect(useStore.getState().currentId).toBe("s9");
     expect(useStore.getState().draftGroup).toBeNull();
+  });
+
+  it("offers Skipper and Central doc for folder sessions and sends them with the new session", async () => {
+    useStore.setState({ sessions: [ses("a", "/Users/me/Apiva", 30)] });
+    await mount();
+    expect(screen.queryByTestId("session-modes")).toBeNull(); // Chat only: no session modes
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Apiva" })); });
+    const modes = () => screen.getByTestId("session-modes");
+    expect(modes().textContent).toBe("Modes");
+    const pick = async (label: string) => {
+      await act(async () => { fireEvent.click(modes()); });
+      await act(async () => { fireEvent.click(screen.getByRole("menuitem", { name: new RegExp(`^${label}`) })); });
+    };
+    await pick("Skipper mode");
+    expect(modes().textContent).toBe("Skipper");
+    await pick("Central doc");
+    expect(modes().textContent).toBe("Skipper + Central doc");
+    await act(async () => { fireEvent.change(box(), { target: { value: "Fix the double jump" } }); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Send" })); });
+    expect(post).toHaveBeenNthCalledWith(1, "/sessions", expect.objectContaining({
+      folder: "/Users/me/Apiva", skipper: true, central_doc: true }));
   });
 
   it("sends a chat-only session with Enter, and /model changes the screen's model", async () => {

@@ -3,16 +3,16 @@
 // Code on the user's own Claude subscription (harness claude_code). Chat only = no folder: Claude
 // Code works in a private scratch folder; Folder = it works in that project folder. The session is
 // created when the first message is sent.
-import { Folder } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, FastForward, FileText, Folder, FolderOpen, Layers, MessageSquare } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { get } from "../lib/api";
 import { pickFolder } from "../lib/native";
 import { sessionActions } from "../lib/sessions";
 import { useStore, type Session } from "../lib/store";
 import { ClaudeStatusNotice, useClaudeStatus } from "./ClaudeCode";
-import { EffortSelect, EFFORTS, folderName, ModelSelect, ModeSelect, NEW_SESSION_MODES, TextSelect, tilde } from "./ClaudeCard";
+import { EffortSelect, EFFORTS, folderName, ModelSelect, ModeSelect, NEW_SESSION_MODES, tilde } from "./ClaudeCard";
 import { Composer, type ComposerDraft } from "./Composer";
-import { providerModels, useModelCatalog } from "./ui";
+import { Menu, providerModels, useModelCatalog, type MenuItem } from "./ui";
 
 export { folderName, NEW_SESSION_MODES };
 
@@ -21,8 +21,11 @@ export const PLACEHOLDER = "Describe a task, or type / for commands and skills, 
 const PREFS_KEY = "newSession.prefs";
 const RECENT_MAX = 6;
 
-type Prefs = { location: Location; folder: string | null; model: string | null; effort: string | null; mode: string | null };
-const NO_PREFS: Prefs = { location: "chat", folder: null, model: null, effort: null, mode: null };
+type Prefs = {
+  location: Location; folder: string | null; model: string | null; effort: string | null; mode: string | null;
+  skipper: boolean; centralDoc: boolean;
+};
+const NO_PREFS: Prefs = { location: "chat", folder: null, model: null, effort: null, mode: null, skipper: false, centralDoc: false };
 
 /** The last choices on this screen (this window's browser storage; a convenience only). */
 function loadPrefs(): Prefs {
@@ -46,6 +49,65 @@ export function recentFolders(sessions: Session[], max = RECENT_MAX): string[] {
     if (out.length >= max) break;
   }
   return out;
+}
+
+/** Where the session works: Chat only, a recent folder, or "Choose a folder…" (the macOS folder picker).
+ *  One menu (not a native dropdown), so every choice is a click away. */
+function LocationButton({ folder, recents, onChat, onFolder, onChoose }: {
+  folder: string | null; recents: string[]; onChat: () => void; onFolder: (f: string) => void; onChoose: () => void;
+}) {
+  const btn = useRef<HTMLButtonElement>(null);
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const folders = folder && !recents.includes(folder) ? [folder, ...recents] : recents;
+  const items: MenuItem[] = [
+    { label: "Chat only", icon: <MessageSquare size={14} />, checked: !folder, hint: "private scratch folder", onClick: onChat },
+    ...(folders.length ? ["sep" as const, { heading: "Folders" }] : []),
+    ...folders.map((f): MenuItem => ({ label: folderName(f), icon: <Folder size={14} />, checked: f === folder, onClick: () => onFolder(f) })),
+    "sep",
+    { label: "Choose a folder…", icon: <FolderOpen size={14} />, onClick: onChoose },
+  ];
+  return (
+    <>
+      <button ref={btn} className="btn btn-ghost gap-1.5 px-2 text-[14px] min-w-0" aria-label="Location" aria-haspopup="menu" aria-expanded={!!at}
+        data-testid="location" title={folder ? tilde(folder) : "No folder: Claude Code works in a private scratch folder"}
+        onClick={() => { const r = btn.current!.getBoundingClientRect(); setAt(at ? null : { x: r.left, y: r.bottom + 4 }); }}>
+        {folder ? <Folder size={15} className="shrink-0" aria-hidden /> : <MessageSquare size={15} className="shrink-0 text-muted" aria-hidden />}
+        <span className="truncate max-w-[220px]">{folder ? folderName(folder) : "Chat only"}</span>
+        <ChevronDown size={15} className="shrink-0 text-muted" aria-hidden />
+      </button>
+      {at && <Menu x={at.x} y={at.y} width={280} items={items} onClose={() => setAt(null)} />}
+    </>
+  );
+}
+
+/** Folder sessions only: Skipper mode (a handoff and a fresh Claude Code conversation after every turn) and
+ *  central-doc mode (one summary doc of the session, updated after every turn). */
+function SessionModesButton({ skipper, centralDoc, onSkipper, onCentralDoc }: {
+  skipper: boolean; centralDoc: boolean; onSkipper: (v: boolean) => void; onCentralDoc: (v: boolean) => void;
+}) {
+  const btn = useRef<HTMLButtonElement>(null);
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const on = [skipper && "Skipper", centralDoc && "Central doc"].filter(Boolean) as string[];
+  const items: MenuItem[] = [
+    { heading: "Session modes" },
+    { label: "Skipper mode", icon: <FastForward size={14} />, checked: skipper,
+      hint: "handoff, then a fresh conversation after each prompt", onClick: () => onSkipper(!skipper) },
+    { label: "Central doc", icon: <FileText size={14} />, checked: centralDoc,
+      hint: "one summary doc, updated after each step", onClick: () => onCentralDoc(!centralDoc) },
+  ];
+  return (
+    <>
+      <button ref={btn} className={`btn btn-ghost gap-1.5 px-2 text-[14px] min-w-0 ${on.length ? "text-action" : ""}`}
+        aria-label="Session modes" aria-haspopup="menu" aria-expanded={!!at} data-testid="session-modes"
+        title="Skipper mode and central-doc mode"
+        onClick={() => { const r = btn.current!.getBoundingClientRect(); setAt(at ? null : { x: r.left, y: r.bottom + 4 }); }}>
+        <Layers size={15} className={`shrink-0 ${on.length ? "" : "text-muted"}`} aria-hidden />
+        <span className="truncate max-w-[200px]">{on.length ? on.join(" + ") : "Modes"}</span>
+        <ChevronDown size={15} className="shrink-0 text-muted" aria-hidden />
+      </button>
+      {at && <Menu x={at.x} y={at.y} width={330} items={items} onClose={() => setAt(null)} />}
+    </>
+  );
 }
 
 export function NewSession() {
@@ -80,12 +142,6 @@ export function NewSession() {
     if (f) setPrefs({ location: "folder", folder: f });
     else setPrefs({ location: "chat" }); // the browser prompt left empty: chat only
   };
-  const setLocation = (v: string) => {
-    if (v !== "folder") return setPrefs({ location: "chat" });
-    const known = prefs.folder ?? recents[0] ?? null;
-    if (known) setPrefs({ location: "folder", folder: known });
-    else void choose();
-  };
 
   const subtitle = folder
     ? <>The project stays in <span className="text-text" title={tilde(folder)}>{folderName(folder)}</span>. Claude Code reads, edits and runs commands there.</>
@@ -101,28 +157,24 @@ export function NewSession() {
       setPrefs({ ...(m ? { model: m } : {}), ...(b.effort ? { effort: b.effort } : {}), ...(b.mode ? { mode: b.mode } : {}) });
     },
     start: async (text, skill, attachments) => {
-      const started = await sessionActions.start({ text, skill, attachments, folder, model, effort, mode });
+      const started = await sessionActions.start({
+        text, skill, attachments, folder, model, effort, mode,
+        ...(folder ? { skipper: !!prefs.skipper, central_doc: !!prefs.centralDoc } : {}),
+      });
       if (!started) setPrefsState(loadPrefs()); // a missing folder resets saved preferences to Chat only
       return started;
     },
     rows: [
       <>
-        <TextSelect label="Location" value={location} onChange={setLocation}
-          title={location === "folder" ? "Claude Code works in a project folder" : "No folder: Claude Code works in a private scratch folder"}>
-          <option value="chat">Chat only</option>
-          <option value="folder">Folder</option>
-        </TextSelect>
-        {location === "folder" && (
-          <button className="btn btn-ghost gap-1.5 px-2 text-[14px] min-w-0" onClick={choose} title={folder ? `${folder} (choose another folder)` : "Choose a folder"}
-            aria-label={folder ? `Folder ${folderName(folder)}` : "Choose a folder"} data-testid="folder-chip">
-            <Folder size={15} className="shrink-0" aria-hidden /><span className="truncate max-w-[220px]">{folder ? folderName(folder) : "Choose a folder…"}</span>
-          </button>
-        )}
+        <LocationButton folder={folder} recents={recents} onChat={() => setPrefs({ location: "chat" })}
+          onFolder={(f) => setPrefs({ location: "folder", folder: f })} onChoose={choose} />
         <ModelSelect value={model} onChange={(v) => setPrefs({ model: v })} />
       </>,
       <>
         <EffortSelect value={effort} onChange={(v) => setPrefs({ effort: v })} />
         <ModeSelect value={mode} onChange={(v) => setPrefs({ mode: v })} />
+        {folder && <SessionModesButton skipper={!!prefs.skipper} centralDoc={!!prefs.centralDoc}
+          onSkipper={(v) => setPrefs({ skipper: v })} onCentralDoc={(v) => setPrefs({ centralDoc: v })} />}
       </>,
     ],
   };

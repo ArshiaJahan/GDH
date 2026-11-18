@@ -1486,3 +1486,93 @@ def test_attachments_over_the_turn_limit_become_a_note(tmp_path):
         ccm2.MAX_TURN_MEDIA = orig
     assert "left out of this request" in capped[2]["text"]  # the big (oldest) one; the newest stays
     assert capped[4]["type"] == "document" and len(json.dumps(capped)) < full
+
+
+# ------------------------------------------------- Skipper mode and central-doc mode
+
+
+def _docs(folder: Path, sid: str) -> Path:
+    return folder / ".gdw" / "sessions" / sid
+
+
+def _chat_texts(live, sid: str) -> list[str]:
+    return [b.get("text", "") for m in live.msgs(sid) for b in m["content"] if b.get("type") == "text"]
+
+
+def test_central_doc_is_updated_after_each_turn(live, tmp_path):
+    folder = _project(tmp_path)
+    sid = live.session(folder, central_doc=True)
+    assert live.get(sid)["settings"]["central_doc"] is True
+    live.send(sid, "hello")
+    live.wait_idle(sid)
+    doc = _docs(folder, sid) / "central.md"
+    assert doc.read_text() == "Hello from fake claude (turn 2).\n"  # the step's reply, saved by the harness
+    users = live.events("user")
+    assert len(users) == 2 and users[1]["text"].startswith("GameDevWorkstation central doc update")
+    assert "(empty: this is the first update)" in users[1]["text"]
+    assert "Central doc mode" in _opt(live.starts()[0]["argv"], "--append-system-prompt")
+    texts = _chat_texts(live, sid)
+    assert "Hello from fake claude (turn 1)." in texts
+    assert not any("turn 2" in t for t in texts)  # the step's reply isn't a chat message
+    assert any(t.startswith("Central doc updated:") for t in texts)
+    live.send(sid, "hello")
+    live.wait_idle(sid)
+    assert "Hello from fake claude (turn 2)." in live.events("user")[-1]["text"]  # the step sees the current doc
+    assert doc.read_text() == "Hello from fake claude (turn 4).\n"
+    assert len(live.starts()) == 1  # the same conversation throughout
+
+
+def test_skipper_hands_off_to_a_fresh_conversation_after_each_turn(live, tmp_path):
+    folder = _project(tmp_path)
+    sid = live.session(folder, skipper=True)
+    live.send(sid, "hello")
+    live.wait_idle(sid)
+    first = _opt(live.starts()[0]["argv"], "--session-id")
+    handoff = _docs(folder, sid) / "handoff-001.md"
+    assert handoff.read_text() == "Hello from fake claude (turn 2).\n"
+    assert live.events("user")[1]["text"].startswith("GameDevWorkstation Skipper handoff")
+    st = live.get(sid)["settings"]
+    assert st["skipper_n"] == 1 and st["skipper_handoff"] == str(handoff)
+    # The fresh conversation is started right away, from the handoff.
+    live.wait_for(lambda: len(live.starts()) == 2)
+    argv = live.starts()[1]["argv"]
+    second = _opt(argv, "--session-id")
+    assert second and second != first and _opt(argv, "--resume") is None
+    sp = _opt(argv, "--append-system-prompt")
+    assert "previous conversation's handoff" in sp and "Hello from fake claude (turn 2)." in sp
+    assert any(t.startswith("Skipper: handoff #1 saved") for t in _chat_texts(live, sid))
+    live.send(sid, "hello")
+    live.wait_idle(sid)
+    assert len(live.starts()) >= 2 and _opt(live.starts()[1]["argv"], "--session-id") == second  # the warm one
+    new = [e["text"] for e in live.events("user")][2]
+    assert new == "hello" and "Earlier in this conversation" not in new  # the handoff replaces the recap
+    assert _chat_texts(live, sid).count("Hello from fake claude (turn 1).") == 2  # one per conversation
+    assert (_docs(folder, sid) / "handoff-002.md").exists()
+    assert live.get(sid)["settings"]["skipper_n"] == 2
+
+
+def test_skipper_with_central_doc_uses_the_doc_as_the_handoff(live, tmp_path):
+    folder = _project(tmp_path)
+    sid = live.session(folder, skipper=True, central_doc=True)
+    live.send(sid, "hello")
+    live.wait_idle(sid)
+    d = _docs(folder, sid)
+    assert (d / "central.md").read_text() == (d / "handoff-001.md").read_text() == "Hello from fake claude (turn 2).\n"
+    assert len(live.events("user")) == 2  # one step, not two
+
+
+def test_modes_need_claude_code_and_quiet_steps_deny_tools(live, tmp_path):
+    folder = _project(tmp_path)
+    r = live.c.post("/api/sessions", json={"folder": str(folder), "harness": "builtin", "skipper": True, "central_doc": True})
+    assert r.status_code == 200 and "skipper" not in r.json()["settings"] and "central_doc" not in r.json()["settings"]
+    mgr = live.S.extensions["claude_code"]
+    sid = live.session(folder)
+    import types
+
+    mgr.procs[sid] = types.SimpleNamespace(turn=types.SimpleNamespace(quiet=True))
+    try:
+        out = asyncio.run(mgr.pre_tool_use(sid, {"tool_name": "Bash", "tool_input": {"command": "ls"}}))
+        assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert asyncio.run(mgr.decide(sid, "Write", {"file_path": "x"}))["behavior"] == "deny"
+    finally:
+        mgr.procs.pop(sid, None)

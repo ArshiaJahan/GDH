@@ -737,6 +737,24 @@ paperclip, *Chat only* or the folder (fixed once the session has started; click 
 Finder), the model (Claude models by name), effort, permission mode (Plan only, Ask before edits,
 Accept edits), Tools and Send. Changing a dropdown updates the session; the next message uses it.
 
+**Session modes (folder sessions).** On the new-session screen, once a folder is chosen, **Modes**
+offers two switches. They're set when the session starts.
+
+- **Skipper mode.** After each turn, GameDevWorkstation asks Claude Code for a handoff (goal, what
+  was done, current state, decisions, open problems, next step) and saves it as
+  `<folder>/.gdw/sessions/<session id>/handoff-001.md`, `handoff-002.md` and so on. It then ends that
+  Claude Code conversation and starts a fresh one with the handoff in its instructions, ready for your
+  next message. Every prompt starts with a clean context; the chat stays one thread, and a note marks
+  each handoff.
+- **Central doc.** After each turn, Claude Code is asked for the updated version of one summary doc:
+  goal, what's happened, current state, decisions, open questions, next steps. It's saved as
+  `<folder>/.gdw/sessions/<session id>/central.md`. With Skipper mode on too, the central doc is the
+  handoff, so each turn takes one extra step, not two.
+
+Both extra steps are text-only (tools are refused during them), don't appear as chat messages, and
+count toward your usage like any other turn. Add `.gdw/` to the project's `.gitignore` if you don't
+want the docs committed.
+
 **Attachments.** The paperclip works as in other sessions. Attached files go to Claude Code inside the
 message itself, the way the API takes them: images (already converted and shrunk at upload) and PDFs
 as base64, text files as text, audio as its transcript (when there is one), and other binary files

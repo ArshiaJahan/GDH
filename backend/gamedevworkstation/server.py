@@ -210,9 +210,11 @@ def create_app(token: str, state: AppState | None = None) -> FastAPI:
             # Not checked for the CLI: without it the session still opens, and its first turn says
             # how to install or log in (claude_code.run_turn).
             harness = new_session_harness(S.config)
+        # Skipper mode and central-doc mode: Claude Code sessions only (claude_code.ClaudeCode._after_turn).
+        modes = {k: True for k in ("skipper", "central_doc") if body.get(k) is True and harness == "claude_code"}
         s = S.store.create(title=body.get("title") or "New session", folder=folder,
                            model=_model_arg(body["model"]) if body.get("model") else None,
-                           effort=body.get("effort"), mode=body.get("mode"), harness=harness)  # skill disclosure: store.create
+                           effort=body.get("effort"), mode=body.get("mode"), harness=harness, **modes)  # skill disclosure: store.create
         if group_id:  # ⌘N in a grouped session: the new one joins that group
             s = S.store.update(s["id"], group_id=group_id) or s
         return s

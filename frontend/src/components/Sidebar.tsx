@@ -507,7 +507,12 @@ export function Sidebar() {
       <div className="px-3 pt-3 pb-2 flex items-center gap-1" data-tauri-drag-region>
         <span className="font-semibold tracking-tight mr-auto">GameDevWorkstation</span>
         <button className="btn btn-ghost px-1.5" onClick={(e) => openMenu(e.currentTarget, headerItems())} title="New group, group by, sort, archived and trash" aria-label="Session list options" aria-haspopup="menu"><ListFilter size={15} /></button>
-        <button className="btn btn-ghost px-1.5" onClick={newSession} title="New session (⌘N)" aria-label="New session"><Plus size={16} /></button>
+      </div>
+      <div className="px-3 pb-2">
+        <button className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-[13.5px] text-text hover:bg-sunken focus-visible:outline-2 focus-visible:outline-action"
+          onClick={newSession} title="New session (⌘N)" aria-label="New session">
+          <Plus size={16} className="shrink-0" aria-hidden /><span className="flex-1 text-left">New session</span><kbd className="text-[11px] text-faint font-sans">⌘N</kbd>
+        </button>
       </div>
       <div className="px-3 pb-2">
         <label className="relative block">
