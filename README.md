@@ -40,7 +40,7 @@ Everything runs locally; the backend listens on `127.0.0.1` only.
 
 > [!IMPORTANT]
 > **Built for macOS.** GameDevWorkstation targets macOS 13 or later on Apple Silicon. A
-> [Windows x64 build](#windows-experimental) is experimental: CI builds its installer on every push and
+> [Windows x64 build](#windows-experimental) is experimental. CI builds its installer on every push and
 > checks that the bundled backend starts and serves sessions, but the desktop app hasn't been tested by
 > hand on Windows, and the built-in terminal and in-app updates are macOS-only. Linux is not supported.
 
