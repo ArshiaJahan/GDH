@@ -9,7 +9,7 @@
 [![CI](https://github.com/ArshiaJahan/GDH/actions/workflows/ci.yml/badge.svg)](https://github.com/ArshiaJahan/GDH/actions/workflows/ci.yml)
 [![macOS](https://img.shields.io/badge/macOS-13%2B%20·%20Apple%20Silicon-000000?logo=apple&logoColor=white)](#quick-start)
 [![Unity](https://img.shields.io/badge/Unity-6-222222?logo=unity&logoColor=white)](#built-for-unity)
-[![Version](https://img.shields.io/badge/version-0.4.0-4c1)](VERSION)
+[![Version](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FArshiaJahan%2FGDH%2Fmain%2Fpyproject.toml&query=%24.project.version&label=version&color=4c1)](VERSION)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 <br>
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
