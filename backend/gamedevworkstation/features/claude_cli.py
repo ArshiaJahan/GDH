@@ -5,8 +5,8 @@ with the user's own Claude login (subscription or CLI-managed API key). It never
 from ~/.claude or the Keychain: login happens when the user runs `claude auth login` in a terminal.
 
 - `find_cli(config)`: [claude_code].cli_path, else PATH, ~/.local/bin, ~/.claude/local,
-  /opt/homebrew/bin. GDW_CLAUDE_CLI_SEARCH=0 (tests) turns the search off: only cli_path.
-- `child_env()`: an allowlist of shell, locale, proxy and desktop environment variables, plus
+  /opt/homebrew/bin (Windows: claude.exe/claude.cmd in ~/.local/bin, ~/.claude/local, %APPDATA%/npm). GDW_CLAUDE_CLI_SEARCH=0 (tests) turns the search off: only cli_path.
+- `child_env()`: an allowlist of shell, locale, proxy, desktop and Windows profile/system variables, plus
   MCP_TOOL_TIMEOUT. Provider credentials and arbitrary application secrets never reach the child.
 - `probe(config)`: path, `claude --version` and the JSON of `claude auth status` (run with
   child_env(), so what it reports is what a session will use). Cached for CACHE_S.
@@ -26,17 +26,32 @@ from ..procs import NEW_GROUP
 
 ENV_NAMES = {"PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TERM", "TMPDIR", "TZ",
              "SSH_AUTH_SOCK", "__CF_USER_TEXT_ENCODING"}
+# Windows: where the user profile lives (`claude auth login` saves the login under %USERPROFILE%\\.claude, and
+# Node's os.homedir() reads USERPROFILE, not HOME), plus what Node and cmd.exe need to start at all (SystemRoot,
+# ComSpec, PATHEXT, TEMP). Compared case-insensitively; none of them carries a credential.
+WIN_ENV_NAMES = {"USERPROFILE", "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "PROGRAMFILES",
+                 "PROGRAMFILES(X86)", "PROGRAMW6432", "COMMONPROGRAMFILES", "COMMONPROGRAMFILES(X86)",
+                 "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP", "USERNAME",
+                 "USERDOMAIN", "COMPUTERNAME", "OS", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS"}
 PROXY_NAMES = {"http_proxy", "https_proxy", "no_proxy", "all_proxy"}
 # A GDW tool call or approval card can wait on the user for a long time; the CLI's MCP tool timeout
 # (MCP_TOOL_TIMEOUT, milliseconds [docs]) must not cut that short.
 MCP_TOOL_TIMEOUT_MS = 24 * 3600 * 1000
 CACHE_S = 60.0
 SEARCH_DIRS = ("~/.local/bin", "~/.claude/local", "/opt/homebrew/bin")
+# Windows: the native installer's %USERPROFILE%\\.local\\bin\\claude.exe and npm's %APPDATA%\\npm\\claude.cmd
+WIN_SEARCH_DIRS = ("~/.local/bin", "~/.claude/local", "%APPDATA%/npm", "%LOCALAPPDATA%/Programs/claude")
+WIN_NAMES = ("claude.exe", "claude.cmd")
+_WINVAR = re.compile(r"%([A-Za-z0-9_()]+)%")
 LOGIN_HINT = "Run `claude auth login` in a terminal, then retry."
 _SECRETISH = re.compile(r"token|secret|key|password|credential", re.I)
 # Account details `claude auth status` reports when logged in [live]; GDW has no use for them.
 PERSONAL = frozenset({"email", "orgId", "orgName", "organization", "accountUuid", "organizationUuid"})
 _ERROR_SECRET = re.compile(r"Bearer\s+\S+|sk-[A-Za-z0-9_-]{10,}", re.I)
+
+
+def _windows() -> bool:
+    return os.name == "nt"
 
 
 def redact(text: str, token: str = "") -> str:
@@ -49,7 +64,8 @@ def redact(text: str, token: str = "") -> str:
 def child_env(base: dict[str, str] | None = None) -> dict[str, str]:
     """The environment for every `claude` process GDW starts (sessions and probes)."""
     env = {k: v for k, v in (os.environ if base is None else base).items()
-           if k in ENV_NAMES or k.startswith(("LC_", "XDG_")) or k.lower() in PROXY_NAMES}
+           if k in ENV_NAMES or k.upper() in WIN_ENV_NAMES or k.upper() == "PATH" or k.startswith(("LC_", "XDG_"))
+           or k.lower() in PROXY_NAMES}
     env["MCP_TOOL_TIMEOUT"] = str(MCP_TOOL_TIMEOUT_MS)
     return env
 
@@ -68,10 +84,16 @@ def find_cli(config: Any) -> str | None:
         return None
     if found := shutil.which("claude"):
         return found
-    for d in SEARCH_DIRS:
-        p = Path(d).expanduser() / "claude"
-        if p.is_file() and os.access(p, os.X_OK):
-            return str(p)
+    windows = _windows()
+    for d in WIN_SEARCH_DIRS if windows else SEARCH_DIRS:
+        raw = _WINVAR.sub(lambda m: os.environ.get(m.group(1), m.group(0)), d)
+        if "%" in raw:  # the variable isn't set
+            continue
+        base = Path(raw).expanduser()
+        for name in WIN_NAMES if windows else ("claude",):
+            p = base / name
+            if p.is_file() and os.access(p, os.X_OK):
+                return str(p)
     return None
 
 
@@ -153,8 +175,9 @@ class CliProbe:
                                "checked_at": time.time(), "login_hint": LOGIN_HINT}
         if not path:
             want = str(_cfg(self.config).get("cli_path") or "").strip()
+            where = ", ".join(("PATH", *(WIN_SEARCH_DIRS if _windows() else SEARCH_DIRS)))
             out["error"] = (f"[claude_code].cli_path {want} isn't an executable file." if want else
-                            "The claude CLI wasn't found (PATH, ~/.local/bin, ~/.claude/local, /opt/homebrew/bin).")
+                            f"The claude CLI wasn't found ({where}).")
             return out
         try:
             code, so, se = await _run([path, "--version"])

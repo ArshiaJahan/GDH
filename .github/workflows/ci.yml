@@ -77,7 +77,7 @@ jobs:
         run: |
           uv sync --frozen --all-extras
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          uv run --frozen pytest -q -p no:cacheprovider tests/test_procs.py tests/test_release_feed.py
+          uv run --frozen pytest -q -p no:cacheprovider tests/test_procs.py tests/test_release_feed.py tests/test_claude_cli_windows.py
       - name: Build the installer
         shell: pwsh
         run: ./scripts/build_windows.ps1

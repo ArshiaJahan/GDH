@@ -769,13 +769,22 @@ data policy for Anthropic.
 GameDevWorkstation passes no API key and never uses `--bare`. Every CLI process (including status
 probes) receives an env allowlist: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_*`, `TERM`,
 `TMPDIR`, `TZ`, `SSH_AUTH_SOCK`, proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `ALL_PROXY`,
-any case), `XDG_*`, and `__CF_USER_TEXT_ENCODING`, plus GDW's `MCP_TOOL_TIMEOUT`. All other variables,
+any case), `XDG_*`, and `__CF_USER_TEXT_ENCODING`; on Windows also the profile and system variables
+`claude` needs to find your login and start (`USERPROFILE`, `HOMEDRIVE`, `HOMEPATH`, `APPDATA`,
+`LOCALAPPDATA`, `ProgramData`, `ProgramFiles*`, `SystemRoot`, `SystemDrive`, `windir`, `ComSpec`,
+`PATHEXT`, `TEMP`, `TMP`, `USERNAME`, `USERDOMAIN`, `COMPUTERNAME`, `OS`, `PROCESSOR_ARCHITECTURE`,
+`NUMBER_OF_PROCESSORS`); plus GDW's `MCP_TOOL_TIMEOUT`. All other variables,
 including provider credentials, `GDW_KEY_*`, `GDW_TOKEN` and arbitrary secrets, are excluded.
 **GameDevWorkstation never reads, copies or stores your tokens**: it doesn't open `~/.claude` or the
 Keychain entry, and it never runs the login for you.
 
 **Logging in.** Run `claude auth login` in a terminal (it opens your browser). Settings → Claude
-Code shows the CLI it found, its version and what `claude auth status` says. If a session isn't
+Code shows the CLI it found, its version and what `claude auth status` says. On Windows the app looks
+for `claude` on PATH, then `claude.exe` or `claude.cmd` in `%USERPROFILE%\.local\bin`,
+`%USERPROFILE%\.claude\local`, `%APPDATA%\npm` and `%LOCALAPPDATA%\Programs\claude`. The Claude
+desktop app's login is separate from the CLI's: log in once with `claude auth login` as well. An
+Anthropic API key saved in GameDevWorkstation's Settings is for the built-in harness only and never
+reaches `claude`. If a session isn't
 logged in, its reply is a card: *Run `claude auth login` in a terminal, then retry*, with **Retry**.
 Only the most recent login card offers Retry. If `claude auth status` reports an API key login,
 the session warns, records usage with `billing='api'`, and checks the normal spend limits before

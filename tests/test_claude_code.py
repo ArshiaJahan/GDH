@@ -724,6 +724,39 @@ def test_env_allowlist_preserves_only_documented_names():
         **keep, "MCP_TOOL_TIMEOUT": str(24 * 3600 * 1000)}
 
 
+def test_env_allowlist_keeps_the_windows_profile_and_system_names():
+    # Python on Windows reports these names in whatever case Windows stores them in; `claude` needs USERPROFILE
+    # to find the login `claude auth login` saved, and Node/cmd.exe need SystemRoot, ComSpec and PATHEXT to start.
+    win = {"Path": r"C:\\Windows", "USERPROFILE": r"C:\\Users\\a", "APPDATA": r"C:\\Users\\a\\AppData\\Roaming",
+           "LOCALAPPDATA": r"C:\\Users\\a\\AppData\\Local", "HOMEDRIVE": "C:", "HOMEPATH": r"\\Users\\a",
+           "SystemRoot": r"C:\\Windows", "ComSpec": r"C:\\Windows\\system32\\cmd.exe", "PATHEXT": ".COM;.EXE;.CMD",
+           "TEMP": r"C:\\Temp", "TMP": r"C:\\Temp", "USERNAME": "a", "ProgramFiles": r"C:\\Program Files",
+           "ProgramFiles(x86)": r"C:\\Program Files (x86)", "windir": r"C:\\Windows", "NUMBER_OF_PROCESSORS": "8"}
+    assert child_env({**win, **LEAKY}) == {**win, "MCP_TOOL_TIMEOUT": str(24 * 3600 * 1000)}
+
+
+def test_find_cli_on_windows_finds_claude_exe_and_npm_cmd(tmp_path, monkeypatch):
+    from gamedevworkstation.features import claude_cli as cli
+    cfg = SimpleNamespace(claude_code={})
+    monkeypatch.delenv("GDW_CLAUDE_CLI_SEARCH", raising=False)
+    monkeypatch.setattr(cli, "_windows", lambda: True)
+    monkeypatch.setattr(cli.shutil, "which", lambda name: None)  # the GUI app's PATH often lacks ~/.local/bin
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    assert cli.find_cli(cfg) is None
+    npm = tmp_path / "Roaming" / "npm" / "claude.cmd"
+    npm.parent.mkdir(parents=True)
+    npm.write_text("@echo off")
+    npm.chmod(0o755)
+    assert cli.find_cli(cfg) == str(npm)
+    native = tmp_path / ".local" / "bin" / "claude.exe"
+    native.parent.mkdir(parents=True)
+    native.write_bytes(b"MZ")
+    native.chmod(0o755)
+    assert cli.find_cli(cfg) == str(native)  # the native installer wins over npm
+
+
 @pytest.mark.parametrize("sources", ["", "user", "project,local", "user,project,local", " user, project "])
 def test_settings_isolation_flags(tmp_path, sources):
     argv = ccm.build_argv("fake", session_id="12345678-1234-1234-1234-123456789abc", resume=None,
