@@ -173,7 +173,9 @@ class TaskScheduler:
         self.app.db.insert("task_runs", {"id": rid, "task_id": tid, "session_id": s["id"], "started_at": time.time(),
                                          "status": "running"})
         jid = self.app.jobs.start(s["id"], "scheduled", f"Scheduled: {t['name']}", {"task": tid, "run": rid})
-        self.app.store.add_message(s["id"], Message.user(t["prompt"]))
+        msg = Message.user(t["prompt"])
+        msg.meta = {**(msg.meta or {}), "origin": "scheduled"}  # prompt improver bypass (NON_USER_ORIGINS)
+        self.app.store.add_message(s["id"], msg)
         task = self.app.runner.start(s["id"])
 
         async def watch() -> None:

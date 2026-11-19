@@ -151,7 +151,8 @@ if resume and (not state_file or not os.path.exists(state_file)):
     emit(swap(find(failed, lambda e: e.get("type") == "result"), find(failed, lambda e: e.get("type") == "result")["session_id"], resume))
     sys.exit(1)
 state = json.load(open(state_file)) if resume else {"turns": 0, "cost": 0.0, "in": 0, "out": 0}
-mcp = json.load(open(opt("--mcp-config")))["mcpServers"]["gdw"]
+HELPER = opt("--mcp-config") is None  # the prompt improver's tool-less helper conversation (pi_helper.jsonl)
+mcp = None if HELPER else json.load(open(opt("--mcp-config")))["mcpServers"]["gdw"]
 
 
 def save():
@@ -201,7 +202,8 @@ def handshake():
     log({"event": "mcp_handshake", "seen": seen})
 
 
-handshake()
+if not HELPER:
+    handshake()
 lines: "queue.Queue[dict | None]" = queue.Queue()
 interrupted = threading.Event()
 sigint = threading.Event()
@@ -371,7 +373,27 @@ def permission(name, inp, tuid):
     return False, inp, "prompt_tool"
 
 
+def helper_turn(prompt):
+    """pi_helper.jsonl with the scripted reply (settings "pi": {"text", "mode": ok|hang|error}); the helper
+    is a fresh conversation every time, so its totals are this turn's alone."""
+    pi = settings.get("pi") or {}
+    emit(mine(copy.deepcopy(INIT)) | {"cwd": os.getcwd()})
+    if pi.get("mode") == "hang":
+        time.sleep(120)
+        return
+    if pi.get("mode") == "error":
+        result("helper failed", is_error=True, subtype="error_during_execution")
+        return
+    text = pi.get("text", "helper reply")
+    for ev in outs("pi_helper.jsonl"):
+        if ev.get("type") not in ("result", "rate_limit_event", "system"):
+            emit(swap(mine(ev), "PI_HELPER_TEXT", text))
+    result(text)
+
+
 def turn(prompt):
+    if HELPER:
+        return helper_turn(prompt)
     init = mine(copy.deepcopy(INIT))
     init.update(cwd=os.getcwd(), permissionMode=cli_mode, claude_code_version="2.1.308",
                 original_cwd=os.getcwd(), **settings.get("init", {}))

@@ -145,6 +145,7 @@ class Config(BaseModel):
     fleet: dict[str, Any] = Field(default_factory=dict)    # enabled, max_units, unit_timeout_min, relay_tokens
     unity: dict[str, Any] = Field(default_factory=dict)    # backend (auto|mcp|cli), cli_path, timeouts (features/unity_cli.py)
     claude_code: dict[str, Any] = Field(default_factory=dict)  # cli_path, load_user_mcp, setting_sources (features/claude_code.py)
+    prompt_improver: dict[str, Any] = Field(default_factory=dict)  # enabled, max_questions, model, effort, limits (features/prompt_improver.py)
     models: dict[str, ModelConfig] = Field(default_factory=dict)
 
     def mcp_presets(self) -> dict[str, dict[str, Any]]:
@@ -257,7 +258,7 @@ PRE_OVERRIDES_BACKUP = "config.toml.pre-overrides.bak"  # the old full copy, kep
 # number, bool, string, list or table must have that type, else the default is used (see _check_types).
 TYPED_SECTIONS = ("orchestrator", "delegation", "assistant", "limits", "elevenlabs", "modes", "data_policy",
                   "appearance", "updates", "sessions", "skills", "hooks", "ladder", "campaigns", "fleet", "unity",
-                  "claude_code")
+                  "claude_code", "prompt_improver")
 # Tables inside typed sections that stay free-form (their entries may legitimately differ in type
 # from the defaults: [skills.mcp_on_invoke] takes a server name or a list of them).
 UNTYPED_KEYS = {"skills": ("mcp_on_invoke",)}
@@ -314,6 +315,43 @@ def _check_types(user: dict, defaults: dict, prefix: str = "") -> tuple[dict, li
     return out, bad
 
 
+_PI_BOOLS = ("enabled", "builtin_enabled", "claude_code_enabled")
+_PI_POSITIVE_INTS = ("max_input_tokens", "max_output_tokens", "timeout_s", "breaker_failures", "breaker_pause_s")
+
+
+def _is_int(v: Any) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def prompt_improver_errors(sec: dict) -> dict[str, str]:
+    """Key -> why, for the [prompt_improver] values in `sec` (a whole section or a partial patch)
+    that are out of range. Strict about types: a bool is not a number, a string is not an int."""
+    from .core.types import EFFORT_LEVELS
+
+    bad: dict[str, str] = {}
+    for k, v in sec.items():
+        if k in _PI_BOOLS:
+            ok, why = isinstance(v, bool), "must be true or false"
+        elif k == "model":
+            ok, why = isinstance(v, str) and bool(v.strip()), "must be a non-empty model or tier name"
+        elif k == "effort":
+            ok = isinstance(v, str) and v in EFFORT_LEVELS and EFFORT_LEVELS.index(v) <= EFFORT_LEVELS.index("high")
+            why = "must be one of none, low, medium, high"
+        elif k == "max_questions":
+            ok, why = _is_int(v) and 1 <= v <= 3, "must be a whole number from 1 to 3"
+        elif k == "max_calls":
+            ok, why = _is_int(v) and v in (1, 2), "must be 1 or 2"
+        elif k in _PI_POSITIVE_INTS:
+            ok, why = _is_int(v) and v > 0, "must be a positive whole number"
+        elif k == "budget_usd":
+            ok, why = _is_num(v) and 0 < v <= 1, "must be more than 0 and at most 1"
+        else:
+            continue
+        if not ok:
+            bad[k] = why
+    return bad
+
+
 def _split_invalid(user: dict, defaults: dict) -> tuple[dict, list[str]]:
     """(`user` without wrong-typed values in the free-form sections, their dotted names)."""
     out = dict(user)
@@ -330,6 +368,10 @@ def _split_invalid(user: dict, defaults: dict) -> tuple[dict, list[str]]:
             d = {k: v for k, v in d.items() if k not in UNTYPED_KEYS[sec]}
         out[sec], sub = _check_types(out[sec], d, sec + ".")
         bad += sub
+    if isinstance(out.get("prompt_improver"), dict):  # out of range (e.g. max_questions = 9): the default is used
+        for k in prompt_improver_errors(out["prompt_improver"]):
+            del out["prompt_improver"][k]
+            bad.append(f"prompt_improver.{k}")
     return out, bad
 
 

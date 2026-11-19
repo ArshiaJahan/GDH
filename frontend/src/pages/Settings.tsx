@@ -9,7 +9,7 @@ import { StorageSettings } from "../components/StorageSettings";
 import { ClaudeCodeSettings } from "../components/ClaudeCode";
 
 const SECTIONS = [["accounts", "Accounts"], ["models", "Models and effort"], ["delegation", "Delegation and budgets"], ["modes", "Modes and approvals"],
-  ["data", "Data policy"], ["elevenlabs", "ElevenLabs defaults"], ["unity", "Unity"], ["claude_code", "Claude Code"], ["appearance", "Appearance"], ["storage", "Storage"], ["about", "About & updates"]];
+  ["data", "Data policy"], ["elevenlabs", "ElevenLabs defaults"], ["unity", "Unity"], ["claude_code", "Claude Code"], ["prompt_improver", "Prompt improver"], ["appearance", "Appearance"], ["storage", "Storage"], ["about", "About & updates"]];
 const PROVIDER_NAME: Record<string, string> = { anthropic: providerLabel("anthropic"), openai: providerLabel("openai"), elevenlabs: providerLabel("elevenlabs") };
 
 /** A provider's configured models by real name, each with the tiers routing to it:
@@ -66,6 +66,7 @@ export function SettingsPage() {
           {section === "elevenlabs" && <ElevenDefaults st={st} save={save} />}
           {section === "unity" && <UnitySettings st={st} save={save} />}
           {section === "claude_code" && <ClaudeCodeSection st={st} save={save} />}
+          {section === "prompt_improver" && <PromptImproverSettings st={st} save={save} />}
           {section === "appearance" && <Appearance st={st} save={save} reload={load} />}
           {section === "storage" && <StorageSettings />}
           {section === "about" && <About />}
@@ -420,6 +421,43 @@ function TextSetting({ value, onSave, label, placeholder }: { value: string; onS
 /** Settings → Claude Code (components/ClaudeCode.tsx) with this page's rows and text fields. */
 export function ClaudeCodeSection({ st, save }: { st: any; save: Save }) {
   return <ClaudeCodeSettings st={st} save={save} Row={Row} TextSetting={TextSetting} />;
+}
+
+/** Settings → Prompt improver: asks a few quick questions about unclear game-dev requests, then adds a task card. */
+export function PromptImproverSettings({ st, save }: { st: any; save: Save }) {
+  const p = st.prompt_improver ?? {};
+  const set = (k: string, label: string) => (v: unknown) => save({ prompt_improver: { [k]: v } }, label);
+  const model: string = p.model ?? "claude.fast";
+  const tiers = Object.keys(st.tiers ?? {});
+  const toggle = (k: string, label: string, aria: string, on: boolean) => (
+    <Row label={label} field={label}>
+      <input type="checkbox" checked={on} aria-label={aria} onChange={(e) => set(k, label)(e.target.checked)} />
+    </Row>
+  );
+  return (
+    <div>
+      <H2 sub="Asks up to 3 quick questions when a game-dev request is unclear, then adds a task card. Start a message with * to skip it.">Prompt improver</H2>
+      {toggle("enabled", "Enabled", "Prompt improver enabled", p.enabled ?? true)}
+      {toggle("builtin_enabled", "Built-in sessions", "Prompt improver for Built-in sessions", p.builtin_enabled ?? true)}
+      {toggle("claude_code_enabled", "Claude Code sessions", "Prompt improver for Claude Code sessions", p.claude_code_enabled ?? true)}
+      <Row label="Model" hint="A tier or model; Claude Code sessions only use a model your login lists">
+        <select className="input max-w-full" value={model} aria-label="Prompt improver model" onChange={(e) => set("model", "Model")(e.target.value)}>
+          {!tiers.includes(model) && <option value={model}>{model}</option>}
+          {tiers.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+      </Row>
+      <Row label="Effort" hint="Up to high">
+        <select className="input w-40" value={p.effort ?? "low"} aria-label="Prompt improver effort" onChange={(e) => set("effort", "Effort")(e.target.value)}>
+          {["none", "low", "medium", "high"].map((l) => <option key={l} value={l}>{l}</option>)}
+        </select>
+      </Row>
+      <Row label="Questions per message" hint="1 to 3">
+        <select className="input w-40" value={p.max_questions ?? 3} aria-label="Prompt improver question limit" onChange={(e) => set("max_questions", "Questions per message")(Number(e.target.value))}>
+          {[1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+      </Row>
+    </div>
+  );
 }
 
 export function UnitySettings({ st, save }: { st: any; save: Save }) {

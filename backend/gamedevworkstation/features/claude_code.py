@@ -733,6 +733,200 @@ class Proc:
             self.reader.cancel()
 
 
+HELPER_DENY = ("Bash", "BashOutput", "KillShell", "Edit", "MultiEdit", "Write", "NotebookEdit", "Read", "Glob", "Grep",
+               "WebFetch", "WebSearch", "Task", "Agent", "TodoWrite", "AskUserQuestion", "ExitPlanMode", "EnterPlanMode",
+               "Skill", "SlashCommand", "ToolSearch", "ListMcpResources", "ReadMcpResource")
+HELPER_SYSTEM = ("You are a text-only helper for GameDevWorkstation. You have no tools. Answer with the text asked for "
+                 "in the single reply and nothing else.")
+HELPER_DEFAULTS = {"model": "claude.fast", "effort": "low", "timeout_s": 30, "budget_usd": 0.03,
+                   "max_input_tokens": 4096, "max_output_tokens": 1024}
+
+
+def _est_tokens(text: str) -> int:
+    return (len(text) + 3) // 4
+
+
+def helper_argv(cli: str, *, session_id: str, model: str, effort: str | None, budget_usd: float | None = None) -> list[str]:
+    """The prompt improver's helper conversation: its own session id, every tool off (empty --tools and
+    --allowedTools, everything named in --disallowedTools), no MCP servers (strict, none given), no
+    user/project/local settings, nothing saved to disk."""
+    if not valid_claude_code_session(session_id):
+        raise ValueError("Claude Code session id must be a UUID")
+    argv = [cli, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+            f"--session-id={session_id}", f"--model={model}", f"--permission-mode={CLI_MODE['ask']}"]
+    if effort and effort not in ("none", "cancel"):
+        argv.append(f"--effort={effort}")
+    argv += ["--tools=", "--allowedTools=", f"--disallowedTools={','.join(HELPER_DENY)}", "--strict-mcp-config",
+             "--setting-sources=", "--disable-slash-commands", "--no-session-persistence",
+             f"--append-system-prompt={HELPER_SYSTEM}"]
+    if budget_usd and budget_usd > 0:  # the CLI stops the conversation once its own cost estimate reaches this
+        argv.append(f"--max-budget-usd={budget_usd:.4f}")
+    return argv
+
+
+class HelperConv:
+    """One bounded, text-only Claude Code conversation for the prompt improver, on the user's own login.
+    It never shares a session id, cursor, process slot or usage totals with the session's main conversation.
+    `await helper(prompt)` sends one prompt and returns the reply text, or None (no CLI, effort refused,
+    timeout, error, cancelled-then-raised); `aclose()` kills the process. A second prompt reuses the same
+    helper conversation."""
+
+    def __init__(self, mgr: "ClaudeCode", s: dict, run_id: str):
+        self.mgr, self.app, self.sid, self.run_id = mgr, mgr.app, s["id"], run_id
+        cfg = {**HELPER_DEFAULTS, **dict(getattr(mgr.app.config, "prompt_improver", None) or {})}
+        self.effort = str(cfg["effort"]) if cfg.get("effort") else None
+        self.timeout_s = float(cfg["timeout_s"])
+        self.budget_usd = float(cfg.get("budget_usd") or HELPER_DEFAULTS["budget_usd"])
+        self.max_input = int(cfg.get("max_input_tokens") or HELPER_DEFAULTS["max_input_tokens"])
+        self.max_output = int(cfg.get("max_output_tokens") or HELPER_DEFAULTS["max_output_tokens"])
+        self.model_name = str(cfg["model"])
+        self.cc_session = str(uuid.uuid4())
+        self.proc: asyncio.subprocess.Process | None = None
+        self.stderr = ""
+        self.failure = ""  # why the last ask returned None
+        self.calls = 0
+        self.cost_seen = 0.0
+        self.billing = "api" if (mgr.probe.cached() or {}).get("bills_api") else "subscription"
+        self.model = ""
+
+    async def __call__(self, prompt: str) -> str | None:
+        return await self.ask(prompt)
+
+    async def ask(self, prompt: str) -> str | None:
+        from ..core.effort import check_effort
+
+        self.failure = ""
+        try:
+            check_effort(self.effort, None, self.run_id)  # right before dispatch; xhigh/max never reach the CLI
+        except PermissionError:
+            self.failure = "effort_refused"
+            return None
+        model = self.app.config.resolve(self.model_name)
+        try:
+            if self.app.config.model(model).provider != "anthropic":
+                self.failure = "model_not_claude"
+                return None
+        except Exception:  # noqa: BLE001
+            pass
+        self.model = model
+        if _est_tokens(HELPER_SYSTEM) + _est_tokens(prompt) > self.max_input:  # measured before anything is sent
+            self.failure = "input_too_large"
+            return None
+        if self.cost_seen >= self.budget_usd:  # the CLI's cost estimate, also for subscription logins
+            self.failure = "budget"
+            return None
+        if self.billing == "api":  # subscription logins are never blocked by the API spend limits
+            try:
+                self.app.usage.check(self.sid, self.run_id)
+            except Exception:  # noqa: BLE001 — over the spend limit: no helper call
+                self.failure = "spend_limit"
+                return None
+        try:
+            if self.proc is None or self.proc.returncode is not None:
+                await self._spawn(model)
+            self.calls += 1
+            assert self.proc and self.proc.stdin
+            self.proc.stdin.write((json.dumps({"type": "user", "message": {"role": "user", "content": prompt},
+                                               "parent_tool_use_id": None, "session_id": "default"}) + "\n").encode())
+            await self.proc.stdin.drain()
+            return await asyncio.wait_for(self._reply(model), self.timeout_s)
+        except asyncio.TimeoutError:
+            self.failure = "timeout"
+        except (BrokenPipeError, ConnectionResetError, OSError, ValueError, RuntimeError) as e:
+            self.failure = "start_failed" if self.proc is None else "exited"
+            log.info("claude_code: prompt improver helper failed: %s", redact(str(e), ""))
+        except BaseException:  # cancelled: never leave the process behind
+            await self.aclose()
+            raise
+        await self.aclose()
+        return None
+
+    async def _spawn(self, model: str) -> None:
+        from .claude_cli import child_env
+
+        cli = (self.mgr.probe.cached() or {}).get("path")
+        if not cli:
+            raise RuntimeError("The claude CLI isn't installed.")
+        argv = helper_argv(cli, session_id=self.cc_session, model=model, effort=self.effort,
+                           budget_usd=max(self.budget_usd - self.cost_seen, 0.0001))
+        cwd = data_dir() / "claude_code" / self.sid / "helper"
+        cwd.mkdir(parents=True, exist_ok=True)
+        self.proc = await asyncio.create_subprocess_exec(*argv, cwd=str(cwd), stdin=asyncio.subprocess.PIPE,
+                                                         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                                                         env=child_env() | {"CLAUDE_CODE_MAX_OUTPUT_TOKENS": str(self.max_output)},
+                                                         **NEW_GROUP, limit=2**24)
+        CHILDREN.track(self.proc.pid, "claude_code")
+        self._err = asyncio.create_task(self._read_stderr())
+
+    async def _read_stderr(self) -> None:
+        assert self.proc and self.proc.stderr
+        async for line in self.proc.stderr:
+            self.stderr = (self.stderr + redact(line.decode(errors="replace"), ""))[-STDERR_KEEP:]
+
+    async def _reply(self, model: str) -> str | None:
+        assert self.proc and self.proc.stdout
+        texts: list[str] = []
+        t0 = time.monotonic()
+        async for raw in self.proc.stdout:
+            try:
+                ev = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(ev, dict) or ev.get("parent_tool_use_id"):
+                continue
+            if ev.get("type") == "assistant":
+                for b in (ev.get("message") or {}).get("content") or []:
+                    if isinstance(b, dict) and b.get("type") == "text" and b.get("text"):
+                        texts.append(str(b["text"]))
+                if sum(_est_tokens(t) for t in texts) > self.max_output:  # cut the reply off: kill the helper
+                    self.failure = "output_limit"
+                    await self.aclose()
+                    return None
+            elif ev.get("type") == "result":
+                self.mgr.record_usage(self.sid, ev, None, helper=self, latency_ms=int((time.monotonic() - t0) * 1000))
+                if ev.get("is_error") or str(ev.get("subtype") or "success") != "success":
+                    self.failure = "budget" if "budget" in str(ev.get("subtype") or "") else "error"
+                    return None
+                out = "\n\n".join(t for t in texts if t.strip()).strip() or str(ev.get("result") or "").strip()
+                if not out:
+                    self.failure = "empty"
+                return out or None
+        self.failure = "exited"
+        return None
+
+    async def aclose(self) -> None:
+        p, self.proc = self.proc, None
+        if p is None:
+            return
+        from ..services import _kill_tree
+
+        if p.returncode is None:
+            try:
+                if p.stdin:
+                    p.stdin.close()
+            except Exception:  # noqa: BLE001
+                pass
+            _kill_tree(p)
+            try:
+                await asyncio.wait_for(p.wait(), 3)
+            except asyncio.TimeoutError:
+                try:
+                    kill_group(p.pid, SIGKILL)
+                except (ProcessLookupError, PermissionError, OSError):
+                    pass
+        try:
+            kill_group(p.pid, SIGTERM)  # descendants in its group
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+        t = getattr(self, "_err", None)
+        if t is not None:
+            try:
+                await asyncio.wait_for(t, 2)
+            except (asyncio.TimeoutError, Exception):  # noqa: BLE001
+                t.cancel()
+        CHILDREN.release(p.pid)
+
+
 class ClaudeCode:
     """The claude_code harness: processes per session, the GDW MCP server and the status probe."""
 
@@ -787,10 +981,12 @@ class ClaudeCode:
             return m
         return cfg.resolve("claude.standard") if "claude.standard" in cfg.tiers else m
 
-    def _prompt(self, sid: str, recap: bool) -> tuple[str, str]:
+    def _prompt(self, sid: str, recap: bool, extra: str = "", text_override: str | None = None) -> tuple[Any, str]:
         """(text, id of the last message in it): the user messages this Claude Code conversation hasn't
         been sent yet (a skill load plus the message itself; never one an interrupted turn already
-        got), after a recap of earlier turns when the conversation is new."""
+        got), after a recap of earlier turns when the conversation is new. `extra` (the prompt improver's
+        context) is appended to this one outbound request only; `text_override` replaces the last message's
+        text there (the `*`-stripped copy). The stored messages and `last_id` are unchanged."""
         msgs = self.app.store.messages(sid, include_compacted=False)
         sent = ((self.app.store.get(sid) or {}).get("settings") or {}).get("claude_code_sent")
         ids = [m.id for m in msgs]
@@ -805,14 +1001,19 @@ class ClaudeCode:
         new = [m for m in tail if m.role == "user" and not m.meta.get("tool_results")]
         if not new:
             raise RuntimeError("No user message to answer")
+        if text_override is not None and (tb := next((i for i, b in enumerate(new[-1].content) if isinstance(b, TextBlock)), None)) is not None:
+            last = new[-1].model_copy(deep=True)
+            last.content[tb] = TextBlock(text=text_override)
+            new = [*new[:-1], last]
         recap_text = None
         if recap and (h := self.app.extensions.get("harnesses")) is not None:
             if r := h._recap(sid, new[0]):  # type: ignore[attr-defined]
                 recap_text = f"Earlier in this conversation:\n{r}\n\nNow: "
         if not any(isinstance(b, (ImageBlock, FileBlock, AudioBlock)) for m in new for b in m.content):
             text = "\n\n".join(t for t in (_prompt_text(m) for m in new) if t)
-            return (recap_text or "") + text, new[-1].id
-        return _user_content(new, recap_text), new[-1].id
+            return (recap_text or "") + text + (f"\n\n{extra}" if extra else ""), new[-1].id
+        content = _user_content(new, recap_text)
+        return (content + [{"type": "text", "text": extra}] if extra else content), new[-1].id
 
     def _system_prompt(self, s: dict, cwd: Path) -> str:
         app = self.app
@@ -889,6 +1090,7 @@ class ClaudeCode:
         jid = app.jobs.start(sid, HARNESS, f"Claude Code turn · {app.config.label(model)}",
                              {"model": model, "billing": billing})
         status = "failed"
+        improved: Any = None  # the prompt improver's outcome: once per user turn, not once per resume retry
         try:
             for attempt in (0, 1):
                 try:
@@ -914,7 +1116,25 @@ class ClaudeCode:
                 if proc.reader.done():  # it already exited (bad flags, crash at start)
                     proc._finish_turn(exited=True)
                 skipped = bool(settings.get("skipper") and settings.get("skipper_handoff"))  # the handoff replaces the recap
-                prompt, last_id = self._prompt(sid, recap=not proc.resumed and not resume and not skipped)
+                if improved is None:
+                    improved = await self._improve(s, proc, turn)
+                    task = asyncio.current_task()
+                    if task is not None and task.cancelling():  # Stop landed as the improver finished: send nothing
+                        proc.turn = None
+                        if not turn.done.done():
+                            turn.done.cancel()
+                        raise asyncio.CancelledError
+                    if getattr(improved, "status", "") == "paused":
+                        # A declined critical question: the coordinator already added the notice. Send nothing and
+                        # leave the session idle, like agent/loop.py; the next message starts a normal turn.
+                        proc.turn = None
+                        if not turn.done.done():
+                            turn.done.cancel()
+                        status = "done"
+                        return
+                prompt, last_id = self._prompt(sid, recap=not proc.resumed and not resume and not skipped,
+                                               extra=getattr(improved, "context_text", "") or "",
+                                               text_override=getattr(improved, "execution_text", "") or None)
                 try:
                     await proc.send({"type": "user", "message": {"role": "user", "content": prompt},
                                      "parent_tool_use_id": None, "session_id": "default"})
@@ -951,6 +1171,36 @@ class ClaudeCode:
             raise
         finally:
             app.jobs.finish(jid, status)
+
+    async def _improve(self, s: dict, proc: Proc, turn: Turn) -> Any:
+        """The prompt improver for this user turn (None when it is off, bypassed by the coordinator or
+        unavailable). It never blocks the turn: a failure shows a notice and the real prompt goes out as
+        it was. Works the same on fresh and resumed processes: the context rides on the outbound request."""
+        app, sid = self.app, s["id"]
+        improver = app.extensions.get("prompt_improver")
+        fn = getattr(improver, "improve_cc", None)
+        cfg = getattr(app.config, "prompt_improver", None) or {}
+        if fn is None or cfg.get("enabled") is False or cfg.get("claude_code_enabled") is False:
+            return False  # not None: it was decided, don't retry
+        msg = next((m for m in reversed(app.store.messages(sid, include_compacted=False))
+                    if m.role == "user" and not m.meta.get("tool_results")), None)
+        if msg is None:
+            return False
+        helper = HelperConv(self, s, f"pi:{sid}:{msg.id}")
+        try:
+            out = await fn(s, msg, helper)
+        except asyncio.CancelledError:
+            proc.turn = None  # nothing was sent: the process is idle again
+            if not turn.done.done():
+                turn.done.cancel()
+            raise
+        except Exception as e:  # noqa: BLE001 — the improver never stops the real turn
+            log.warning("claude_code: prompt improver failed: %s", redact(str(e), proc.token))
+            self.notice(sid, "prompt_improver", "Prompt improver unavailable this turn; sending your message as it is.")
+            return False
+        finally:
+            await helper.aclose()
+        return out if out is not None else False
 
     async def _quiet_step(self, proc: Proc, model: str, effort: str | None, jid: str | None, text: str) -> str | None:
         """Send `text` as a hidden turn and return the reply's text (None if it failed or ran out of time)."""
@@ -1262,7 +1512,8 @@ class ClaudeCode:
 
     # ------------------------------------------------------------ usage
 
-    def record_usage(self, sid: str, ev: dict, turn: Turn | None) -> None:
+    def record_usage(self, sid: str, ev: dict, turn: Turn | None, *, helper: "HelperConv | None" = None,
+                     latency_ms: int = 0) -> None:
         """One usage row per `result`. Observed [live]: `usage` holds this turn's own tokens (zero for a
         turn that was interrupted mid-stream), while `total_cost_usd` and `modelUsage` are running totals
         for the conversation that carry across --resume. So the tokens are recorded as they are and the
@@ -1277,6 +1528,20 @@ class ClaudeCode:
                       cache_read_tokens=int(u.get("cache_read_input_tokens") or 0),
                       cache_write_tokens=int(u.get("cache_creation_input_tokens") or 0))
         cost = float(ev.get("total_cost_usd") or 0.0)
+        if helper is not None:  # the improver's own conversation: its totals never touch the session's
+            if ev.get("total_cost_usd") is not None:  # a running total of the helper conversation
+                usage.cost_usd = cost - helper.cost_seen if cost >= helper.cost_seen else cost
+                helper.cost_seen = cost
+            else:
+                try:
+                    usage.cost_usd = compute_cost(app.config.model(helper.model), usage)
+                except Exception:  # noqa: BLE001
+                    usage.cost_usd = 0.0
+            app.usage.record(provider="anthropic", model=helper.model, usage=usage, session_id=sid,
+                             profile="subscription" if helper.billing == "subscription" else "default",
+                             role="assistant", run_id=helper.run_id, effort=helper.effort, latency_ms=latency_ms,
+                             ok=not ev.get("is_error"), billing=helper.billing, feature="prompt_improver")
+            return
         last = s["settings"].get("claude_code_totals") or {}
         if not isinstance(last, dict):
             last = {}

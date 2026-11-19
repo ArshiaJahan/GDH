@@ -19,6 +19,7 @@ transcription, sound and music. Everything runs locally; the backend listens on 
 - [Campaigns and workflows](#campaigns-and-workflows)
 - [Sessions](#sessions)
 - [Claude Code sessions](#claude-code-sessions)
+- [Prompt improver](#prompt-improver)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [How delegation works](#how-delegation-works)
 - [Built-in skills](#built-in-skills) (and [Record and replay](#record-and-replay), [Unity: MCP or CLI](#unity-mcp-or-cli))
@@ -865,6 +866,84 @@ never touches your credentials, and you drive one turn at a time. Don't share th
 other people or use them for automated bulk work, and re-read that page
 (code.claude.com/docs/en/legal-and-compliance) before using it any other way.
 
+## Prompt improver
+
+A request in a Unity session can be too vague to build ("make jumping better"). The prompt improver
+looks at your project first, and only when a choice would materially change the work does it ask. It is
+on by default and works in built-in and Claude Code sessions. The original message is stored unchanged;
+the answers and a task summary are added to the request the model sees for that turn only.
+
+**What it researches** (bounded, read-only, no Editor launch): Unity version, installed packages and the
+*active* render pipeline, input handler (old, new or both), scenes in Build Settings, likely candidate
+scenes/prefabs/scripts, git state, project docs (GDD, TASTE, BACKLOG), the attached task, any running
+campaign and recent console errors. Anything it can't find is recorded as `unknown`, never guessed.
+Facts that rarely change are cached and refreshed when the underlying files change.
+
+**What it skips** (the message goes through untouched):
+
+| Case | Reason code |
+|---|---|
+| Message starts with `*` (the `*` is removed before the model sees it; the transcript keeps it) | `star_prefix` |
+| Starts with `/` (including `/task`, `/workflow`, `/skill`) | `slash_prefix` |
+| Starts with `#` | `hash_prefix` |
+| Scheduled, campaign, fleet and subagent messages, loaded skills, tool results, recaps, handoffs | `scheduled`, `campaign`, `fleet`, `subagent`, ... |
+| Chat-only session or a folder that is not a Unity project | `chat_only`, `not_unity` |
+| Harnesses other than built-in and Claude Code, or a switch turned off | `unsupported_harness`, `harness_disabled` |
+| Turned off in Settings, or an empty message | `disabled`, `empty` |
+
+**Questions.** At most 3 per message, one approval card each, 2-4 options with a recommended one, plus
+a free-text box and **Skip (assume)**. A skipped optional question becomes an explicit assumption on the
+card; skipping a critical one pauses the turn. Topics: `target` (which scene/prefab), `platform_input`,
+`acceptance`, `feel` (jump height, apex time, coyote time, hit-stop), `assets`, `performance`,
+`multiplayer` (who owns the state) and `bug_replay` (recorded input sequence, scene, seed, checkpoint).
+Options come from your own project facts; it never assumes permission to buy or download assets.
+
+**Task card.** Every run saves an indexed draft with the goal, scope, acceptance criteria (each with a
+verification type and a target where numeric), a quality ladder level (L1-L4 or manual), effort and
+budget recommendations, your answers, assumptions, risks and a routing suggestion (skills, MCP or CLI,
+harness). It is a recommendation only: it never spends money or switches harness. **Save to Tasks** on the
+card writes it to the Backlog. A Backlog task is created automatically only when you answered at least
+one question; for an explicitly attached task a proposal comment is added and its text is never
+overwritten. In Plan only mode, or with the task-board tools off, only the draft is kept.
+
+**Settings** (`[prompt_improver]`, Settings > Prompt improver, changes apply to the next unsent turn):
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `true` | master switch |
+| `builtin_enabled`, `claude_code_enabled` | `true`, `true` | per harness |
+| `max_questions` | `3` | 1-3 |
+| `model` | `claude.fast` | alias; Claude Code accepts only a model your login lists, no silent fallback |
+| `effort` | `low` | `none`, `low`, `medium` or `high` (above high is refused) |
+| `max_calls` | `2` | 1-2: one evaluation plus at most one synthesis |
+| `max_input_tokens`, `max_output_tokens` | `4096`, `1024` | per call |
+| `timeout_s` | `30` | per call |
+| `budget_usd` | `0.03` | per-prompt cap, 0-1 |
+| `breaker_failures`, `breaker_pause_s` | `2`, `600` | after this many failures in a row (per session, or per model), the improver pauses for this long and shows one notice; a success resets it |
+
+**Claude Code sessions.** The improver runs in a separate, tool-less, text-only helper conversation on
+your own Claude login, so no API key is needed. It counts against your subscription limits like any other
+Claude Code usage, and its token use is recorded under the `prompt_improver` feature (the CLI's own
+accounting can be coarser than the built-in loop's).
+
+**Cost limits.** At most 2 model calls per message, bounded input and output tokens, a wall-clock
+timeout, and the budget cap above; each call passes the effort gate first. If the improver fails or runs
+over budget you see an "unavailable" notice and your original message is sent unchanged.
+
+**Running the evaluation.** A 48-prompt corpus (24 vague, 24 clear, plus a separate list of bypass cases)
+lives in `tests/fixtures/prompt_improver/prompts.json`.
+
+```bash
+uv run --frozen python scripts/eval_prompt_improver.py --fake --out /tmp/pi-eval.json   # free, no network
+uv run --frozen python scripts/eval_prompt_improver.py --live --yes --out pi-live.json   # real model calls, costs money
+```
+
+It reports the vague ask-rate, clear false-ask rate, bypass accuracy, mean and p95 added input/output
+tokens, calls and cards per prompt. `--fake` uses a scripted FakeProvider with a small cue heuristic
+(missing target, number or acceptance cues), so its results test orchestration and the regression gates in
+`tests/test_pi_eval.py`, not model intelligence. No real-model accuracy numbers have been measured yet;
+none are claimed here. A real run only happens after you approve its cost.
+
 ## Keyboard shortcuts
 
 **⌘/** shows this list in the app. The Session menu in the macOS menu bar has the session
@@ -1477,6 +1556,11 @@ parameters). They also cover:
   install refused from source, and the swap helper against a fake signed bundle. The swap test
   covers install, a failed launch that restores the old app, and rollback. `version.py`
   bumping every file is tested too.
+- the prompt improver (`tests/test_pi_eval.py`): the corpus schema (24/24 split, unique ids, topics from
+  the question bank), the regression gates (vague ask-rate at least 0.80, clear false-asks at most 0.10, at
+  most 2 calls and 3 cards per prompt, mean clear overhead at most 2,500 estimated tokens) and every
+  bypass reason code. These run on a scripted fake model, so they test orchestration only; there are no
+  measured real-model accuracy numbers yet.
 - CI failure triage:
   - `tests/test_triage_rules.py`: each rule and log format, precedence, NUnit limits, slow-regex
     inputs, and the Markdown escaping, so a log can't add mentions or links to a PR comment.

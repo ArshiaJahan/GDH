@@ -1,0 +1,1412 @@
+{
+  "version": 1,
+  "prompts": [
+    {
+      "id": "p01",
+      "prompt": "make jumping better",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Prefabs/Player.prefab",
+          "Assets/Scripts/PlayerMotor.cs"
+        ],
+        "docs": [
+          "TASTE.md: floaty jumps are disliked"
+        ],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "vague",
+      "expected_missing": [
+        "feel",
+        "acceptance"
+      ],
+      "rationale": "No numbers, no definition of better; Player.prefab is the obvious owner but the intended apex/coyote values are unknown.",
+      "category": "mechanics",
+      "tags": [
+        "terse"
+      ]
+    },
+    {
+      "id": "p02",
+      "prompt": "the dash feels floaty, fix it",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Prefabs/Player.prefab",
+          "Assets/Scripts/PlayerMotor.cs"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "vague",
+      "expected_missing": [
+        "feel",
+        "acceptance"
+      ],
+      "rationale": "Subjective complaint with no target distance, duration or ending speed.",
+      "category": "mechanics",
+      "tags": [
+        "terse"
+      ]
+    },
+    {
+      "id": "p03",
+      "prompt": "I have been playing the combat for a while and something about it is off. The hits do not land the way I expect and the enemies seem to take a bit too long to react, and I want the whole encounter to feel punchier and more satisfying overall without making it too hard.",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Scripts/Combat/HitHandler.cs",
+          "Assets/Prefabs/Enemy_Slime.prefab"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "vague",
+      "expected_missing": [
+        "feel",
+        "target",
+        "acceptance"
+      ],
+      "rationale": "Long but contains no scene, prefab, number or check; hit-stop, reaction time and difficulty are all open.",
+      "category": "mechanics",
+      "tags": [
+        "long"
+      ]
+    },
+    {
+      "id": "p04",
+      "prompt": "In Assets/Prefabs/Player.prefab set the jump apex height to 2.5 units reached in 0.35 s and add 0.1 s of coyote time; add a PlayMode test that asserts the apex stays within 0.1 units of 2.5.",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Prefabs/Player.prefab",
+          "Assets/Scripts/PlayerMotor.cs"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "clear",
+      "expected_missing": [],
+      "rationale": "Names the prefab, gives three numeric targets with units and an observable test.",
+      "category": "mechanics",
+      "tags": []
+    },
+    {
+      "id": "p05",
+      "prompt": "Set Player coyote time to 0.12 s in Assets/Scripts/PlayerMotor.cs.",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Prefabs/Player.prefab",
+          "Assets/Scripts/PlayerMotor.cs"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "clear",
+      "expected_missing": [],
+      "rationale": "Terse but names the file and the single value; nothing consequential is left to decide.",
+      "category": "mechanics",
+      "tags": [
+        "terse"
+      ]
+    },
+    {
+      "id": "p06",
+      "prompt": "Yes, go with the second option.",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Prefabs/Player.prefab",
+          "Assets/Scripts/PlayerMotor.cs"
+        ],
+        "docs": [],
+        "history": [
+          "user: the jump arc feels too slow at the top",
+          "assistant: Options: A) keep gravity at 30. B) raise gravity to 42 units/s2 in Assets/Scripts/PlayerMotor.cs so the apex is reached in 0.35 s. Which one?"
+        ],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "clear",
+      "expected_missing": [],
+      "rationale": "Confirmation that only makes sense with the history, which already lists the file, the value and the apex goal.",
+      "category": "mechanics",
+      "tags": [
+        "terse",
+        "continuation"
+      ]
+    },
+    {
+      "id": "p07",
+      "prompt": "add a shop",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Scenes/Village.unity",
+          "Assets/Scenes/Main.unity"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "vague",
+      "expected_missing": [
+        "target",
+        "acceptance"
+      ],
+      "rationale": "Which scene hosts it, what it sells and how opening it interacts with gameplay are all open.",
+      "category": "scenes",
+      "tags": [
+        "terse"
+      ]
+    },
+    {
+      "id": "p08",
+      "prompt": "do the same for the other room",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Scenes/Cave.unity",
+          "Assets/Scenes/Crypt.unity",
+          "Assets/Scenes/Cellar.unity"
+        ],
+        "docs": [],
+        "history": [
+          "user: add torches to the cave room",
+          "assistant: Done, torches added to the cave."
+        ],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "vague",
+      "expected_missing": [
+        "target",
+        "acceptance"
+      ],
+      "rationale": "Only meaningful with the history; even then the 'other room' is not identified.",
+      "category": "scenes",
+      "tags": [
+        "terse",
+        "continuation"
+      ]
+    },
+    {
+      "id": "p09",
+      "prompt": "We need a main menu that looks nice and ties into the rest of the game, with the usual things you would expect from a menu, and it would be good if it was easy to extend later when we add more screens and options.",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Scenes/Main.unity"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "vague",
+      "expected_missing": [
+        "target",
+        "assets",
+        "acceptance"
+      ],
+      "rationale": "Long but nothing concrete: no scene, no list of buttons, no art direction, no check.",
+      "category": "scenes",
+      "tags": [
+        "long"
+      ]
+    },
+    {
+      "id": "p10",
+      "prompt": "Create Assets/Scenes/Shop.unity with the canvas prefab Assets/Prefabs/UI/ShopPanel.prefab; opening it from the village must pause gameplay with Time.timeScale at 0, and a PlayMode test has to verify it.",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Scenes/Village.unity"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "clear",
+      "expected_missing": [],
+      "rationale": "Names two assets, a numeric state and a test.",
+      "category": "scenes",
+      "tags": []
+    },
+    {
+      "id": "p11",
+      "prompt": "Rename Assets/Prefabs/Enemy_Slime.prefab to Slime.prefab; compile must stay clean and no missing-reference warnings may appear.",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Prefabs/Enemy_Slime.prefab"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "clear",
+      "expected_missing": [],
+      "rationale": "Terse mechanical change with a named asset and a clear acceptance condition.",
+      "category": "scenes",
+      "tags": [
+        "terse"
+      ]
+    },
+    {
+      "id": "p12",
+      "prompt": "Mueve el spawn del jugador en Assets/Scenes/Level02.unity a la posicion (4, 1, 0) y comprueba que no cae al vacio; debe pasar el test PlayMode.",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Scenes/Level02.unity"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "clear",
+      "expected_missing": [],
+      "rationale": "Spanish; names the scene, gives coordinates and a PlayMode check.",
+      "category": "scenes",
+      "tags": [
+        "non_english"
+      ]
+    },
+    {
+      "id": "p13",
+      "prompt": "make it work on mobile",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Settings/Controls.inputactions"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "vague",
+      "expected_missing": [
+        "platform_input",
+        "acceptance",
+        "performance"
+      ],
+      "rationale": "Which devices, which control scheme and what counts as working are all unspecified.",
+      "category": "input",
+      "tags": [
+        "terse"
+      ]
+    },
+    {
+      "id": "p14",
+      "prompt": "add controller support",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Settings/Controls.inputactions"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "vague",
+      "expected_missing": [
+        "platform_input",
+        "acceptance"
+      ],
+      "rationale": "Which controllers, which actions and whether both devices must work together are open.",
+      "category": "input",
+      "tags": [
+        "terse"
+      ]
+    },
+    {
+      "id": "p15",
+      "prompt": "Die Steuerung fuehlt sich komisch an, mach sie besser.",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Settings/Controls.inputactions",
+          "Assets/Scripts/PlayerMotor.cs"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "vague",
+      "expected_missing": [
+        "feel",
+        "platform_input",
+        "acceptance"
+      ],
+      "rationale": "German: the controls feel odd; no device, action or target is named.",
+      "category": "input",
+      "tags": [
+        "terse",
+        "non_english"
+      ]
+    },
+    {
+      "id": "p16",
+      "prompt": "Add gamepad support using Assets/Settings/Controls.inputactions: left stick moves, the south button jumps; both devices must work with the new Input System and a play test has to show it.",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Settings/Controls.inputactions"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "clear",
+      "expected_missing": [],
+      "rationale": "Names the actions asset and the exact bindings and requires evidence.",
+      "category": "input",
+      "tags": []
+    },
+    {
+      "id": "p17",
+      "prompt": "Set the touch joystick dead zone to 0.15 in Assets/Prefabs/UI/Joystick.prefab",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Prefabs/UI/Joystick.prefab"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "clear",
+      "expected_missing": [],
+      "rationale": "One named prefab and one value.",
+      "category": "input",
+      "tags": [
+        "terse"
+      ]
+    },
+    {
+      "id": "p18",
+      "prompt": "ok, do that on Android at 60 fps",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Prefabs/UI/TouchPad.prefab"
+        ],
+        "docs": [],
+        "history": [
+          "user: how would you add touch controls?",
+          "assistant: Remap jump to the south button in Assets/Settings/Controls.inputactions and add a touch layout via Assets/Prefabs/UI/TouchPad.prefab. Want me to?"
+        ],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "clear",
+      "expected_missing": [],
+      "rationale": "Short continuation; the history carries the files, the number adds the target frame rate.",
+      "category": "input",
+      "tags": [
+        "terse",
+        "continuation"
+      ]
+    },
+    {
+      "id": "p19",
+      "prompt": "add some sound effects",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Audio/"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "vague",
+      "expected_missing": [
+        "assets",
+        "target"
+      ],
+      "rationale": "Which events, which sounds and whether sources are licensed are all open.",
+      "category": "assets",
+      "tags": [
+        "terse"
+      ]
+    },
+    {
+      "id": "p20",
+      "prompt": "the player looks ugly, update the art",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Art/Hero.png",
+          "Assets/Prefabs/Player.prefab"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "vague",
+      "expected_missing": [
+        "assets",
+        "acceptance"
+      ],
+      "rationale": "No art direction or source; permission to buy or download assets cannot be assumed.",
+      "category": "assets",
+      "tags": [
+        "terse"
+      ]
+    },
+    {
+      "id": "p21",
+      "prompt": "I would like a boss enemy for the end of the first world. It needs a memorable look, a few attacks, some dramatic music when it appears and a nice defeat moment. Use whatever you think works best.",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Scenes/World1_Boss.unity"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "vague",
+      "expected_missing": [
+        "assets",
+        "feel",
+        "target",
+        "acceptance"
+      ],
+      "rationale": "Long wishlist with no scene, no attack list, no asset source and no done condition.",
+      "category": "assets",
+      "tags": [
+        "long"
+      ]
+    },
+    {
+      "id": "p22",
+      "prompt": "Import the licensed pack in Assets/ThirdParty/KenneyUI as sprites with point filtering and no compression, and put them in Assets/Art/UI/Atlas.spriteatlas; the import must produce zero warnings.",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/ThirdParty/KenneyUI"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "clear",
+      "expected_missing": [],
+      "rationale": "Source, destination, import settings and acceptance are all given.",
+      "category": "assets",
+      "tags": []
+    },
+    {
+      "id": "p23",
+      "prompt": "Compress Assets/Art/Hero.png to under 512 KB",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Art/Hero.png"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "clear",
+      "expected_missing": [],
+      "rationale": "One file and a hard size budget.",
+      "category": "assets",
+      "tags": [
+        "terse"
+      ]
+    },
+    {
+      "id": "p24",
+      "prompt": "Swap the jump sound for Assets/Audio/jump_02.wav at -6 dB and verify the console stays clean.",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Audio/jump_02.wav"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "clear",
+      "expected_missing": [],
+      "rationale": "Named clip, level and a check.",
+      "category": "assets",
+      "tags": [
+        "terse"
+      ]
+    },
+    {
+      "id": "p25",
+      "prompt": "the game is laggy",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Scenes/Arena.unity",
+          "Assets/Scenes/Main.unity"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "vague",
+      "expected_missing": [
+        "performance",
+        "target"
+      ],
+      "rationale": "Which scene, which device and what budget are unknown; needs a profile first.",
+      "category": "performance",
+      "tags": [
+        "terse"
+      ]
+    },
+    {
+      "id": "p26",
+      "prompt": "optimize the level loading",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Scenes/Level01.unity",
+          "Assets/Scenes/Level02.unity"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "vague",
+      "expected_missing": [
+        "performance",
+        "target",
+        "acceptance"
+      ],
+      "rationale": "Which level and which load-time budget is open.",
+      "category": "performance",
+      "tags": [
+        "terse"
+      ]
+    },
+    {
+      "id": "p27",
+      "prompt": "On my machine the whole thing stutters now and then, mostly when a lot is going on, and I think we have added too many things lately. Can you go through it and make everything run more smoothly everywhere?",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Scenes/Arena.unity"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "vague",
+      "expected_missing": [
+        "performance",
+        "target",
+        "platform_input"
+      ],
+      "rationale": "Long but no scene, hardware or frame budget; 'everywhere' is unbounded.",
+      "category": "performance",
+      "tags": [
+        "long"
+      ]
+    },
+    {
+      "id": "p28",
+      "prompt": "Profile Assets/Scenes/Arena.unity on the Android Pixel 6 profile and bring the frame time to 16.6 ms or less with zero GC allocations per frame in Assets/Scripts/Enemies/EnemyAI.cs; verify with the profiler.",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Scenes/Arena.unity"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "clear",
+      "expected_missing": [],
+      "rationale": "Scene, device, budget, file and verification are all stated.",
+      "category": "performance",
+      "tags": []
+    },
+    {
+      "id": "p29",
+      "prompt": "Pool bullets in Assets/Scripts/Weapons/Gun.cs; 0 allocations per shot.",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Scripts/Weapons/Gun.cs"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "clear",
+      "expected_missing": [],
+      "rationale": "Named file and a measurable allocation target.",
+      "category": "performance",
+      "tags": [
+        "terse"
+      ]
+    },
+    {
+      "id": "p30",
+      "prompt": "yes, do it with the 200 batches limit",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Scenes/Town.unity"
+        ],
+        "docs": [],
+        "history": [
+          "user: the town scene has too many draw calls",
+          "assistant: I can static-batch the props in Assets/Scenes/Town.unity. Shall I go ahead?"
+        ],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "clear",
+      "expected_missing": [],
+      "rationale": "Short continuation; history names the scene and the technique, the prompt gives the budget.",
+      "category": "performance",
+      "tags": [
+        "terse",
+        "continuation"
+      ]
+    },
+    {
+      "id": "p31",
+      "prompt": "make the game multiplayer",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Scenes/Main.unity"
+        ],
+        "docs": [
+          "GDD: single-player prototype so far"
+        ],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "vague",
+      "expected_missing": [
+        "multiplayer",
+        "platform_input",
+        "target"
+      ],
+      "rationale": "Transport, authority model, player count and which systems replicate are all undecided.",
+      "category": "multiplayer",
+      "tags": [
+        "terse"
+      ]
+    },
+    {
+      "id": "p32",
+      "prompt": "sync the doors between players",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Scripts/Net/DoorNetwork.cs",
+          "Assets/Prefabs/Door.prefab"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "vague",
+      "expected_missing": [
+        "multiplayer",
+        "acceptance"
+      ],
+      "rationale": "Who owns door state (server, client or local-only) is the key undecided choice.",
+      "category": "multiplayer",
+      "tags": [
+        "terse"
+      ]
+    },
+    {
+      "id": "p33",
+      "prompt": "Right now two people can join the same room but things look different on each screen, a bit like each player lives in their own copy of the world. We would like it to be a proper shared experience, so please sort that out in whatever way makes sense.",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Scripts/Net/NetworkBootstrap.cs"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "vague",
+      "expected_missing": [
+        "multiplayer",
+        "target",
+        "acceptance"
+      ],
+      "rationale": "Long description of desync with no authority model, scope or check.",
+      "category": "multiplayer",
+      "tags": [
+        "long"
+      ]
+    },
+    {
+      "id": "p34",
+      "prompt": "In Assets/Scripts/Net/DoorNetwork.cs make the server own the door open state, clients send requests, reject requests from clients farther than 3 units, and add an EditMode test that asserts rejected requests leave the state unchanged.",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Scripts/Net/DoorNetwork.cs"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "clear",
+      "expected_missing": [],
+      "rationale": "Authority model, file, distance threshold and a test.",
+      "category": "multiplayer",
+      "tags": []
+    },
+    {
+      "id": "p35",
+      "prompt": "Set the NetworkManager tick rate to 30 Hz in Assets/Prefabs/NetworkManager.prefab",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Prefabs/NetworkManager.prefab"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "clear",
+      "expected_missing": [],
+      "rationale": "Single named value on a named prefab.",
+      "category": "multiplayer",
+      "tags": [
+        "terse"
+      ]
+    },
+    {
+      "id": "p36",
+      "prompt": "ok, same ownership for pickups, max 8 players",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Scripts/Net/PickupNetwork.cs"
+        ],
+        "docs": [],
+        "history": [
+          "user: who should own door state?",
+          "assistant: The server should own it; see Assets/Scripts/Net/DoorNetwork.cs, clients only send requests."
+        ],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "clear",
+      "expected_missing": [],
+      "rationale": "Short continuation; history fixes the authority model and file, the prompt adds the player cap.",
+      "category": "multiplayer",
+      "tags": [
+        "terse",
+        "continuation"
+      ]
+    },
+    {
+      "id": "p37",
+      "prompt": "fix the bug where pickups sometimes disappear",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Scripts/Pickup.cs",
+          "Assets/Scenes/Level02.unity"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": [
+          "NullReferenceException: Pickup.OnTriggerEnter"
+        ]
+      },
+      "label": "vague",
+      "expected_missing": [
+        "bug_replay",
+        "target"
+      ],
+      "rationale": "Intermittent; no repro, scene, seed or recording is given.",
+      "category": "bugs",
+      "tags": [
+        "terse"
+      ]
+    },
+    {
+      "id": "p38",
+      "prompt": "the game crashes sometimes",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Scenes/Main.unity"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "vague",
+      "expected_missing": [
+        "bug_replay",
+        "target"
+      ],
+      "rationale": "No scene, platform, log or reproduction path.",
+      "category": "bugs",
+      "tags": [
+        "terse"
+      ]
+    },
+    {
+      "id": "p39",
+      "prompt": "still happens",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Scripts/Pickup.cs"
+        ],
+        "docs": [],
+        "history": [
+          "user: pickups vanish after the second room",
+          "assistant: I added a null check in Assets/Scripts/Pickup.cs."
+        ],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "vague",
+      "expected_missing": [
+        "bug_replay",
+        "acceptance"
+      ],
+      "rationale": "Continuation: only meaningful with the history, and even then no repro or definition of fixed exists.",
+      "category": "bugs",
+      "tags": [
+        "terse",
+        "continuation"
+      ]
+    },
+    {
+      "id": "p40",
+      "prompt": "Intermittent pickup loss: the replay archive Assets/Replays/pickup_loss_0412.gdwreplay fails at checkpoint level2_gate on seed 1337; fix it so the replay passes at that checkpoint.",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Replays/pickup_loss_0412.gdwreplay"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "clear",
+      "expected_missing": [],
+      "rationale": "Archive, checkpoint and seed bound the repro and define done.",
+      "category": "bugs",
+      "tags": []
+    },
+    {
+      "id": "p41",
+      "prompt": "NullReference in Assets/Scripts/Inventory.cs line 88 when the slot count is 0; it must not throw.",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Scripts/Inventory.cs"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": [
+          "NullReferenceException: Inventory.AddItem (at Assets/Scripts/Inventory.cs:88)"
+        ]
+      },
+      "label": "clear",
+      "expected_missing": [],
+      "rationale": "Exact file, line, trigger and expected behaviour.",
+      "category": "bugs",
+      "tags": [
+        "terse"
+      ]
+    },
+    {
+      "id": "p42",
+      "prompt": "Fix the double-jump bug in Assets/Scripts/PlayerMotor.cs: reproduce it with a PlayMode test pressing jump twice within 0.05 s, then assert only one jump happens.",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Prefabs/Player.prefab",
+          "Assets/Scripts/PlayerMotor.cs"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "clear",
+      "expected_missing": [],
+      "rationale": "File, deterministic repro and assertion.",
+      "category": "bugs",
+      "tags": []
+    },
+    {
+      "id": "p43",
+      "prompt": "get the game ready to ship",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Scenes/Main.unity"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "vague",
+      "expected_missing": [
+        "platform_input",
+        "acceptance",
+        "target"
+      ],
+      "rationale": "Platforms, store, version and the definition of ready are all missing.",
+      "category": "shipping",
+      "tags": [
+        "terse"
+      ]
+    },
+    {
+      "id": "p44",
+      "prompt": "make a build for testers",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Scenes/Main.unity"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "vague",
+      "expected_missing": [
+        "platform_input",
+        "acceptance"
+      ],
+      "rationale": "Which platform, which scenes and where the build goes are open.",
+      "category": "shipping",
+      "tags": [
+        "terse"
+      ]
+    },
+    {
+      "id": "p45",
+      "prompt": "We are getting close to showing this to people outside the team, so I want everything polished and in order: the build, the store page assets, version numbers and anything else a release usually needs. Take care of the whole thing.",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "vague",
+      "expected_missing": [
+        "platform_input",
+        "assets",
+        "acceptance"
+      ],
+      "rationale": "Long but an unbounded umbrella request with no platform, store or checklist.",
+      "category": "shipping",
+      "tags": [
+        "long"
+      ]
+    },
+    {
+      "id": "p46",
+      "prompt": "Create a Windows x64 IL2CPP release build of Assets/Scenes/Main.unity into Builds/Win/ with version 0.9.1 and development build off; verify the exe launches and the console has no errors.",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Scenes/Main.unity"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "clear",
+      "expected_missing": [],
+      "rationale": "Platform, scene, output, version and verification are all stated.",
+      "category": "shipping",
+      "tags": []
+    },
+    {
+      "id": "p47",
+      "prompt": "Bump the bundle version to 1.4.2 in ProjectSettings/ProjectSettings.asset; the build number must stay 17.",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "ProjectSettings/ProjectSettings.asset"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "clear",
+      "expected_missing": [],
+      "rationale": "One file, one value, one invariant.",
+      "category": "shipping",
+      "tags": [
+        "terse"
+      ]
+    },
+    {
+      "id": "p48",
+      "prompt": "Add a headless batchmode build script at Assets/Editor/CIBuild.cs that exits with code 1 if any scene in the build settings is missing, and cover it with an EditMode test.",
+      "context": {
+        "unity_version": "6000.0.23f1",
+        "render_pipeline": "URP",
+        "input_handler": "new",
+        "candidates": [
+          "Assets/Editor/CIBuild.cs"
+        ],
+        "docs": [],
+        "history": [],
+        "attached_task": null,
+        "console": []
+      },
+      "label": "clear",
+      "expected_missing": [],
+      "rationale": "File, behaviour on failure and a test.",
+      "category": "shipping",
+      "tags": []
+    }
+  ],
+  "bypass": [
+    {
+      "id": "b01",
+      "prompt": "*just rename Player to Hero everywhere",
+      "message_meta": {},
+      "session": {
+        "harness": "builtin",
+        "folder_kind": "unity",
+        "settings": {}
+      },
+      "expected_reason": "star_prefix",
+      "expected_execution_text": "just rename Player to Hero everywhere"
+    },
+    {
+      "id": "b02",
+      "prompt": "  *skip the questions, add a pause menu",
+      "message_meta": {},
+      "session": {
+        "harness": "builtin",
+        "folder_kind": "unity",
+        "settings": {}
+      },
+      "expected_reason": "star_prefix",
+      "expected_execution_text": "  skip the questions, add a pause menu"
+    },
+    {
+      "id": "b03",
+      "prompt": "/task new Fix the jump",
+      "message_meta": {},
+      "session": {
+        "harness": "builtin",
+        "folder_kind": "unity",
+        "settings": {}
+      },
+      "expected_reason": "slash_prefix",
+      "expected_execution_text": "/task new Fix the jump"
+    },
+    {
+      "id": "b04",
+      "prompt": "/workflow start trailer",
+      "message_meta": {},
+      "session": {
+        "harness": "builtin",
+        "folder_kind": "unity",
+        "settings": {}
+      },
+      "expected_reason": "slash_prefix",
+      "expected_execution_text": "/workflow start trailer"
+    },
+    {
+      "id": "b05",
+      "prompt": "#remember to prefer tabs in C#",
+      "message_meta": {},
+      "session": {
+        "harness": "builtin",
+        "folder_kind": "unity",
+        "settings": {}
+      },
+      "expected_reason": "hash_prefix",
+      "expected_execution_text": "#remember to prefer tabs in C#"
+    },
+    {
+      "id": "b06",
+      "prompt": "Run the nightly lint pass over the scripts",
+      "message_meta": {
+        "origin": "scheduled"
+      },
+      "session": {
+        "harness": "builtin",
+        "folder_kind": "unity",
+        "settings": {}
+      },
+      "expected_reason": "scheduled",
+      "expected_execution_text": "Run the nightly lint pass over the scripts"
+    },
+    {
+      "id": "b07",
+      "prompt": "Run the nightly lint pass over the scripts",
+      "message_meta": {},
+      "session": {
+        "harness": "builtin",
+        "folder_kind": "unity",
+        "settings": {
+          "scheduled_task": "nightly-lint"
+        }
+      },
+      "expected_reason": "scheduled",
+      "expected_execution_text": "Run the nightly lint pass over the scripts"
+    },
+    {
+      "id": "b08",
+      "prompt": "Phase 2 brief: add the enemy spawner",
+      "message_meta": {
+        "origin": "campaign"
+      },
+      "session": {
+        "harness": "builtin",
+        "folder_kind": "unity",
+        "settings": {}
+      },
+      "expected_reason": "campaign",
+      "expected_execution_text": "Phase 2 brief: add the enemy spawner"
+    },
+    {
+      "id": "b09",
+      "prompt": "Implement unit 3 of the fleet wave",
+      "message_meta": {
+        "origin": "fleet"
+      },
+      "session": {
+        "harness": "builtin",
+        "folder_kind": "unity",
+        "settings": {}
+      },
+      "expected_reason": "fleet",
+      "expected_execution_text": "Implement unit 3 of the fleet wave"
+    },
+    {
+      "id": "b10",
+      "prompt": "Explore the inventory code and report",
+      "message_meta": {
+        "origin": "subagent"
+      },
+      "session": {
+        "harness": "builtin",
+        "folder_kind": "unity",
+        "settings": {}
+      },
+      "expected_reason": "subagent",
+      "expected_execution_text": "Explore the inventory code and report"
+    },
+    {
+      "id": "b11",
+      "prompt": "make jumping better",
+      "message_meta": {},
+      "session": {
+        "harness": "builtin",
+        "folder_kind": "plain",
+        "settings": {}
+      },
+      "expected_reason": "not_unity",
+      "expected_execution_text": "make jumping better"
+    },
+    {
+      "id": "b12",
+      "prompt": "make jumping better",
+      "message_meta": {},
+      "session": {
+        "harness": "builtin",
+        "folder_kind": "none",
+        "settings": {}
+      },
+      "expected_reason": "chat_only",
+      "expected_execution_text": "make jumping better"
+    },
+    {
+      "id": "b13",
+      "prompt": "make jumping better",
+      "message_meta": {},
+      "session": {
+        "harness": "codex",
+        "folder_kind": "unity",
+        "settings": {}
+      },
+      "expected_reason": "unsupported_harness",
+      "expected_execution_text": "make jumping better"
+    },
+    {
+      "id": "b14",
+      "prompt": "   ",
+      "message_meta": {},
+      "session": {
+        "harness": "builtin",
+        "folder_kind": "unity",
+        "settings": {}
+      },
+      "expected_reason": "empty",
+      "expected_execution_text": "   "
+    },
+    {
+      "id": "b15",
+      "prompt": "make jumping better",
+      "message_meta": {},
+      "session": {
+        "harness": "builtin",
+        "folder_kind": "unity",
+        "settings": {}
+      },
+      "expected_reason": "ok",
+      "expected_execution_text": "make jumping better"
+    }
+  ]
+}

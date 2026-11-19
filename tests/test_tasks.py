@@ -48,3 +48,19 @@ def test_validation(env):
     assert c.post("/api/tasks", json={"name": "x", "prompt": "y", "schedule": "0 9 * * *", "effort": "max"}, headers=H).status_code == 400
     assert c.post("/api/tasks", json={"name": "x", "prompt": "y", "schedule": "every:30m"}, headers=H).status_code == 200
     assert c.post("/api/tasks", json={"name": "x", "prompt": "y", "schedule": "once:2030-01-01T09:00"}, headers=H).status_code == 200
+
+
+def test_scheduled_run_message_bypasses_prompt_improver(env, tmp_path):
+    from gamedevworkstation.features import prompt_improver as PI
+
+    c, s, fake = env
+    t = c.post("/api/tasks", json={"name": "Nightly", "prompt": "Summarize yesterday.", "schedule": "30 8 * * 1-5"},
+               headers=H).json()
+    sid = c.post(f"/api/tasks/{t['id']}/run", headers=H).json()["session_id"]
+    first = s.store.messages(sid)[0]
+    assert first.meta["origin"] == "scheduled"
+    proj = tmp_path / "proj"
+    (proj / "ProjectSettings").mkdir(parents=True)
+    (proj / "ProjectSettings" / "ProjectVersion.txt").write_text("m_EditorVersion: 6000.0.1f1\n")
+    ok, reason, _ = PI.check_eligibility(s, {"folder": str(proj), "harness": "builtin"}, first)
+    assert (ok, reason) == (False, "scheduled")

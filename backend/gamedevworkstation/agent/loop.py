@@ -12,6 +12,7 @@ from ..core.effort import EffortApprovalRequired
 from ..core.media import stub_rejected_images
 from ..core.types import ABOVE_HIGH, ChatRequest, Message, TextBlock, ToolUseBlock, new_id
 from ..features.hookbus import HookEvent, TurnState, run_post_tool, run_pre_tool
+from ..features.prompt_improver import inject as pi_inject
 from ..legacy import migrate_project_dir
 from ..providers import base as _pb
 from ..providers.base import ProviderError
@@ -295,6 +296,22 @@ class AgentRunner:
         compact_failed = False  # e.g. no Anthropic key for claude.fast: don't retry it every call
         image_error: str | None = None  # the provider rejected an image's size: leave such images out from here on
 
+        # Prompt improver (features/prompt_improver.py): once per unsatisfied human message, before the first
+        # execution call. Its context goes into a COPY of the request history; the stored message stays as sent.
+        outcome = None
+        if (pi := app.extensions.get("prompt_improver")) and (pending := self._pending_user_message(sid)):
+            outcome = await pi.improve(session, pending)  # type: ignore[attr-defined]
+            session = ctx.session = app.store.get(sid) or session  # settings may have changed while it waited
+            if outcome.status != "bypassed":
+                app.bus.publish("prompt_improver.done", {"status": outcome.status, "reason": outcome.reason,
+                                                         "message_id": pending.id}, sid)
+            if outcome.status == "paused":
+                return
+            if not (outcome.context_text or outcome.execution_text):
+                outcome = None
+        with_pi = (lambda h: pi_inject(h, outcome.message_id, outcome.context_text, outcome.execution_text)) \
+            if outcome else (lambda h: h)
+
         for _ in range(MAX_MAIN_TURNS):
             app.usage.check(sid)
             turn.calls += 1
@@ -302,14 +319,14 @@ class AgentRunner:
                 await hooks.fire(HookEvent("model_call", ctx, turn=turn, extra={"call": turn.calls}))
             system, tools = self.system_segments(session), self.tool_specs(session)
             overhead = cx.est("\n".join(system)) + cx.est(json.dumps([t.model_dump() for t in tools]))
-            history = self.model_history(sid)
+            history = with_pi(self.model_history(sid))
             tokens = lambda ms: cx.messages_tokens(ms) * factor  # noqa: E731
             fill = overhead * factor + tokens(history)
             if (managed and not compact_failed and fill >= min(cx.AUTO_COMPACT_AT * window, room)
                     and len(history) > compacted_at + 1):
                 done = await self._auto_compact(sid, history, tokens, cx.TARGET_AFTER * window - overhead * factor)
                 if done:
-                    history = self.model_history(sid)
+                    history = with_pi(self.model_history(sid))
                     compacted_at = len(history)
                     fill = overhead * factor + tokens(history)
                 elif done is False:  # the summarizer failed; None (nothing to cut yet) tries again next call
@@ -443,6 +460,12 @@ class AgentRunner:
     def model_history(self, sid: str) -> list[Message]:
         """What the model sees: messages not compacted or cleared, without app notices."""
         return [m for m in self.app.store.messages(sid, include_compacted=False) if not m.meta.get("notice")]
+
+    def _pending_user_message(self, sid: str) -> Message | None:
+        """The human message this run answers: the last message, when it is a user message that isn't tool results."""
+        hist = self.model_history(sid)
+        last = hist[-1] if hist else None
+        return last if last and last.role == "user" and not last.meta.get("tool_results") else None
 
     def _notice(self, sid: str, kind: str, text: str) -> None:
         """A note for the user under the chat (output limit, turn limit, …); never sent to the model."""

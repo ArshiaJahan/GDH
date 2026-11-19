@@ -1,6 +1,6 @@
 import { Archive, Brain, ChevronRight, Clock, GitBranch, PanelRight, Sparkles, Square, Trash2, TriangleAlert, Wrench } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { fileUrl, inTauri, post } from "../lib/api";
+import { fileUrl, get, inTauri, post } from "../lib/api";
 import { MdLite } from "../lib/mdlite";
 import { openLocalFile } from "../lib/native";
 import { sessionActions } from "../lib/sessions";
@@ -11,6 +11,7 @@ import { SafeMarkdown } from "./SafeMarkdown";
 import { NoKeyNotice, SetupChecklist } from "./SetupChecklist";
 import { ClaudeCodeChip, ClaudeLoginNotice } from "./ClaudeCode";
 import { NewSession } from "./NewSession";
+import { PromptImprover, type TaskCardView } from "./PromptImprover";
 import { metaRow } from "./rows";
 import { SessionLimitBanner } from "./LimitsBanner";
 import { SessionTasks } from "./SessionTasks";
@@ -260,6 +261,7 @@ type MsgProps = { m: Msg; results: Record<string, Block>; onFork: (id: string) =
 
 const MessageView = memo(function MessageView({ m, results, onFork }: MsgProps) {
   const compacted = m.meta?.compacted;
+  if (m.meta?.notice === "prompt_improver" && m.meta.outcome) return <PromptImproverNotice m={m} />;
   if (m.meta?.notice) return <Notice m={m} />;
   // Harness-written messages (skill loads, gate results, campaign briefs) get their own rows.
   const Row = metaRow(m);
@@ -320,6 +322,23 @@ function Notice({ m }: { m: Msg }) {
       {canContinue && <button className="btn py-0.5 shrink-0" onClick={go}>Continue</button>}
     </div>
   );
+}
+
+/** The prompt improver's result (meta.outcome, meta.item_id); the task card comes from the session's latest one.
+ *  item_id is set only for a real task card; if /latest belongs to a newer item, only the summary shows. */
+function PromptImproverNotice({ m }: { m: Msg }) {
+  const sid = useStore((s) => s.currentId);
+  const itemId: string | null = m.meta.item_id ?? null;
+  const [card, setCard] = useState<TaskCardView | null>(m.meta.card ?? null);
+  useEffect(() => {
+    if (!sid || !itemId || card || !["proceeded", "asked"].includes(m.meta.outcome?.status)) return;
+    let live = true;
+    get<{ card: TaskCardView | null; item_id: string | null }>(`/sessions/${sid}/prompt-improver/latest`)
+      .then((r) => { if (live && r?.item_id === itemId) setCard(r.card ?? null); }).catch(() => {});
+    return () => { live = false; };
+  }, [sid, itemId, card]);
+  if (!sid) return null;
+  return <PromptImprover outcome={m.meta.outcome} card={card} itemId={itemId} sessionId={sid} />;
 }
 
 /** A failed turn (meta.error): an alert icon and the message in normal weight. Older messages

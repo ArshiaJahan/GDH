@@ -8,7 +8,7 @@ vi.mock("../lib/api", () => ({ api: vi.fn(), del: vi.fn(), get, post: vi.fn() })
 vi.mock("../lib/store", () => ({ actions: { toast: vi.fn(), refreshState: vi.fn() }, useStore: (sel: (s: any) => unknown) => sel({ pageArgs: {} }) }));
 vi.mock("../components/StorageSettings", () => ({ StorageSettings: () => null }));
 
-import { Allowlist, ClaudeCodeSection, Num, savableAllowRules, UnitySettings, validAllowRule } from "./Settings";
+import { Allowlist, ClaudeCodeSection, Num, PromptImproverSettings, savableAllowRules, UnitySettings, validAllowRule } from "./Settings";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => {
@@ -194,5 +194,36 @@ describe("ClaudeCodeSection", () => {
     await act(async () => {});
     expect(screen.getByTestId("claude-cli").textContent).toContain("wasn't found");
     expect(screen.getByTestId("claude-login").textContent).toBe("claude CLI not found");
+  });
+});
+
+describe("PromptImproverSettings", () => {
+  const st = { tiers: { "claude.fast": "claude-haiku-5-5", "claude.deep": "claude-fable-5-1" },
+    prompt_improver: { enabled: true, builtin_enabled: true, claude_code_enabled: true, model: "claude.fast", effort: "low", max_questions: 3 } };
+
+  it("is on by default, explains itself and autosaves the toggles", () => {
+    const save = vi.fn();
+    render(<PromptImproverSettings st={st} save={save} />);
+    expect(screen.getByText(/Asks up to 3 quick questions.*Start a message with \* to skip it\./)).toBeTruthy();
+    const enabled = screen.getByLabelText("Prompt improver enabled") as HTMLInputElement;
+    expect(enabled.checked).toBe(true);
+    fireEvent.click(enabled);
+    expect(save).toHaveBeenLastCalledWith({ prompt_improver: { enabled: false } }, "Enabled");
+    fireEvent.click(screen.getByLabelText("Prompt improver for Claude Code sessions"));
+    expect(save).toHaveBeenLastCalledWith({ prompt_improver: { claude_code_enabled: false } }, "Claude Code sessions");
+    fireEvent.click(screen.getByLabelText("Prompt improver for Built-in sessions"));
+    expect(save).toHaveBeenLastCalledWith({ prompt_improver: { builtin_enabled: false } }, "Built-in sessions");
+  });
+
+  it("saves model, effort (up to high) and the question limit", () => {
+    const save = vi.fn();
+    render(<PromptImproverSettings st={st} save={save} />);
+    fireEvent.change(screen.getByLabelText("Prompt improver model"), { target: { value: "claude.deep" } });
+    expect(save).toHaveBeenLastCalledWith({ prompt_improver: { model: "claude.deep" } }, "Model");
+    fireEvent.change(screen.getByLabelText("Prompt improver effort"), { target: { value: "high" } });
+    expect(save).toHaveBeenLastCalledWith({ prompt_improver: { effort: "high" } }, "Effort");
+    expect(Array.from((screen.getByLabelText("Prompt improver effort") as HTMLSelectElement).options).map((o) => o.value)).not.toContain("xhigh");
+    fireEvent.change(screen.getByLabelText("Prompt improver question limit"), { target: { value: "2" } });
+    expect(save).toHaveBeenLastCalledWith({ prompt_improver: { max_questions: 2 } }, "Questions per message");
   });
 });

@@ -11,13 +11,14 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, Body, FastAPI, HTTPException, UploadFile
 
 from ..config import (ENV_KEYS, PROVIDERS, Config, _env_name, data_dir, delete_key, get_config, get_key,
-                      invalid_settings, key_hint, save_config_patch, set_key)
+                      invalid_settings, key_hint, prompt_improver_errors, save_config_patch, set_key)
 
 if TYPE_CHECKING:
     from ..app import AppState
 
 EDITABLE = {"orchestrator", "tiers", "delegation", "limits", "elevenlabs", "modes", "data_policy", "appearance", "updates",
-            "skills", "hooks", "ladder", "campaigns", "fleet", "unity", "claude_code"}
+            "skills", "hooks", "ladder", "campaigns", "fleet", "unity", "claude_code",
+            "prompt_improver"}
 BG_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".m4v", ".mov", ".webm"}
 
 
@@ -29,7 +30,8 @@ CHOICES = {("skills", "disclosure"): ("progressive", "full"), ("campaigns", "han
 
 # Sections that never change which keys, profiles or models the providers use: saving only
 # these keeps the provider clients (and their connection pools) as they are.
-NO_PROVIDER_RESET = {"appearance", "skills", "hooks", "ladder", "campaigns", "fleet", "unity", "claude_code"}
+NO_PROVIDER_RESET = {"appearance", "skills", "hooks", "ladder", "campaigns", "fleet", "unity", "claude_code",
+                     "prompt_improver"}
 
 
 def _apply(app: "AppState", new: Config, reset_providers: bool = True) -> None:
@@ -97,6 +99,8 @@ def register(app_: FastAPI, api: APIRouter, S: "AppState") -> None:
         bad = set(body) - EDITABLE
         if bad:
             raise HTTPException(400, f"Not editable here: {', '.join(sorted(bad))}")
+        if isinstance(pi := body.get("prompt_improver"), dict) and (pi_bad := prompt_improver_errors(pi)):
+            raise HTTPException(400, "; ".join(f"prompt_improver.{k} {why}" for k, why in pi_bad.items()))
         if bad_types := invalid_settings(body):
             raise HTTPException(400, f"Wrong type of value for: {', '.join(bad_types)}")
         for (sec, key), allowed in CHOICES.items():

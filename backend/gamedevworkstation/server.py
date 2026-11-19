@@ -378,7 +378,7 @@ def create_app(token: str, state: AppState | None = None) -> FastAPI:
             parts.append(attachment_block(a))
         if not parts:
             raise HTTPException(400, "empty message")
-        msg = Message(role="user", content=parts, meta={"invoked_skill": skill} if skill else {})
+        msg = Message(role="user", content=parts, meta={"origin": "user", **({"invoked_skill": skill} if skill else {})})
         prov = S.config.model(s["model"]).provider
         for a, b in zip(attachments, parts[len(parts) - len(attachments):]):
             if not b.item_id and a.get("send_path") and a["send_path"] != a["path"]:  # the item is the original

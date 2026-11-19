@@ -211,7 +211,7 @@ def register(app_: FastAPI, api: APIRouter, S: "AppState") -> None:
                 preview = (card.get("result_preview") or "").strip().rstrip(".")
                 text += ("spawn a follow-up unit with the item. That subagent ran before the app restarted"
                          + (f"; its result began: {preview}" if preview else "") + ".")
-            msg = Message(role="user", content=[TextBlock(text=text)])
+            msg = Message(role="user", content=[TextBlock(text=text)], meta={"origin": "harness_generated"})
             S.store.add_message(sid, msg)
             S.store.mark_read(sid, publish=False)
             if s["archived"]:

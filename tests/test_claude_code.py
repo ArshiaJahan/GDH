@@ -26,7 +26,7 @@ import uvicorn
 
 from gamedevworkstation.app import AppState
 from gamedevworkstation.config import data_dir
-from gamedevworkstation.core.types import Message, Usage
+from gamedevworkstation.core.types import Message, TextBlock, Usage
 from gamedevworkstation.features import claude_code as ccm
 from gamedevworkstation.features.claude_cli import LOGIN_HINT, child_env
 from gamedevworkstation.server import create_app
@@ -1576,3 +1576,338 @@ def test_modes_need_claude_code_and_quiet_steps_deny_tools(live, tmp_path):
         assert asyncio.run(mgr.decide(sid, "Write", {"file_path": "x"}))["behavior"] == "deny"
     finally:
         mgr.procs.pop(sid, None)
+
+
+# ------------------------------------------------ prompt improver: the Claude Code helper transport
+
+from gamedevworkstation.features.pi_contracts import ImproverOutcome  # noqa: E402
+
+
+class FakeImprover:
+    """Stands in for PromptImprover.improve_cc (owner B): optionally asks the helper, returns an outcome."""
+
+    def __init__(self, context="", execution="", ask=None, status="proceeded", notice_on_none=True):
+        self.context, self.execution, self.ask, self.status = context, execution, ask, status
+        self.calls, self.replies, self.helpers, self.notice_on_none, self.app = 0, [], [], notice_on_none, None
+
+    async def improve_cc(self, session, message, helper):
+        self.calls += 1
+        self.helpers.append(helper)
+        status = self.status
+        for prompt in ([self.ask] if isinstance(self.ask, str) else self.ask or []):
+            reply = await helper(prompt)
+            self.replies.append(reply)
+            if reply is None:
+                status = "unavailable"
+                if self.notice_on_none and self.app is not None:
+                    self.app.store.add_message(session["id"], Message(
+                        role="assistant", content=[TextBlock(text="Prompt improver unavailable.")],
+                        meta={"notice": "prompt_improver"}))
+        return ImproverOutcome(status=status, context_text=self.context, execution_text=self.execution,
+                               message_id=message.id)
+
+
+def _install(rig_or_live, **kw) -> FakeImprover:
+    app = getattr(rig_or_live, "app", None) or rig_or_live.S
+    imp = FakeImprover(**kw)
+    imp.app = app
+    app.extensions["prompt_improver"] = imp
+    return imp
+
+
+def _user_texts(entries: list[dict]) -> list[str]:
+    return [e["text"] for e in entries if e.get("event") == "user"]
+
+
+def _helper_starts(entries: list[dict]) -> list[dict]:
+    return [e for e in entries if "argv" in e and "--no-session-persistence" in e["argv"]]
+
+
+def _main_starts(entries: list[dict]) -> list[dict]:
+    return [e for e in entries if "argv" in e and "--no-session-persistence" not in e["argv"]]
+
+
+async def test_helper_argv_denies_every_tool_and_has_no_mcp_or_shared_session(rig):
+    rig.configure(pi={"text": "ok"})
+    imp = _install(rig, ask="evaluate this", context="")
+    await rig.send()
+    helper_argv_, main_argv = _helper_starts(rig.entries())[0]["argv"], _main_starts(rig.entries())[0]["argv"]
+    assert imp.replies == ["ok"] and imp.calls == 1
+    assert _opt(helper_argv_, "--tools") == "" and _opt(helper_argv_, "--allowedTools") == ""
+    denied = _opt(helper_argv_, "--disallowedTools").split(",")
+    assert {"Bash", "Edit", "Write", "Read", "WebFetch", "Task", "AskUserQuestion"} <= set(denied)
+    assert "--strict-mcp-config" in helper_argv_ and not any(a.startswith("--mcp-config") for a in helper_argv_)
+    assert _opt(helper_argv_, "--setting-sources") == "" and "--permission-prompt-tool" not in " ".join(helper_argv_)
+    assert _opt(helper_argv_, "--session-id") != _opt(main_argv, "--session-id")
+    assert _opt(helper_argv_, "--resume") is None
+    assert _opt(helper_argv_, "--model") == "claude-haiku-5-5" and _opt(helper_argv_, "--effort") == "low"
+    assert "evaluate this" in _user_texts(rig.entries())[0]  # the helper got the prompt, before the real one
+    assert _user_texts(rig.entries())[1] == "hello"
+    assert rig.app.store.get(rig.sid)["settings"]["claude_code_session"] == _opt(main_argv, "--session-id")
+
+
+async def test_helper_timeout_kills_the_process_and_the_turn_still_runs(rig, monkeypatch):
+    rig.configure(pi={"mode": "hang"})
+    rig.app.config.prompt_improver.update(timeout_s=1)
+    pids = []
+    real = ccm.HelperConv._spawn
+
+    async def spawn(self, model):
+        await real(self, model)
+        pids.append(self.proc.pid)
+
+    monkeypatch.setattr(ccm.HelperConv, "_spawn", spawn)
+    imp = _install(rig, ask="slow", context="CTX")
+    await rig.send()
+    assert imp.replies == [None] and imp.helpers[0].failure == "timeout" and imp.helpers[0].proc is None
+    assert len(pids) == 1
+
+    async def gone():
+        try:
+            os.kill(pids[0], 0)
+        except ProcessLookupError:
+            return True
+        return False
+
+    for _ in range(100):
+        if await gone():
+            break
+        await asyncio.sleep(0.05)
+    assert await gone()
+    msgs = rig.app.store.messages(rig.sid)
+    assert any(m.meta.get("notice") == "prompt_improver" for m in msgs)  # the unavailable notice
+    assert _user_texts(rig.entries())[-1] == "hello\n\nCTX"  # the real turn still ran
+    assert msgs[-1].role == "assistant" and "Hello from fake claude" in msgs[-1].text()
+
+
+async def test_helper_cancel_kills_the_process(rig, monkeypatch):
+    rig.configure(pi={"mode": "hang"})
+    pids = []
+    real = ccm.HelperConv._spawn
+
+    async def spawn(self, model):
+        await real(self, model)
+        pids.append(self.proc.pid)
+
+    monkeypatch.setattr(ccm.HelperConv, "_spawn", spawn)
+    _install(rig, ask="slow")
+    rig.app.store.add_message(rig.sid, Message.user("hello"))
+    task = asyncio.create_task(rig.cc.run_turn(rig.app.store.get(rig.sid)))
+    await _eventually(lambda: pids)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    for _ in range(100):
+        try:
+            os.kill(pids[0], 0)
+        except ProcessLookupError:
+            break
+        await asyncio.sleep(0.05)
+    else:
+        raise AssertionError("helper process survived the cancel")
+    assert rig.cc.procs[rig.sid].turn is None  # the main conversation is idle again
+    assert not [e for e in _user_texts(rig.entries()) if e == "hello"]  # nothing was sent to it
+
+
+async def test_improver_context_reaches_the_real_prompt_and_the_store_is_unchanged(rig):
+    _install(rig, context="Task card: build the door.")
+    await rig.send("make a door")
+    assert _user_texts(rig.entries()) == ["make a door\n\nTask card: build the door."]
+    stored = [m for m in rig.app.store.messages(rig.sid) if m.role == "user"]
+    assert [m.text() for m in stored] == ["make a door"]
+    assert rig.app.store.get(rig.sid)["settings"]["claude_code_sent"] == stored[-1].id
+
+
+async def test_improver_star_execution_text_replaces_the_outbound_text(rig):
+    _install(rig, execution="do it fast")
+    await rig.send("*do it fast")
+    assert _user_texts(rig.entries()) == ["do it fast"]
+    assert [m.text() for m in rig.app.store.messages(rig.sid) if m.role == "user"] == ["*do it fast"]
+
+
+def test_improver_context_keeps_attachments(live, tmp_path):
+    sid = live.session(_project(tmp_path))
+    imp = _install(live, context="Answered: platform = PC")
+    r = live.c.post("/api/uploads", params={"session_id": sid}, files={"file": ("notes.txt", b"level 3 needs a door", "text/plain")})
+    assert r.status_code == 200, r.text
+    r = live.c.post(f"/api/sessions/{sid}/messages", json={"text": "hello, see notes", "attachments": [r.json()]})
+    assert r.status_code == 200, r.text
+    live.wait_idle(sid)
+    ev = live.events("user")[-1]
+    assert imp.calls == 1
+    assert [b["type"] for b in ev["blocks"]] == ["text", "text", "document", "text"]
+    assert "[Attached file: notes.txt]" in ev["text"] and ev["text"].endswith("Answered: platform = PC")
+    assert live.get(sid)["settings"]["claude_code_sent"] == live.msgs(sid)[0]["id"]
+
+
+async def test_improver_context_is_appended_on_a_resumed_session(rig):
+    await rig.send("hello")  # no improver yet
+    first = _opt(_main_starts(rig.entries())[0]["argv"], "--session-id")
+    await rig.cc.close_session(rig.sid)  # the process died: the next turn resumes the same conversation
+    imp = _install(rig, context="Resolved: 2D platformer.")
+    await rig.send("add a jump")
+    starts = _main_starts(rig.entries())
+    assert len(starts) == 2 and _opt(starts[1]["argv"], "--resume") == first
+    assert _user_texts(rig.entries())[-1] == "add a jump\n\nResolved: 2D platformer."
+    assert imp.calls == 1
+    await rig.send("and a double jump")  # a live process: still once per user turn, still appended
+    assert imp.calls == 2 and _user_texts(rig.entries())[-1] == "and a double jump\n\nResolved: 2D platformer."
+
+
+@pytest.mark.parametrize("how", ["setting_off", "cc_off", "no_improver"])
+async def test_disabled_improver_leaves_the_prompt_unchanged(rig, how):
+    if how == "no_improver":
+        rig.app.extensions.pop("prompt_improver", None)
+        imp = None
+    else:
+        imp = _install(rig, ask="x", context="SHOULD NOT APPEAR")
+        rig.app.config.prompt_improver.update(enabled=False) if how == "setting_off" else \
+            rig.app.config.prompt_improver.update(claude_code_enabled=False)
+    await rig.send("hello")
+    assert _user_texts(rig.entries()) == ["hello"]
+    assert not _helper_starts(rig.entries())
+    assert imp is None or imp.calls == 0
+    assert not rig.app.db.all("SELECT * FROM usage_records WHERE feature='prompt_improver'")
+
+
+async def test_improver_exception_shows_a_notice_and_the_turn_runs(rig):
+    class Boom:
+        async def improve_cc(self, *a):
+            raise RuntimeError("boom")
+
+    rig.app.extensions["prompt_improver"] = Boom()
+    await rig.send("hello")
+    assert _user_texts(rig.entries()) == ["hello"]
+    assert any(m.meta.get("notice") == "prompt_improver" for m in rig.app.store.messages(rig.sid))
+
+
+@pytest.mark.parametrize("effort", ["xhigh", "max"])
+async def test_helper_effort_above_high_is_refused_before_spawning(rig, effort):
+    rig.app.config.prompt_improver.update(effort=effort)
+    imp = _install(rig, ask="anything", context="C")
+    await rig.send("hello")
+    assert imp.replies == [None] and imp.helpers[0].failure == "effort_refused"
+    assert not _helper_starts(rig.entries())  # never spawned
+    assert len(_main_starts(rig.entries())) == 1 and _user_texts(rig.entries()) == ["hello\n\nC"]
+
+
+async def test_helper_usage_is_prompt_improver_subscription_and_separate_from_the_main_totals(rig):
+    rig.configure(pi={"text": "ok"})
+    _install(rig, ask=["one", "two"])
+    await rig.send("hello")
+    rows = rig.app.db.all("SELECT * FROM usage_records WHERE session_id=? ORDER BY id", [rig.sid])
+    pi_rows = [r for r in rows if r["feature"] == "prompt_improver"]
+    main_rows = [r for r in rows if r["feature"] != "prompt_improver"]
+    assert len(pi_rows) == 2 and len(main_rows) == 1  # two helper asks, one main turn
+    for r in pi_rows:
+        assert r["billing"] == "subscription" and r["role"] == "assistant" and r["profile"] == "subscription"
+        assert r["run_id"].startswith(f"pi:{rig.sid}:") and r["effort"] == "low"
+        assert (r["input_tokens"], r["output_tokens"]) == (1000, 800) and r["cost_usd"] == pytest.approx(0.01)
+    assert main_rows[0]["role"] == "main" and main_rows[0]["run_id"] == f"main:{rig.sid}"
+    # subscription estimates stay outside the API spend limits, and the main conversation's totals are its own
+    assert rig.app.usage.spent_session(rig.sid) == 0
+    assert rig.app.store.get(rig.sid)["settings"]["claude_code_totals"]["cost"] == pytest.approx(0.01)
+    hs = _helper_starts(rig.entries())
+    assert len(hs) == 1  # the second ask reuses the same helper conversation
+
+
+# ------------------------------------------------ prompt improver: paused, limits, Stop, exact argv
+
+async def test_paused_outcome_sends_nothing_adds_no_notice_and_the_next_message_works(rig):
+    imp = _install(rig, status="paused", context="CTX")
+    await rig.send("make a door")
+    assert _user_texts(rig.entries()) == []  # the real prompt never went out
+    msgs = rig.app.store.messages(rig.sid)
+    assert not [m for m in msgs if m.meta.get("notice") == "prompt_improver"]  # the coordinator owns that notice
+    assert rig.app.store.get(rig.sid)["settings"].get("claude_code_sent") is None
+    assert rig.cc.procs[rig.sid].turn is None
+    imp.status = "proceeded"
+    await rig.send("make a door, on PC")
+    sent = _user_texts(rig.entries())  # the unsent first message rides along with the follow-up
+    assert len(sent) == 1 and "make a door" in sent[0] and sent[0].endswith("make a door, on PC\n\nCTX")
+    assert rig.app.store.messages(rig.sid)[-1].role == "assistant"
+
+
+async def test_helper_enforces_input_output_and_budget_limits(rig):
+    rig.configure(pi={"text": "ok"})
+    rig.app.config.prompt_improver.update(max_input_tokens=50, budget_usd=0.005)
+    imp = _install(rig, ask=["x" * 1000, "small", "again"])
+    await rig.send()
+    h = imp.helpers[0]
+    assert imp.replies[0] is None and imp.replies[1] == "ok"  # too large: refused before a process exists
+    assert imp.replies[2] is None and h.failure == "budget"  # the CLI-reported $0.01 passed the $0.005 cap
+    starts = _helper_starts(rig.entries())
+    assert len(starts) == 1 and _opt(starts[0]["argv"], "--max-budget-usd") == "0.0050"
+    assert len([e for e in rig.entries() if e.get("event") == "user" and "small" in e["text"]]) == 1
+    assert len(rig.app.db.all("SELECT * FROM usage_records WHERE feature='prompt_improver'")) == 1
+
+
+async def test_helper_output_over_the_cap_is_cut_off_and_the_helper_killed(rig):
+    rig.configure(pi={"text": "y" * 2000})
+    rig.app.config.prompt_improver.update(max_output_tokens=20)
+    imp = _install(rig, ask="go")
+    await rig.send()
+    assert imp.replies == [None] and imp.helpers[0].failure == "output_limit" and imp.helpers[0].proc is None
+
+
+async def test_helper_checks_api_spend_only_for_api_billing(rig, monkeypatch):
+    from gamedevworkstation.usage import BudgetExceeded
+
+    checks = []
+
+    def boom(*a, **k):
+        checks.append(a)
+        raise BudgetExceeded("over")
+
+    monkeypatch.setattr(rig.app.usage, "check", boom)
+    rig.configure(pi={"text": "ok"})  # subscription login
+    imp = _install(rig, ask="hi")
+    await rig.send()
+    assert imp.replies == ["ok"] and imp.helpers[0].billing == "subscription" and not checks
+    imp.helpers[0].billing = "api"
+    assert await imp.helpers[0]("again") is None and imp.helpers[0].failure == "spend_limit" and checks
+
+
+async def test_stop_while_the_helper_runs_kills_it_and_sends_nothing(rig, monkeypatch):
+    rig.configure(pi={"mode": "hang"})
+    pids = []
+    real = ccm.HelperConv._spawn
+
+    async def spawn(self, model):
+        await real(self, model)
+        pids.append(self.proc.pid)
+
+    monkeypatch.setattr(ccm.HelperConv, "_spawn", spawn)
+    imp = _install(rig, ask="slow", context="CTX")
+    rig.app.store.add_message(rig.sid, Message.user("hello"))
+    task = asyncio.create_task(rig.cc.run_turn(rig.app.store.get(rig.sid)))
+    await _eventually(lambda: pids)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    for _ in range(100):
+        try:
+            os.kill(pids[0], 0)
+        except ProcessLookupError:
+            break
+        await asyncio.sleep(0.05)
+    else:
+        raise AssertionError("helper process survived Stop")
+    assert _user_texts(rig.entries()) == [] and rig.cc.procs[rig.sid].turn is None
+    rig.configure(pi={"text": "ok"})
+    await rig.send("again")  # a following message works
+    assert "again" in _user_texts(rig.entries())[-1] and imp.calls == 2
+
+
+def test_helper_argv_exact_shape():
+    sid = "123e4567-e89b-42d3-a456-426614174000"
+    argv = ccm.helper_argv("claude", session_id=sid, model="claude-haiku-5-5", effort="low", budget_usd=0.03)
+    assert argv == [
+        "claude", "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+        f"--session-id={sid}", "--model=claude-haiku-5-5", f"--permission-mode={ccm.CLI_MODE['ask']}",
+        "--effort=low", "--tools=", "--allowedTools=", f"--disallowedTools={','.join(ccm.HELPER_DENY)}",
+        "--strict-mcp-config", "--setting-sources=", "--disable-slash-commands", "--no-session-persistence",
+        f"--append-system-prompt={ccm.HELPER_SYSTEM}", "--max-budget-usd=0.0300"]
+    assert "--effort=low" not in ccm.helper_argv("claude", session_id=sid, model="m", effort=None)
+    with pytest.raises(ValueError):
+        ccm.helper_argv("claude", session_id="nope", model="m", effort=None)
