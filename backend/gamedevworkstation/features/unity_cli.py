@@ -187,11 +187,11 @@ def probe_cli(path: Path) -> UnityCliInfo | None:
         return _PROBE_CACHE[key]
     info = None
     try:
-        out = subprocess.run([str(path), "--version"], capture_output=True, text=True, timeout=5,
+        out = subprocess.run([str(path), "--version"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
                              stdin=subprocess.DEVNULL, env=cli_env())
         m = re.search(r"\b(\d+\.\d+\.\d+(?:-[0-9A-Za-z.\-]+)?)\b", out.stdout or "")
         if out.returncode == 0 and m:
-            cat = subprocess.run([str(path), "commands", "--format", "json"], capture_output=True, text=True,
+            cat = subprocess.run([str(path), "commands", "--format", "json"], capture_output=True, text=True, encoding="utf-8", errors="replace",
                                  timeout=20, stdin=subprocess.DEVNULL, env=cli_env())
             env = parse_envelope(cat.stdout)
             opts: dict[str, list] = {}
@@ -250,7 +250,7 @@ def find_unity_cli(cfg: dict) -> CliStatus:
 
 def project_editor_version(project: Path) -> str | None:
     try:
-        text = (project / "ProjectSettings" / "ProjectVersion.txt").read_text(errors="replace")
+        text = (project / "ProjectSettings" / "ProjectVersion.txt").read_text(errors="replace", encoding="utf-8")
     except OSError:
         return None
     m = re.search(r"^m_EditorVersion:\s*(\S+)", text, re.M)
@@ -259,7 +259,7 @@ def project_editor_version(project: Path) -> str | None:
 
 def _manifest(project: Path) -> dict:
     try:
-        d = json.loads((project / "Packages" / "manifest.json").read_text(errors="replace"))
+        d = json.loads((project / "Packages" / "manifest.json").read_text(errors="replace", encoding="utf-8"))
         return d.get("dependencies") or {} if isinstance(d, dict) else {}
     except (OSError, ValueError):
         return {}
@@ -563,7 +563,7 @@ class CliRun:
         if self.log_path:
             try:
                 if self.log_path.is_file() and self.log_path.stat().st_size <= cap:
-                    return self.log_path.read_text(errors="replace")
+                    return self.log_path.read_text(errors="replace", encoding="utf-8")
                 if self.log_path.is_file():
                     with self.log_path.open("rb") as f:
                         f.seek(-cap, 2)
@@ -590,7 +590,7 @@ def batch_editor_pids(project: Path) -> list[int]:
     esc = re.escape(str(project))
     pat = rf"Unity\.app/Contents/MacOS/Unity.*-batchmode.*-projectPath[= ]+{esc}/?( |$)"
     try:
-        out = subprocess.run(["pgrep", "-fi", pat], capture_output=True, text=True, timeout=5, stdin=subprocess.DEVNULL)
+        out = subprocess.run(["pgrep", "-fi", pat], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError):
         return []
     pids = [int(x) for x in out.stdout.split() if x.isdigit()]
@@ -600,7 +600,7 @@ def batch_editor_pids(project: Path) -> list[int]:
         if pid == os.getpid():
             continue
         try:
-            cmd = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, timeout=5).stdout
+            cmd = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5).stdout
         except (OSError, subprocess.SubprocessError):
             continue
         # A GUI Editor's import workers are batch-mode Unity processes too: never touch them.
@@ -611,7 +611,7 @@ def batch_editor_pids(project: Path) -> list[int]:
 
 def _started_after(pid: int, since: float) -> bool:
     try:
-        et = subprocess.run(["ps", "-o", "etime=", "-p", str(pid)], capture_output=True, text=True, timeout=5).stdout
+        et = subprocess.run(["ps", "-o", "etime=", "-p", str(pid)], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5).stdout
     except (OSError, subprocess.SubprocessError):
         return False
     e = _elapsed_s(et)

@@ -404,7 +404,7 @@ def execute_steps(
         try:
             r = subprocess.run(
                 argv,
-                capture_output=True, text=True, timeout=600,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600,
             )
             if r.returncode != 0:
                 error = r.stderr.strip() or f"ffmpeg exit code {r.returncode}"

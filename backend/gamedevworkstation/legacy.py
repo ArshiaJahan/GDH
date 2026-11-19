@@ -223,7 +223,7 @@ def migrate_data_dir(old: Path, new: Path) -> bool:
         _rewrite_db(tmp, old, new)
         os.replace(tmp, new / DB_NAME)
     record = {"from": str(old), "at": time.time(), "worktrees_left_in": str(old / "worktrees")}
-    (new / MIGRATION_RECORD).write_text(json.dumps(record, indent=2) + "\n")
+    (new / MIGRATION_RECORD).write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     log.info("migration: data copied from %s in %.1fs", old, time.monotonic() - started)
     return True
 
@@ -233,7 +233,7 @@ def migrate_data_dir(old: Path, new: Path) -> bool:
 
 def _keychain_record(path: Path) -> set[str]:
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
         return {str(a) for a in data.get("accounts", [])} if isinstance(data, dict) else set()
     except (OSError, ValueError):
         return set()
@@ -246,7 +246,7 @@ def keychain_mark(record: Path, account: str) -> None:
         return
     record.parent.mkdir(parents=True, exist_ok=True)
     tmp = record.with_name(record.name + ".tmp")
-    tmp.write_text(json.dumps({"accounts": sorted(done | {account})}, indent=2) + "\n")
+    tmp.write_text(json.dumps({"accounts": sorted(done | {account})}, indent=2) + "\n", encoding="utf-8")
     os.chmod(tmp, 0o600)
     os.replace(tmp, record)
 

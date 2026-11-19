@@ -27,7 +27,7 @@ def version_info() -> dict:
                   "frozen": frozen()}
     if frozen():
         try:
-            data = json.loads(BUILD_INFO.read_text())
+            data = json.loads(BUILD_INFO.read_text(encoding="utf-8"))
             info.update({k: data.get(k) for k in ("git_commit", "git_dirty", "built_at")})
             if data.get("channel"):  # set by CI release builds (scripts/version.py build-info)
                 info.update(channel=data["channel"], repo=data.get("repo"))
@@ -39,11 +39,11 @@ def version_info() -> dict:
     repo = Path(__file__).resolve().parents[2]
     try:
         out = subprocess.run(["git", *GIT_SAFE, "rev-parse", "--short", "HEAD"], cwd=repo, capture_output=True,
-                             text=True, timeout=3)
+                             text=True, encoding="utf-8", errors="replace", timeout=3)
         if out.returncode == 0:
             info["git_commit"] = out.stdout.strip() or None
             dirty = subprocess.run(["git", *GIT_SAFE, "status", "--porcelain", "--untracked-files=no"], cwd=repo,
-                                   capture_output=True, text=True, timeout=3)
+                                   capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=3)
             info["git_dirty"] = bool(dirty.stdout.strip())
     except (OSError, subprocess.SubprocessError):
         pass

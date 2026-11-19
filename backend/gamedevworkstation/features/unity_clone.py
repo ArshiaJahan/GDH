@@ -115,7 +115,7 @@ async def sync_clone(project: Path | str, *, timeout_s: float = 1800) -> dict:
     cmds: list[list[str]] = []
     await asyncio.to_thread(_check_symlinks, src, dst)
     try:
-        marker = json.loads((dst / MARKER).read_text())
+        marker = json.loads((dst / MARKER).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         marker = None
     first = not isinstance(marker, dict)
@@ -149,7 +149,7 @@ async def sync_clone(project: Path | str, *, timeout_s: float = 1800) -> dict:
                                  f"{out.strip()[-300:]}")
     try:
         meta = {"source": str(src), "created": time.time() if first else marker.get("created"), "synced": time.time()}
-        (dst / MARKER).write_text(json.dumps(meta))
+        (dst / MARKER).write_text(json.dumps(meta), encoding="utf-8")
     except (OSError, ValueError) as e:
         raise CloneError(f"couldn't write {MARKER}: {e}") from e
     return {"clone": str(dst), "first": first, "commands": cmds}

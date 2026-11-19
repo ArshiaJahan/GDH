@@ -84,7 +84,7 @@ def unpack_app(zip_path: Path, into: Path) -> Path:
     """Extract a zipped GameDevWorkstation.app (made with `ditto -c -k --keepParent`)."""
     into.mkdir(parents=True, exist_ok=True)
     if shutil.which("ditto"):  # keeps symlinks and the code signature intact
-        r = subprocess.run(["ditto", "-x", "-k", str(zip_path), str(into)], capture_output=True, text=True, timeout=600)
+        r = subprocess.run(["ditto", "-x", "-k", str(zip_path), str(into)], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
         if r.returncode != 0:
             raise ValueError(f"couldn't unzip {zip_path.name}: {r.stderr.strip()[:300]}")
     else:

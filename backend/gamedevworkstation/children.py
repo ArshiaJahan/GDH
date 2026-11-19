@@ -41,7 +41,7 @@ def process_table() -> dict[int, tuple[int, int, str]]:
     """pid → (ppid, pgid, stat) for every process on the machine (`ps`, macOS and Linux)."""
     try:
         p = subprocess.Popen(["ps", "-A", "-o", "pid=,ppid=,pgid=,stat="], stdout=subprocess.PIPE,
-                             stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, text=True)
+                             stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace")
         out, _ = p.communicate(timeout=5)
     except (OSError, subprocess.SubprocessError):
         return {}
@@ -86,9 +86,9 @@ def _darwin_start(pid: int) -> float | None:
 
 def _linux_start(pid: int) -> float | None:
     try:
-        stat = open(f"/proc/{pid}/stat").read()
+        stat = open(f"/proc/{pid}/stat", encoding="utf-8").read()
         ticks = int(stat[stat.rindex(")") + 2:].split()[19])  # field 22, starttime
-        btime = next(int(ln.split()[1]) for ln in open("/proc/stat") if ln.startswith("btime "))
+        btime = next(int(ln.split()[1]) for ln in open("/proc/stat", encoding="utf-8") if ln.startswith("btime "))
         return btime + ticks / os.sysconf("SC_CLK_TCK")
     except (OSError, ValueError, IndexError, StopIteration):
         return None
@@ -96,7 +96,7 @@ def _linux_start(pid: int) -> float | None:
 
 def _ps_start(pid: int) -> float | None:
     try:
-        out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=5,
+        out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
                              stdin=subprocess.DEVNULL, env={**os.environ, "LC_ALL": "C"}).stdout.strip()
         return time.mktime(time.strptime(out, "%a %b %d %H:%M:%S %Y")) if out else None
     except (OSError, subprocess.SubprocessError, ValueError):

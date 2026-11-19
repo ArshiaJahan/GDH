@@ -415,7 +415,7 @@ class SkillAssistant:
         d.mkdir(exist_ok=True)
         doc = {"card": run.card(), "history": [m.model_dump() for m in run.history]}
         doc = _redact(doc, run.secrets, run.redact_calls)  # refused secrets never reach the disk
-        (d / f"{run.id}.json").write_text(json.dumps(doc, default=str))
+        (d / f"{run.id}.json").write_text(json.dumps(doc, default=str), encoding="utf-8")
 
     def get(self, run_id: str) -> dict | None:
         if run := self.runs.get(run_id):
@@ -423,7 +423,7 @@ class SkillAssistant:
         if not re.fullmatch(r"asst_[A-Za-z0-9_-]+", run_id):
             return None
         f = data_dir() / "assistant" / f"{run_id}.json"
-        return json.loads(f.read_text())["card"] if f.exists() else None
+        return json.loads(f.read_text(encoding="utf-8"))["card"] if f.exists() else None
 
     async def cancel(self, run_id: str) -> bool:
         run = self.runs.get(run_id)
@@ -636,7 +636,7 @@ class SkillAssistant:
             root = (user_skills_dir() / name).resolve()
             skill_md = root / "SKILL.md"
             existed = root.exists()
-            before: dict[Path, str | None] = {skill_md: skill_md.read_text() if skill_md.is_file() else None}
+            before: dict[Path, str | None] = {skill_md: skill_md.read_text(encoding="utf-8") if skill_md.is_file() else None}
             try:
                 s = save_skill(name, final)
             except ValueError as e:
@@ -653,9 +653,9 @@ class SkillAssistant:
                     skipped.append(f"{rel} (same file as SKILL.md)")
                     continue
                 try:
-                    before.setdefault(dest, dest.read_text(errors="replace") if dest.is_file() else None)
+                    before.setdefault(dest, dest.read_text(errors="replace", encoding="utf-8") if dest.is_file() else None)
                     dest.parent.mkdir(parents=True, exist_ok=True)
-                    dest.write_text(text)
+                    dest.write_text(text, encoding="utf-8")
                 except OSError as e:
                     extra.pop(rel)
                     skipped.append(f"{rel} ({e})")
@@ -663,9 +663,9 @@ class SkillAssistant:
                 if os.path.samefile(dest, skill_md):  # an alias nobody foresaw: put SKILL.md back
                     extra.pop(rel)
                     skipped.append(f"{rel} (same file as SKILL.md)")
-                    skill_md.write_text(final)
+                    skill_md.write_text(final, encoding="utf-8")
             # The file on disk is what agents load: it must still parse to the folder's name.
-            saved = parse_skill(skill_md.read_text())[0].get("name") if skill_md.is_file() else None
+            saved = parse_skill(skill_md.read_text(encoding="utf-8"))[0].get("name") if skill_md.is_file() else None
             if saved != name:
                 _rollback(root, existed, before)
                 return ToolOutput(f"Couldn't install from {src}: the saved SKILL.md's name ({saved!r}) doesn't match "
@@ -798,7 +798,7 @@ def _rollback(root: Path, existed: bool, before: dict[Path, str | None]) -> None
             if old is None:
                 p.unlink(missing_ok=True)
             else:
-                p.write_text(old)
+                p.write_text(old, encoding="utf-8")
         except OSError:
             pass
 

@@ -227,7 +227,7 @@ class Recorder:
 def make_project(base: Path) -> Path:
     unity = base / "unity"
     (unity / "ProjectSettings").mkdir(parents=True)
-    (unity / "ProjectSettings" / "ProjectVersion.txt").write_text("m_EditorVersion: 6000.0.23f1\n")
+    (unity / "ProjectSettings" / "ProjectVersion.txt").write_text("m_EditorVersion: 6000.0.23f1\n", encoding="utf-8")
     return unity
 
 
@@ -428,7 +428,7 @@ def markdown(summary: dict, mode: str) -> str:
 
 
 def load_corpus(path: Path = CORPUS) -> dict:
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def run_fake(corpus: dict | None = None) -> dict:
@@ -494,7 +494,7 @@ def main(argv: list[str] | None = None) -> int:
         report = run_fake(corpus)
     if a.out:
         a.out.parent.mkdir(parents=True, exist_ok=True)
-        a.out.write_text(json.dumps(report, indent=2))
+        a.out.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(markdown(report["summary"], report["mode"]))
     return 0
 

@@ -203,10 +203,10 @@ def cli(argv: list[str]) -> int:
         # --create-if-none, or one that reports no comment to edit, gets a plain new comment.
         try:
             r = subprocess.run(base + ["--edit-last", "--create-if-none"] + tail, input=body,
-                               capture_output=True, text=True, timeout=60)
+                               capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
             if r.returncode != 0 and re.search(r"unknown flag|no comments? found|no comment to edit",
                                                r.stderr or "", re.I):
-                r = subprocess.run(base + tail, input=body, capture_output=True, text=True, timeout=60)
+                r = subprocess.run(base + tail, input=body, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
         except (OSError, subprocess.SubprocessError) as e:
             print(f"gdw triage: gh failed: {e}", file=sys.stderr)
             return 2

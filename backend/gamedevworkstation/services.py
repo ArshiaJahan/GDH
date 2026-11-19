@@ -33,7 +33,7 @@ def login_shell_path() -> str | None:
         return None  # Windows apps get the user's PATH from the environment
     shell = default_shell()
     try:
-        out = subprocess.run([shell, "-lic", 'echo "__PATH__=$PATH"'], capture_output=True, text=True,
+        out = subprocess.run([shell, "-lic", 'echo "__PATH__=$PATH"'], capture_output=True, text=True, encoding="utf-8", errors="replace",
                              timeout=10, stdin=subprocess.DEVNULL)
         for line in out.stdout.splitlines():
             if line.startswith("__PATH__="):

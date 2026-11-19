@@ -320,7 +320,7 @@ def _candidates(root: Path, prompt: str, truncated: list[bool]) -> list[Fact]:
 def _git(root: Path) -> list[Fact]:
     def run(*args: str) -> str | None:
         try:
-            r = subprocess.run(["git", *GIT_SAFE, *args], cwd=str(root), capture_output=True, text=True, timeout=GIT_TIMEOUT,
+            r = subprocess.run(["git", *GIT_SAFE, *args], cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=GIT_TIMEOUT,
                                stdin=subprocess.DEVNULL, env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
         except (OSError, subprocess.SubprocessError):
             return None

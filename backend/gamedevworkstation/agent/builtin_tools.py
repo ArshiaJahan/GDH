@@ -189,7 +189,7 @@ def register_builtin(reg: ToolRegistry) -> None:
         await ctx.approve("edit", str(p), {"action": "write", "path": str(p), "bytes": len(a["content"])})
         ctx.app.changes.snapshot(ctx.session_id, p)
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(a["content"])
+        p.write_text(a["content"], encoding="utf-8")
         ctx.app.changes.notify(ctx.session_id, p, ctx.provider, ctx.model)
         return ToolOutput(f"Wrote {len(a['content'])} chars to {a['path']}")
 
@@ -198,7 +198,7 @@ def register_builtin(reg: ToolRegistry) -> None:
                   "replace_all": {"type": "boolean"}}, ["path", "old", "new"]))
     async def edit_file(ctx: ToolContext, a: dict) -> ToolOutput:
         p = ctx.resolve_path(a["path"], write=True)
-        text = p.read_text()
+        text = p.read_text(encoding="utf-8")
         n = text.count(a["old"])
         if n == 0:
             return ToolOutput("old string not found", is_error=True)
@@ -207,7 +207,7 @@ def register_builtin(reg: ToolRegistry) -> None:
         await ctx.approve("edit", str(p), {"action": "edit", "path": str(p), "old": a["old"][:500],
                                            "new": a["new"][:500]})
         ctx.app.changes.snapshot(ctx.session_id, p)
-        p.write_text(text.replace(a["old"], a["new"]) if a.get("replace_all") else text.replace(a["old"], a["new"], 1))
+        p.write_text(text.replace(a["old"], a["new"]) if a.get("replace_all") else text.replace(a["old"], a["new"], 1), encoding="utf-8")
         ctx.app.changes.notify(ctx.session_id, p, ctx.provider, ctx.model)
         return ToolOutput(f"Edited {a['path']} ({n if a.get('replace_all') else 1} replacement)")
 

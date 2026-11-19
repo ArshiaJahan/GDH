@@ -388,7 +388,7 @@ def _local_cpu_model() -> str | None:
     try:
         if platform.system() == "Darwin":
             out = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"], capture_output=True,
-                                 text=True, timeout=2)
+                                 text=True, encoding="utf-8", errors="replace", timeout=2)
             model = out.stdout.strip()
             return model or None
     except (OSError, subprocess.SubprocessError):
@@ -402,7 +402,7 @@ def _sha256_bytes(data: bytes) -> str:
 
 def _project_unity_version(root: Path) -> str | None:
     try:
-        text = (root / "ProjectSettings" / "ProjectVersion.txt").read_text(errors="replace")
+        text = (root / "ProjectSettings" / "ProjectVersion.txt").read_text(errors="replace", encoding="utf-8")
     except OSError:
         return None
     m = re.search(r"^m_EditorVersion:\s*(\S+)", text, re.M)
@@ -411,7 +411,7 @@ def _project_unity_version(root: Path) -> str | None:
 
 def _manifest_dependencies(root: Path) -> dict[str, str] | None:
     try:
-        data = json.loads((root / "Packages" / "manifest.json").read_text(errors="replace"))
+        data = json.loads((root / "Packages" / "manifest.json").read_text(errors="replace", encoding="utf-8"))
     except (OSError, ValueError):
         return None
     deps = data.get("dependencies") if isinstance(data, dict) else None
@@ -420,7 +420,7 @@ def _manifest_dependencies(root: Path) -> dict[str, str] | None:
 
 def _project_identifier(root: Path) -> str | None:
     try:
-        text = (root / "ProjectSettings" / "ProjectSettings.asset").read_text(errors="replace")
+        text = (root / "ProjectSettings" / "ProjectSettings.asset").read_text(errors="replace", encoding="utf-8")
     except OSError:
         return None
     m = re.search(r"^\s*applicationIdentifier:\s*\n\s+[A-Za-z]+:\s*(\S+)", text, re.M)
@@ -433,7 +433,7 @@ def _scene_guid(root: Path, scene_path: str | None) -> str | None:
     if not scene_path:
         return None
     try:
-        text = (root / f"{scene_path}.meta").read_text(errors="replace")
+        text = (root / f"{scene_path}.meta").read_text(errors="replace", encoding="utf-8")
     except OSError:
         return None
     m = re.search(r"^guid:\s*([0-9a-fA-F]{32})\s*$", text, re.M)
@@ -587,7 +587,7 @@ def _utc(epoch: float | None) -> str:
 def _read_existing_report(path: Path) -> dict | None:
     """A report someone else (the Unity package) already wrote is never replaced."""
     try:
-        data = json.loads(path.read_text(errors="replace"))
+        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
     except (OSError, ValueError):
         return None
     return data if isinstance(data, dict) and data.get("schema") == "gdw.replay.report/1" else None
@@ -909,7 +909,7 @@ async def _op_status(app: "AppState", session: dict, root: Path, run_id: str, br
     report_path = out_dir / "report.json"
     if report_path.is_file():
         try:
-            report = json.loads(report_path.read_text(errors="replace"))
+            report = json.loads(report_path.read_text(errors="replace", encoding="utf-8"))
             parts.append(f"report: {report.get('status', 'unknown')}")
             if report.get("environment") == "differs":
                 parts.append("environment: differs (" + ", ".join(report.get("environment_diff") or []) + ")")
@@ -1160,7 +1160,7 @@ def register(app_: "FastAPI", api: "APIRouter", S: "AppState") -> None:
         report_path = out_dir / "report.json"
         if report_path.is_file():
             try:
-                loaded = json.loads(report_path.read_text(errors="replace"))
+                loaded = json.loads(report_path.read_text(errors="replace", encoding="utf-8"))
                 report = loaded if isinstance(loaded, dict) else {}
             except (OSError, ValueError):
                 report = {}

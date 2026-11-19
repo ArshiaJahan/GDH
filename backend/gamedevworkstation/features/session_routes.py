@@ -117,7 +117,7 @@ def account_full_name() -> str:
     Only the local account: never the Claude login or any email address."""
     if sys.platform == "darwin":
         try:
-            r = subprocess.run(["/usr/bin/id", "-F"], capture_output=True, text=True, timeout=3)
+            r = subprocess.run(["/usr/bin/id", "-F"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=3)
             if r.returncode == 0 and r.stdout.strip():
                 return r.stdout.strip()
         except (OSError, subprocess.SubprocessError):

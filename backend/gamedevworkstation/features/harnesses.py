@@ -69,7 +69,7 @@ def _project_instructions(cwd: Path) -> str | None:
         f = cwd / rel
         try:
             if f.is_file() and root in f.resolve().parents:  # not a symlink out of the folder
-                parts.append(f"Contents of {f} (project instructions):\n\n{f.read_text(errors='replace')}")
+                parts.append(f"Contents of {f} (project instructions):\n\n{f.read_text(errors='replace', encoding="utf-8")}")
         except OSError:
             continue
     return "\n\n".join(parts)[:PROJECT_INSTRUCTIONS_MAX_CHARS] or None

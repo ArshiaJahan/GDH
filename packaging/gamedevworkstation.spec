@@ -36,7 +36,8 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    [],
+    # Python UTF-8 mode: on Windows, open()/subprocess text default to UTF-8 instead of the ANSI code page.
+    [("X utf8", None, "OPTION")],
     exclude_binaries=True,
     name="gamedevworkstation-backend",
     console=True,

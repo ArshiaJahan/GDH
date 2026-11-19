@@ -394,7 +394,7 @@ class ElevenLabsService:
             d.mkdir(parents=True, exist_ok=True)
             tpath = d / f"{time.strftime('%Y%m%d-%H%M%S')}-transcript-{new_id()[:6]}.json"
             tpath.write_text(json.dumps({"source": str(audio), "text": text, "labelled": labelled,
-                                         "language_code": r.get("language_code"), "words": words}, indent=1))
+                                         "language_code": r.get("language_code"), "words": words}, indent=1), encoding="utf-8")
             secs = r.get("audio_duration_secs") or (words[-1]["end"] if words else 0) or _audio_seconds(audio) or 0
             credits, estimated = stt_credits(headers, secs)
             iid = self.app.items.add(kind="file", subtype="transcript", source="tool" if source == "agent" else source,
@@ -645,4 +645,4 @@ def register(app_: FastAPI, api: APIRouter, S: "AppState") -> None:
         it = S.items.get(item_id)
         if not it:
             raise HTTPException(404)
-        return json.loads(Path(it["path"]).read_text())
+        return json.loads(Path(it["path"]).read_text(encoding="utf-8"))

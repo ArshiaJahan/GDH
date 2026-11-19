@@ -97,7 +97,7 @@ def build_scenes(root: Path) -> list[dict]:
     """[{path, enabled}] from ProjectSettings/EditorBuildSettings.asset, in build order."""
     f = root / "ProjectSettings" / "EditorBuildSettings.asset"
     try:
-        text = f.read_text(errors="replace")[:2_000_000]
+        text = f.read_text(errors="replace", encoding="utf-8")[:2_000_000]
     except OSError:
         return []
     out: list[dict] = []
@@ -194,7 +194,7 @@ def _guid_paths(root: Path, guids: set[str]) -> dict[str, str]:
             if n > MAX_META_SCAN:
                 return found
             try:
-                with open(os.path.join(dirpath, f), "r", errors="replace") as fh:
+                with open(os.path.join(dirpath, f), "r", encoding="utf-8", errors="replace") as fh:
                     head = fh.read(400)
             except OSError:
                 continue
@@ -214,7 +214,7 @@ def read_scene(root: Path | str, scene: str, *, query: str | None = None, limit:
     size = p.stat().st_size
     if size > MAX_SCENE_BYTES:
         raise ValueError(f"{scene} is {size // 1_000_000} MB; too big to read here")
-    text = p.read_text(errors="replace")
+    text = p.read_text(errors="replace", encoding="utf-8")
     if not text.startswith("%YAML"):
         raise ValueError(f"{scene} isn't a text scene (Asset Serialization must be Force Text)")
     gos: dict[str, dict] = {}

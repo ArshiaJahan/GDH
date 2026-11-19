@@ -174,7 +174,7 @@ def install_problem(project: Path, st: dict) -> str | None:
 
 def _install_marker(root: Path) -> dict:
     try:
-        data = json.loads((root / MARKER).read_text())
+        data = json.loads((root / MARKER).read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
         return {}
@@ -288,7 +288,7 @@ def uninstall_harness(project: Path | str) -> dict:
 
 def _git(root: Path, *args: str) -> str | None:
     try:
-        r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=15,
+        r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
                            stdin=subprocess.DEVNULL)
     except (OSError, subprocess.TimeoutExpired):
         return None

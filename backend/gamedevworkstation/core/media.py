@@ -85,7 +85,7 @@ def _longest_side(sips: str, p: Path) -> int | None:
         return max(dims)
     try:
         out = subprocess.run([sips, "-g", "pixelWidth", "-g", "pixelHeight", str(p)], capture_output=True,
-                             text=True, timeout=30).stdout
+                             text=True, encoding="utf-8", errors="replace", timeout=30).stdout
         sides = [int(ln.split(":")[1]) for ln in out.splitlines() if ln.strip().startswith("pixel")]
         return max(sides) if sides else None
     except (OSError, subprocess.SubprocessError, ValueError, IndexError):

@@ -54,7 +54,7 @@ def cmd_publish(a: argparse.Namespace, d: Path) -> int:
         shutil.rmtree(partial)
     partial.mkdir()
     subprocess.run(["ditto", str(app), str(partial / APP_NAME)], check=True)
-    notes = Path(a.notes_file).read_text().strip() if a.notes_file else ""
+    notes = Path(a.notes_file).read_text(encoding="utf-8").strip() if a.notes_file else ""
     rel = {"version": v, "built_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(),
            "git_commit": a.commit or None, "notes": notes}
     write_json_atomic(partial / "release.json", rel)

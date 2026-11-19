@@ -51,7 +51,7 @@ def _finished_card(S: "AppState", sub_id: str) -> dict | None:
     if not f.is_file():
         return None
     try:
-        card = json.loads(f.read_text())["card"]
+        card = json.loads(f.read_text(encoding="utf-8"))["card"]
     except (ValueError, KeyError):
         return None
     row = S.db.one("SELECT session_id FROM jobs WHERE kind IN ('subagent','codex_cli') "

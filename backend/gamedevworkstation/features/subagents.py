@@ -154,7 +154,7 @@ class SubagentManager:
         if sub := self.subs.get(sub_id):
             return sub
         try:
-            d = json.loads(self._transcript(sub_id).read_text())
+            d = json.loads(self._transcript(sub_id).read_text(encoding="utf-8"))
             c = d["card"]
             if not d.get("session_id"):
                 return None
@@ -180,7 +180,7 @@ class SubagentManager:
         """Bring a finished subagent's history back from its transcript (before resuming it)."""
         if not sub.history_on_disk:
             return
-        d = json.loads(self._transcript(sub.id).read_text())
+        d = json.loads(self._transcript(sub.id).read_text(encoding="utf-8"))
         sub.history = [Message.model_validate(m) for m in d["history"]]
         sub.history_on_disk = False
 
@@ -480,7 +480,7 @@ class SubagentManager:
         (d / f"{sub.id}.json").write_text(json.dumps({
             "card": sub.card(), "result": sub.result, "session_id": sub.session_id, "tools": sub.tools,
             "instructions": sub.instructions, "max_turns": sub.max_turns,
-            "history": [m.model_dump() for m in sub.history]}, default=str))
+            "history": [m.model_dump() for m in sub.history]}, default=str), encoding="utf-8")
 
     def compact_result(self, sub: Subagent) -> str:
         wall = (sub.ended or time.time()) - sub.started
@@ -722,7 +722,7 @@ def register(app_: FastAPI, api: APIRouter, S: "AppState") -> None:
                 sid_ = json.loads(job["meta"]).get("subagent")
                 f = d / f"{sid_}.json"
                 if sid_ and sid_ not in cards and f.exists():
-                    cards[sid_] = json.loads(f.read_text())["card"]
+                    cards[sid_] = json.loads(f.read_text(encoding="utf-8"))["card"]
         return list(cards.values())
 
     @api.get("/subagents/{sub_id}")
@@ -732,7 +732,7 @@ def register(app_: FastAPI, api: APIRouter, S: "AppState") -> None:
             return {**s.card(), "result": s.result}
         f = data_dir() / "subagents" / f"{sub_id}.json"
         if f.exists():
-            d = json.loads(f.read_text())
+            d = json.loads(f.read_text(encoding="utf-8"))
             return {**d["card"], "result": d["result"]}
         raise HTTPException(404)
 

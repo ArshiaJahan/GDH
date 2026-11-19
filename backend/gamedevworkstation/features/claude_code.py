@@ -1326,7 +1326,7 @@ class ClaudeCode:
             d.mkdir(parents=True, exist_ok=True)
             os.chmod(d, 0o700)
             fd = os.open(mcp_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(fd, "w") as f:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 os.fchmod(f.fileno(), 0o600)
                 json.dump(self.mcp.config_json(token), f)
             wt = app.worktrees_root(sid)

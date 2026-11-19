@@ -446,7 +446,7 @@ def _set_aside(path: Path, err: Exception) -> None:
 
 
 def _defaults() -> dict:
-    return tomllib.loads(DEFAULT_CONFIG_PATH.read_text())
+    return tomllib.loads(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
 
 
 def _read_user(path: Path, defaults: dict) -> tuple[dict, bool]:
@@ -546,7 +546,7 @@ def _dev_keys() -> dict[str, str]:
     <data_dir>/dev-keys.json (mode 0600, plain text) so dev runs and tests never touch the real
     Keychain yet a saved key still sticks. Never used when the Keychain is enabled."""
     try:
-        d = json.loads(_dev_keys_path().read_text())
+        d = json.loads(_dev_keys_path().read_text(encoding="utf-8"))
         return {str(k): str(v) for k, v in d.items()} if isinstance(d, dict) else {}
     except (OSError, ValueError):
         return {}
@@ -557,7 +557,7 @@ def _write_dev_keys(keys: dict[str, str]) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(p.name + ".tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(keys, f)
     os.chmod(tmp, 0o600)
     os.replace(tmp, p)

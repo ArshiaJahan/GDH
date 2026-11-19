@@ -142,7 +142,7 @@ def list_skills() -> list[dict]:
         if not root.exists():
             continue
         for f in sorted(root.glob("*/SKILL.md")):
-            meta, _ = parse_skill(f.read_text())
+            meta, _ = parse_skill(f.read_text(encoding="utf-8"))
             name = meta.get("name") or f.parent.name
             if src == "user" and name != f.parent.name:
                 # A user skill is known by its folder: a file whose frontmatter claims another name
@@ -161,7 +161,7 @@ def list_skills() -> list[dict]:
 def get_skill(name: str) -> dict | None:
     for s in list_skills():
         if s["name"] == name:
-            return {**s, "content": Path(s["path"]).read_text()}
+            return {**s, "content": Path(s["path"]).read_text(encoding="utf-8", errors="replace")}
     return None
 
 
@@ -194,7 +194,7 @@ def save_skill(name: str, content: str) -> dict:
     _copy_builtin(name)  # a first override of a built-in keeps the files its SKILL.md refers to
     d = user_skills_dir() / name
     d.mkdir(parents=True, exist_ok=True)
-    (d / "SKILL.md").write_text(content)
+    (d / "SKILL.md").write_text(content, encoding="utf-8")
     return get_skill(name)  # type: ignore[return-value]
 
 
@@ -260,7 +260,7 @@ def write_skill_file(name: str, path: str, content: str) -> dict:
     cur = skill_file(name, path)
     if cur["binary"] or cur["truncated"]:
         raise ValueError(f"{path} isn't a text file that can be edited here")
-    p.write_text(content)
+    p.write_text(content, encoding="utf-8")
     return skill_file(name, path)
 
 
@@ -277,7 +277,7 @@ def read_skill_file(name: str, path: str = "") -> str:
     p = (root / path).resolve()
     if root not in p.parents or not p.is_file():
         raise FileNotFoundError(f"{path} is not a file in the {name} skill")
-    return p.read_text(errors="replace")[:MAX_SKILL_FILE]
+    return p.read_text(errors="replace", encoding="utf-8")[:MAX_SKILL_FILE]
 
 
 def skill_invocation(name: str) -> str:

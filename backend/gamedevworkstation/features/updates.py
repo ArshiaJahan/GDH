@@ -89,7 +89,7 @@ def updates_dir(cfg: Any = None) -> Path:
 
 def read_json(p: Path) -> dict | None:
     try:
-        data = json.loads(p.read_text())
+        data = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     return data if isinstance(data, dict) else None
@@ -100,7 +100,7 @@ def write_json_atomic(p: Path, data: dict) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=f".{p.name}.", suffix=".tmp")
     try:
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
             f.write("\n")
             f.flush()
@@ -352,7 +352,7 @@ def verify_bundle(app: Path, expect_version: str | None) -> dict:
     if expect_version and info.get("version") != expect_version:
         raise ValueError(f"{app} says it's version {info.get('version')}, expected {expect_version}.")
     if shutil.which("codesign"):
-        r = subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], capture_output=True, text=True,
+        r = subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], capture_output=True, text=True, encoding="utf-8", errors="replace",
                            timeout=180)
         if r.returncode != 0:
             raise ValueError(f"The signature of {app} doesn't verify: {(r.stderr or r.stdout).strip()[:300]}")
@@ -368,7 +368,7 @@ def copy_bundle(src: Path, dst: Path) -> None:
     if dst.exists():
         shutil.rmtree(dst)
     if shutil.which("ditto"):  # keeps symlinks, xattrs and the code signature intact
-        r = subprocess.run(["ditto", str(src), str(dst)], capture_output=True, text=True, timeout=600)
+        r = subprocess.run(["ditto", str(src), str(dst)], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
         if r.returncode != 0:
             shutil.rmtree(dst, ignore_errors=True)
             raise OSError(f"ditto failed: {r.stderr.strip()[:300]}")
@@ -553,7 +553,7 @@ def launch_windows_helper(script: str, log_path: Path) -> int:
     path.write_text(script, encoding="utf-8-sig")
     log_path.parent.mkdir(parents=True, exist_ok=True)
     flags = 0x00000008 | 0x00000200 | 0x08000000  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
-    with log_path.open("a") as out:
+    with log_path.open("a", encoding="utf-8") as out:
         p = subprocess.Popen(["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
                               "-File", str(path)], stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
                              creationflags=flags, close_fds=True, env=_clean_env())
@@ -572,10 +572,10 @@ def launch_helper(script: str, log_path: Path) -> int:
     d = data_dir() / "updates-tmp"
     d.mkdir(parents=True, exist_ok=True)
     path = d / f"install-{int(time.time())}.sh"
-    path.write_text(script)
+    path.write_text(script, encoding="utf-8")
     path.chmod(0o700)
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("a") as out:
+    with log_path.open("a", encoding="utf-8") as out:
         p = subprocess.Popen(["/bin/bash", str(path)], stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
                              start_new_session=True, close_fds=True, env=_clean_env(), cwd="/")
     return p.pid

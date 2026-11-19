@@ -35,13 +35,13 @@ def call(rt: dict, path: str, body: dict | None = None, method: str | None = Non
 
 
 def backend_pids() -> list[str]:
-    out = subprocess.run(["pgrep", "-f", BACKEND_MARK], capture_output=True, text=True).stdout
+    out = subprocess.run(["pgrep", "-f", BACKEND_MARK], capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
     return [p for p in out.split() if p]
 
 
 def process_rows() -> dict[int, tuple[int, int, str, str]]:
     """pid → (ppid, pgid, stat, command) for every process."""
-    out = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,pgid=,stat=,command="], capture_output=True, text=True).stdout
+    out = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,pgid=,stat=,command="], capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
     rows = {}
     for line in out.splitlines():
         parts = line.split(None, 4)
@@ -91,7 +91,7 @@ def main() -> int:
     while time.time() - t0 < 90:
         if RUNTIME.exists():
             try:
-                rt = json.loads(RUNTIME.read_text())
+                rt = json.loads(RUNTIME.read_text(encoding="utf-8"))
                 break
             except json.JSONDecodeError:
                 pass

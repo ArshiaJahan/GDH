@@ -151,7 +151,7 @@ def replay_package_status(project: str | Path) -> dict:
 
 def _read_version(pkg_json: Path) -> str | None:
     try:
-        data = json.loads(pkg_json.read_text(errors="replace"))
+        data = json.loads(pkg_json.read_text(encoding="utf-8", errors="replace"))
         return str(data.get("version", "")) or None
     except (OSError, ValueError):
         return None
@@ -159,7 +159,7 @@ def _read_version(pkg_json: Path) -> str | None:
 
 def _manifest_dependencies(root: Path) -> dict[str, str]:
     try:
-        manifest = json.loads((root / "Packages" / "manifest.json").read_text(errors="replace"))
+        manifest = json.loads((root / "Packages" / "manifest.json").read_text(errors="replace", encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     deps = manifest.get("dependencies") if isinstance(manifest, dict) else None
@@ -171,7 +171,7 @@ def _ensure_manifest(root: Path, *, write: bool) -> dict:
     preserving every existing pin, and make com.gdw.replay testable. Never suffixes versions."""
     manifest_path = root / "Packages" / "manifest.json"
     try:
-        manifest = json.loads(manifest_path.read_text(errors="replace"))
+        manifest = json.loads(manifest_path.read_text(errors="replace", encoding="utf-8"))
     except (OSError, ValueError) as e:
         return {"ok": False, "message": f"cannot read manifest.json: {e}", "added": []}
     if not isinstance(manifest, dict):

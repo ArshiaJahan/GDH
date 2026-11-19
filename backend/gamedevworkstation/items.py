@@ -166,7 +166,7 @@ def extract_text(path: str | Path, mime: str | None = None, limit: int = 200_000
             r = PdfReader(str(p))
             return "\n".join((pg.extract_text() or "") for pg in r.pages[:200])[:limit]
         if p.suffix.lower() in TEXT_EXT or (mime or "").startswith("text/"):
-            t = p.read_text(errors="replace")[:limit]
+            t = p.read_text(encoding="utf-8", errors="replace")[:limit]
             if p.suffix.lower() in (".html", ".htm"):
                 m = re.search(r"<title>(.*?)</title>", t, re.S | re.I)
                 body = re.sub(r"<[^>]+>", " ", t)

@@ -1913,7 +1913,7 @@ def _git_stat(folder: Path) -> str:
     if not (folder / ".git").exists():
         return ""
     try:
-        r = subprocess.run(["git", "diff", "--stat", "--", "Assets"], cwd=folder, capture_output=True, text=True,
+        r = subprocess.run(["git", "diff", "--stat", "--", "Assets"], cwd=folder, capture_output=True, text=True, encoding="utf-8", errors="replace",
                            timeout=10)
     except (OSError, subprocess.SubprocessError):
         return ""

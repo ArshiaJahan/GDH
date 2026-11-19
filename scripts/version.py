@@ -147,23 +147,23 @@ def current(root: Path) -> str:
     f = root / "VERSION"
     if not f.exists():
         raise SystemExit(f"version.py: {f} is missing")
-    return f.read_text().strip()
+    return f.read_text(encoding="utf-8").strip()
 
 
 def set_version(root: Path, v: str) -> list[str]:
     parse(v)
     changed = []
-    (root / "VERSION").write_text(v + "\n")
+    (root / "VERSION").write_text(v + "\n", encoding="utf-8")
     for rel, required, upd, _ in TARGETS:
         p = root / rel
         if not p.exists():
             if required:
                 raise SystemExit(f"version.py: {rel} is missing")
             continue
-        old = p.read_text()
+        old = p.read_text(encoding="utf-8")
         new = upd(old, v)
         if new != old:
-            p.write_text(new)
+            p.write_text(new, encoding="utf-8")
             changed.append(rel)
     return changed
 
@@ -173,14 +173,14 @@ def check(root: Path) -> list[str]:
     bad = []
     for rel, _required, _, read in TARGETS:
         p = root / rel
-        if p.exists() and (found := read(p.read_text())) != v:
+        if p.exists() and (found := read(p.read_text(encoding="utf-8"))) != v:
             bad.append(f"{rel}: {found}")
     return bad
 
 
 def _git(root: Path, *args: str) -> str:
     try:
-        return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, timeout=5).stdout.strip()
+        return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, timeout=5, encoding="utf-8", errors="replace").stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return ""
 
@@ -198,7 +198,7 @@ def build_info(root: Path) -> dict:
         info["channel"] = channel
         info["repo"] = os.environ.get("GDW_UPDATE_REPO", "").strip() or "ArshiaJahan/GDH"
     out = root / "backend" / "gamedevworkstation" / "_build_info.json"
-    out.write_text(json.dumps(info, indent=2) + "\n")
+    out.write_text(json.dumps(info, indent=2) + "\n", encoding="utf-8")
     return info
 
 
