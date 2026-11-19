@@ -106,3 +106,25 @@ def test_outcome_text_fields_keep_their_spaces():
     o = ImproverOutcome(status="bypassed", execution_text="  keep me  ", context_text=" ctx ")
     assert o.execution_text == "  keep me  " and o.context_text == " ctx "
     assert ImproverOutcome(status="unavailable", failure_item_id="it_1").failure_item_id == "it_1"
+
+
+def test_ask_may_omit_the_card_but_proceed_may_not():
+    r = parse_eval(json.dumps({"decision": "ASK", "questions": [q()]}))
+    assert r.task_card is None
+    with pytest.raises(PiFormatError):
+        parse_eval(json.dumps({"decision": "PROCEED", "questions": []}))
+
+
+def test_object_cited_facts_become_strings_and_are_capped():
+    data = result("PROCEED", [])
+    data["cited_facts"] = [{"source": "project_facts", "fact": "unity_version: 6000.0.23f1"}, "Assets/A.cs", 7, None,
+                           {"nested": {"x": 1}}] + [f"f{i}" for i in range(30)]
+    facts = parse_eval(json.dumps(data)).cited_facts
+    assert facts[:3] == ["project_facts: unity_version: 6000.0.23f1", "Assets/A.cs", "7"] and len(facts) == 20
+
+
+def test_a_question_with_an_invented_topic_is_dropped_but_all_invented_fails():
+    data = result("ASK", [q("q1"), q("q2", topic="scope")])
+    assert [x.id for x in parse_eval(json.dumps(data)).questions] == ["q1"]
+    with pytest.raises(PiFormatError):
+        parse_eval(json.dumps(result("ASK", [q("q1", topic="scope")])))

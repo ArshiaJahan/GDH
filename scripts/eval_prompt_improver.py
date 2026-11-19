@@ -35,6 +35,7 @@ from gamedevworkstation.core.types import ChatRequest, Message, TextBlock  # noq
 from gamedevworkstation.features import pi_research  # noqa: E402
 from gamedevworkstation.features.pi_contracts import ProjectFacts  # noqa: E402
 from gamedevworkstation.features.pi_research import QUESTION_BANK  # noqa: E402
+from gamedevworkstation.features.pi_contracts import TEMPLATE_VERSION  # noqa: E402
 from gamedevworkstation.providers.fake import FakeProvider, text_response  # noqa: E402
 
 CORPUS = REPO / "tests" / "fixtures" / "prompt_improver" / "prompts.json"
@@ -263,6 +264,8 @@ async def improve_one(app: Any, imp: Any, rec_provider: Recorder, folder: Path, 
     rec = {"id": entry["id"], "label": entry["label"], "calls": 0, "cards": 0, "input_tokens": 0, "output_tokens": 0,
            "context_tokens": 0, "decision": None, "topics": [], "error": None, "raw": []}
     rec_provider.reset()
+    imp._fails.clear()  # each corpus prompt is independent: one failure must not pause the rest
+    imp._until.clear()
     try:
         session = app.store.create(folder=str(folder), mode="ask")
         for h in ctx.get("history", []):
@@ -438,7 +441,7 @@ def run_fake(corpus: dict | None = None) -> dict:
 
     recs = asyncio.run(go())
     bypass = run_bypass(corpus["bypass"])
-    return {"mode": "fake", "template_version": "pi-eval-2", "summary": summarize(recs, bypass, corpus), "prompts": recs,
+    return {"mode": "fake", "template_version": TEMPLATE_VERSION, "summary": summarize(recs, bypass, corpus), "prompts": recs,
             "bypass": bypass}
 
 
@@ -461,7 +464,7 @@ def run_live(corpus: dict, model: str) -> dict:
 
     recs, resolved = asyncio.run(go())
     bypass = run_bypass(corpus["bypass"])
-    return {"mode": "live", "model": resolved, "template_version": "pi-eval-2",
+    return {"mode": "live", "model": resolved, "template_version": TEMPLATE_VERSION,
             "ran_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "summary": summarize(recs, bypass, corpus), "prompts": recs, "bypass": bypass}
 

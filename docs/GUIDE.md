@@ -916,7 +916,7 @@ overwritten. In Plan only mode, or with the task-board tools off, only the draft
 | `model` | `claude.fast` | alias; Claude Code accepts only a model your login lists, no silent fallback |
 | `effort` | `low` | `none`, `low`, `medium` or `high` (above high is refused) |
 | `max_calls` | `2` | 1-2: one evaluation plus at most one synthesis |
-| `max_input_tokens`, `max_output_tokens` | `4096`, `1024` | per call |
+| `max_input_tokens`, `max_output_tokens` | `4096`, `2048` | per call |
 | `timeout_s` | `30` | per call |
 | `budget_usd` | `0.03` | per-prompt cap, 0-1 |
 | `breaker_failures`, `breaker_pause_s` | `2`, `600` | after this many failures in a row (per session, or per model), the improver pauses for this long and shows one notice; a success resets it |
@@ -941,8 +941,20 @@ uv run --frozen python scripts/eval_prompt_improver.py --live --yes --out pi-liv
 It reports the vague ask-rate, clear false-ask rate, bypass accuracy, mean and p95 added input/output
 tokens, calls and cards per prompt. `--fake` uses a scripted FakeProvider with a small cue heuristic
 (missing target, number or acceptance cues), so its results test orchestration and the regression gates in
-`tests/test_pi_eval.py`, not model intelligence. No real-model accuracy numbers have been measured yet;
-none are claimed here. A real run only happens after you approve its cost.
+`tests/test_pi_eval.py`, not model intelligence. A real run only happens after you approve its cost.
+
+One real run has been measured (2026-11-19, `claude.fast` = Claude Haiku 5.5, effort low, template
+`pi-eval-2`, this 48-prompt corpus only; the decision rules were tuned on the same corpus, so treat these
+as optimistic):
+
+| Metric | Measured |
+|---|---|
+| Vague ask-rate | 0.83 (20 of 24; 2 more were parse errors since fixed) |
+| Clear false-ask rate | 0.04 (1 of 24) |
+| Bypass accuracy | 15 of 15 |
+| Calls / cards per prompt, max | 2 / 3 |
+| Added tokens per prompt, mean / p95 | 3,647 / 5,059 (about half of the output is hidden thinking) |
+| Mean clear overhead | 3,159, above the 2,500 fake-model gate |
 
 ## Keyboard shortcuts
 
@@ -1559,8 +1571,8 @@ parameters). They also cover:
 - the prompt improver (`tests/test_pi_eval.py`): the corpus schema (24/24 split, unique ids, topics from
   the question bank), the regression gates (vague ask-rate at least 0.80, clear false-asks at most 0.10, at
   most 2 calls and 3 cards per prompt, mean clear overhead at most 2,500 estimated tokens) and every
-  bypass reason code. These run on a scripted fake model, so they test orchestration only; there are no
-  measured real-model accuracy numbers yet.
+  bypass reason code. These run on a scripted fake model, so they test orchestration only; the one
+  measured real-model run is in "Prompt improver" above.
 - CI failure triage:
   - `tests/test_triage_rules.py`: each rule and log format, precedence, NUnit limits, slow-regex
     inputs, and the Markdown escaping, so a log can't add mentions or links to a PR comment.

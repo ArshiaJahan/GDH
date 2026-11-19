@@ -9,7 +9,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, field_validator, model_validator
 
 SCHEMA_VERSION = 1
-TEMPLATE_VERSION = "pi-eval-1"
+TEMPLATE_VERSION = "pi-eval-2"  # bump on any change to the evaluator system text
 COLLECTOR_VERSION = "pi-facts-1"
 MAX_QUESTIONS = 3
 UNKNOWN = "unknown"
@@ -180,7 +180,7 @@ class EvalResult(_M):
     decision: Decision
     cited_facts: list[str] = Field(default_factory=list, max_length=20)  # Fact sources
     questions: list[Question] = Field(default_factory=list, max_length=MAX_QUESTIONS)
-    task_card: TaskCard
+    task_card: TaskCard | None = None  # required for PROCEED; ASK may omit it (built after the answers)
     routing: Routing = Field(default_factory=Routing)
     assumptions: list[str] = Field(default_factory=list, max_length=8)
 
@@ -190,6 +190,8 @@ class EvalResult(_M):
             raise ValueError("PROCEED must not carry questions")
         if self.decision == "ASK" and not self.questions:
             raise ValueError("ASK needs at least one question")
+        if self.decision == "PROCEED" and self.task_card is None:
+            raise ValueError("PROCEED needs a task card")
         ids = [q.id for q in self.questions]
         if len(set(ids)) != len(ids):
             raise ValueError("duplicate question ids")
@@ -215,6 +217,15 @@ class ImproverOutcome(_M):
 _FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.I)
 
 
+def _fact_text(f: Any) -> str:
+    """A cited fact as one string: strings as is, objects as their values joined with ': '."""
+    if isinstance(f, str):
+        return f.strip()
+    if isinstance(f, dict):
+        return ": ".join(str(v).strip() for v in f.values() if isinstance(v, (str, int, float)) and str(v).strip())
+    return str(f).strip() if isinstance(f, (int, float)) else ""
+
+
 def parse_eval(text: str) -> EvalResult:
     """Parse the evaluator's reply (one JSON object, optional code fence) or raise PiFormatError."""
     if not isinstance(text, str) or not text.strip():
@@ -226,6 +237,13 @@ def parse_eval(text: str) -> EvalResult:
         raise PiFormatError(f"not JSON: {e.msg}") from e
     if not isinstance(data, dict):
         raise PiFormatError("expected a JSON object")
+    facts = data.get("cited_facts")
+    if isinstance(facts, list):  # models sometimes cite {"source": ..., "fact": ...}; keep the text, cap the list
+        data["cited_facts"] = [_fact_text(f) for f in facts if _fact_text(f)][:20]
+    qs = data.get("questions")
+    if isinstance(qs, list) and qs:  # a question under an invented topic is dropped; the valid ones still count
+        kept = [x for x in qs if not isinstance(x, dict) or x.get("topic") in TOPICS]
+        data["questions"] = kept or qs  # all invented: keep them so validation reports the error
     try:
         return EvalResult.model_validate(data)
     except ValidationError as e:

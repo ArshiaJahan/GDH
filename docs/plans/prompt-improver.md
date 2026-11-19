@@ -85,7 +85,7 @@ Recommend L2 for behaviour changes, L3 for gameplay/visual changes and L4 only w
 
 ## Configuration and Settings
 
-`[prompt_improver]` defaults: `enabled=true`, `max_questions=3`, `model="claude.fast"`, `effort="low"`, `builtin_enabled=true`, `claude_code_enabled=true`, `max_calls=2`, `max_input_tokens=4096`, `max_output_tokens=1024`, `timeout_s=30`, `budget_usd=0.03`. Other harnesses are unsupported initially. Resolve model aliases normally; Claude helper accepts only a model supported by that login. No silent API fallback or model upgrade.
+`[prompt_improver]` defaults: `enabled=true`, `max_questions=3`, `model="claude.fast"`, `effort="low"`, `builtin_enabled=true`, `claude_code_enabled=true`, `max_calls=2`, `max_input_tokens=4096`, `max_output_tokens=2048`, `timeout_s=30`, `budget_usd=0.03`. Other harnesses are unsupported initially. Resolve model aliases normally; Claude helper accepts only a model supported by that login. No silent API fallback or model upgrade.
 
 Validate booleans, model, effort at most high, `max_questions` integer 1–3 and positive bounds on load/PATCH. Settings gets an autosaving enabled toggle plus harness switches, model, effort and question limit, default-on explanation and per-turn `*` hint. Changes affect the next unsent turn. Document helper subscription usage and indexed drafts.
 

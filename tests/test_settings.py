@@ -79,7 +79,7 @@ def test_appearance_patch_keeps_provider_clients(env):
 
 
 PI_DEFAULTS = {"enabled": True, "max_questions": 3, "model": "claude.fast", "effort": "low", "builtin_enabled": True,
-               "claude_code_enabled": True, "max_calls": 2, "max_input_tokens": 4096, "max_output_tokens": 1024,
+               "claude_code_enabled": True, "max_calls": 2, "max_input_tokens": 4096, "max_output_tokens": 2048,
                "timeout_s": 30, "budget_usd": 0.03, "breaker_failures": 2, "breaker_pause_s": 600}
 
 

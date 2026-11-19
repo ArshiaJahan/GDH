@@ -739,7 +739,7 @@ HELPER_DENY = ("Bash", "BashOutput", "KillShell", "Edit", "MultiEdit", "Write", 
 HELPER_SYSTEM = ("You are a text-only helper for GameDevWorkstation. You have no tools. Answer with the text asked for "
                  "in the single reply and nothing else.")
 HELPER_DEFAULTS = {"model": "claude.fast", "effort": "low", "timeout_s": 30, "budget_usd": 0.03,
-                   "max_input_tokens": 4096, "max_output_tokens": 1024}
+                   "max_input_tokens": 4096, "max_output_tokens": 2048}
 
 
 def _est_tokens(text: str) -> int:

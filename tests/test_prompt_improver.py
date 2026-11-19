@@ -229,6 +229,35 @@ async def test_all_skipped_is_a_draft_only_with_assumptions(app, folder):
     assert {i["meta"]["pi"] for i in app.items.list(session_id=s["id"], source="prompt_improver")} == {"evaluation", "card"}
 
 
+async def test_ask_without_a_card_builds_it_by_synthesis(app, folder):
+    s = sess(app, folder)
+    m = user_msg(app, s["id"])
+    app.fake.script = [text_response(json.dumps({"decision": "ASK", "questions": [question("q1", "feel")]})),
+                       text_response(json.dumps(card()))]
+    out, _ = await asyncio.gather(app.pi.improve(s, m), answer_cards(app, s["id"], ["o1"]))
+    assert out.status == "asked" and out.calls == 2 and out.task_code is not None
+    assert card()["goal"] in out.context_text
+
+
+async def test_ask_without_a_card_still_synthesizes_when_every_answer_is_skipped(app, folder):
+    s = sess(app, folder)
+    m = user_msg(app, s["id"])
+    app.fake.script = [text_response(json.dumps({"decision": "ASK", "questions": [question("q1", "feel")]})),
+                       text_response(json.dumps(card()))]
+    out, _ = await asyncio.gather(app.pi.improve(s, m), answer_cards(app, s["id"], ["skip"]))
+    assert out.status == "asked" and out.calls == 2 and out.task_code is None  # skipped: no Backlog task
+    assert card()["goal"] in out.context_text and "Skipped" in out.context_text
+
+
+async def test_ask_without_a_card_falls_back_to_the_request_when_synthesis_fails(app, folder):
+    s = sess(app, folder)
+    m = user_msg(app, s["id"])
+    app.fake.script = [text_response(json.dumps({"decision": "ASK", "questions": [question("q1", "feel")]})),
+                       text_response("not json")]
+    out, _ = await asyncio.gather(app.pi.improve(s, m), answer_cards(app, s["id"], ["o1"]))
+    assert out.status == "asked" and m.text()[:40] in out.context_text
+
+
 async def test_declined_critical_question_pauses_and_is_not_stored(app, folder):
     s = sess(app, folder)
     m = user_msg(app, s["id"])

@@ -49,7 +49,7 @@ CRITICAL_TOPICS = ("target", "multiplayer")
 # Config defaults ([prompt_improver]).
 DEFAULTS: dict[str, Any] = {
     "enabled": True, "max_questions": 3, "model": "claude.fast", "effort": "low", "builtin_enabled": True,
-    "claude_code_enabled": True, "max_calls": 2, "max_input_tokens": 4096, "max_output_tokens": 1024,
+    "claude_code_enabled": True, "max_calls": 2, "max_input_tokens": 4096, "max_output_tokens": 2048,
     "timeout_s": 30, "budget_usd": 0.03,
     "breaker_failures": 2, "breaker_pause_s": 600,  # circuit breaker: consecutive failures, then pause seconds
 }
@@ -66,19 +66,33 @@ FORMAT_SPEC = """Reply with exactly one JSON object and nothing else:
 {"decision": "PROCEED" | "ASK", "cited_facts": [fact sources], "assumptions": [str],
  "questions": [] for PROCEED, else 1-3 of {"id": "q1", "topic": "target|platform_input|acceptance|feel|assets|performance|multiplayer|bug_replay",
    "text": str, "options": [2-4 of {"id": "o1", "label": str, "detail": str, "cited_fact": str|null}], "recommended": option id, "rationale": str}],
- "task_card": {"goal": str, "scope": [project-relative paths/systems], "out_of_scope": [str],
+ "task_card" (PROCEED only; omit it for ASK, the card is built after the answers): {"goal": str, "scope": [project-relative paths/systems], "out_of_scope": [str],
    "acceptance_criteria": [{"id": "AC1", "expected": str, "verification": "compile|editmode_test|playmode_test|play_signal|screenshot|replay|manual", "reference": str}],
    "quality_ladder_level": "L1|L2|L3|L4|manual", "quality_rationale": str, "effort": "none|low|medium|high",
    "assumptions": [str], "risks": [str], "blockers": [str]},
  "routing": {"skills": [<=3], "unity_route": "mcp|cli|none|unknown", "harness": "builtin|claude_code|unchanged", "reasons": [str]}}
-Ids match ^[a-z0-9][a-z0-9_-]{0,39}$. Unknown project facts stay unknown; never invent them."""
+Ids match ^[a-z0-9][a-z0-9_-]{0,39}$. Unknown project facts stay unknown; never invent them.
+Be brief: each string at most 25 words, at most 4 items per list, and the whole reply well under 600 words."""
 
 SYNTH_SPEC = """The user answered the clarifying questions. Update the task card with their answers: fold each answer into
 goal, scope, acceptance criteria, risks and assumptions. Never invent facts or numeric targets beyond the answers.
 Reply with exactly one JSON object, the task card itself (same fields as task_card above), and nothing else."""
 
 
-EVAL_SYSTEM = pi_research.EVAL_TEMPLATE + "\n\n" + FORMAT_SPEC
+DECISION_RULES = """How to decide:
+- "Done" must be checkable from the request, the conversation or the facts: a named target plus a value, budget,
+  test or concrete behaviour. Minor unknowns the implementer can look up (a file's current size, the build target,
+  a component's fields) do not justify a question when that holds; PROCEED.
+- ASK when success is subjective ("better", "nice", "off", "memorable", "polished") and nothing gives a measurable
+  target. A note about what the user dislikes is a direction, not a target.
+- ASK when the request names a feature, device class or content wishlist but leaves open which variants, actions,
+  devices or assets must work, and the choice changes the implementation.
+- ASK for an intermittent or unexplained bug with no repro steps, scene, seed or recording, unless the facts
+  already show the cause.
+- If PROCEED would need an assumption about what the user wants (rather than about the codebase) to define done,
+  ASK about it instead of assuming it."""
+
+EVAL_SYSTEM = pi_research.EVAL_TEMPLATE + "\n\n" + DECISION_RULES + "\n\n" + FORMAT_SPEC
 
 
 def _cfg(app: "AppState") -> dict[str, Any]:
@@ -403,7 +417,8 @@ class PromptImprover:
         except PiFormatError as e:
             raise _Stop("malformed", str(e)) from e
         eval_item = self._add_item(run, "evaluation", "Prompt improver: evaluation", reply[:20000])
-        card = ev.task_card.model_copy(deep=True)
+        # ASK replies may omit the card; the synthesis call then builds it from the answers (or their skips)
+        card = ev.task_card.model_copy(deep=True) if ev.task_card else TaskCard(goal=_clean(user_text)[:500] or "(empty request)")
         answers: list[Answer] = []
         assumptions: list[str] = list(ev.assumptions)
         asked = 0
@@ -425,7 +440,7 @@ class PromptImprover:
         answered = [a for a in answers if not a.skipped]
         card.answers = answers[:MAX_QUESTIONS]
         card.assumptions = list(dict.fromkeys([*card.assumptions, *assumptions]))[:8]
-        if answered:  # at most one synthesis call
+        if answered or ev.task_card is None:  # at most one synthesis call
             self._progress(run, "synthesize")
             card = await self._synthesize(run, card, ev, answers, assumptions)
         card.session_id, card.message_id, card.run_id = sid, mid, run.run_id
@@ -539,7 +554,7 @@ class PromptImprover:
             profile = app.config.profile_for(run.session, mcfg.provider)
             provider = app.providers.for_model(model, profile)
             req = ChatRequest(model=model, messages=[Message.user(user)], system=[system], tools=[], effort=effort,
-                              max_tokens=int(cfg.get("max_output_tokens") or 1024), show_thinking=False,
+                              max_tokens=int(cfg.get("max_output_tokens") or 2048), show_thinking=False,
                               metadata={"run_id": run.run_id, "cache_key": FEATURE})
             run.calls += 1
             try:
