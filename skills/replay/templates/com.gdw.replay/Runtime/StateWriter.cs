@@ -31,6 +31,17 @@ namespace Gdw.Replay
 
         public int FieldCount => _entries.Count;
 
+        /// <summary>Field names and tags in canonical (ASCII ordinal) order, without values: the
+        /// provider's schema, hashed into header.providers[].schema_sha256.</summary>
+        internal byte[] SchemaBytes()
+        {
+            var sorted = new List<Entry>(_entries);
+            sorted.Sort((a, b) => string.CompareOrdinal(a.Name, b.Name));
+            var sb = new StringBuilder();
+            foreach (var e in sorted) sb.Append(e.Name).Append(':').Append(e.Tag.ToString("x2")).Append('\n');
+            return Encoding.UTF8.GetBytes(sb.ToString());
+        }
+
         static void ValidateName(string name)
         {
             if (name == null) throw new ArgumentNullException(nameof(name));

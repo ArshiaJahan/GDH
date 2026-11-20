@@ -11,12 +11,26 @@ namespace Gdw.Replay.Editor
     /// Editor commands for the record/replay lifecycle. Start/Status/Cancel persist job identity
     /// across domain reload via EditorPrefs, emit [HARNESS] REPLAY {json} lines per contracts §5,
     /// and read the -gdwReplayRequest CLI argument.
+    /// A record started in Edit Mode enters Play Mode first and begins once Play Mode is running:
+    /// entering Play Mode reloads the domain, which would drop a session started before it.
     /// </summary>
+    [InitializeOnLoad]
     public static class ReplayCommands
     {
         const string JobIdPrefKey = "Gdw.Replay.Editor.JobId";
         const string RunIdPrefKey = "Gdw.Replay.Editor.RunId";
         const string RequestPathPrefKey = "Gdw.Replay.Editor.RequestPath";
+        // A record request waiting for Play Mode. SessionState survives the domain reload.
+        const string PendingRecordKey = "Gdw.Replay.Editor.PendingRecord";
+
+        static ReplayCommands()
+        {
+            EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
+            EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+        }
+
+        /// <summary>True while a record request is waiting for Play Mode to start.</summary>
+        public static bool RecordPending => !string.IsNullOrEmpty(SessionState.GetString(PendingRecordKey, ""));
         const string CliArg = "-gdwReplayRequest";
 
         static string _jobId;
@@ -130,19 +144,18 @@ namespace Gdw.Replay.Editor
 
                 if (request.Op == "record")
                 {
-                    var options = new ReplayOptions
+                    if (!EditorApplication.isPlaying)
                     {
-                        Seed = request.Seed,
-                        FixedDeltaTime = request.FixedDt != null ? request.FixedDt.Value : 1f / 60f,
-                        ScenePath = request.Scene,
-                        RunId = RunId,
-                        Strict = true,
-                    };
-                    if (!string.IsNullOrEmpty(request.Scene))
-                    {
-                        UnityEditor.SceneManagement.EditorSceneManager.OpenScene(request.Scene);
+                        // Open the scene, enter Play Mode, and begin in OnPlayModeStateChanged.
+                        if (!string.IsNullOrEmpty(request.Scene))
+                        {
+                            UnityEditor.SceneManagement.EditorSceneManager.OpenScene(request.Scene);
+                        }
+                        SessionState.SetString(PendingRecordKey, requestPath);
+                        EditorApplication.EnterPlaymode();
+                        return JsonSerialize(new { ok = true, job_id = JobId, run_id = RunId, status = "entering_play_mode" });
                     }
-                    ReplaySession.BeginRecord(options);
+                    BeginRecord(request);
                 }
                 else
                 {
@@ -169,6 +182,44 @@ namespace Gdw.Replay.Editor
                     message = e.Message,
                 });
                 return JsonSerialize(new { ok = false, error = e.Message });
+            }
+        }
+
+        static void BeginRecord(ReplayRequest request)
+        {
+            var options = new ReplayOptions
+            {
+                Seed = request.Seed,
+                FixedDeltaTime = request.FixedDt != null ? request.FixedDt.Value : 1f / 60f,
+                ScenePath = request.Scene,
+                RunId = RunId,
+                Strict = true,
+            };
+            ReplaySession.BeginRecord(options);
+        }
+
+        static void OnPlayModeStateChanged(PlayModeStateChange change)
+        {
+            string pending = SessionState.GetString(PendingRecordKey, "");
+            if (string.IsNullOrEmpty(pending)) return;
+            if (change == PlayModeStateChange.EnteredEditMode)
+            {
+                // Play Mode never started (or was left before it did): drop the request.
+                SessionState.EraseString(PendingRecordKey);
+                return;
+            }
+            if (change != PlayModeStateChange.EnteredPlayMode) return;
+            SessionState.EraseString(PendingRecordKey);
+            try
+            {
+                if (ReplayInput.Factory == null)
+                    ReplayInput.Factory = (dir, mb) => new InputTraceAdapter(dir, mb);
+                BeginRecord(ReplayContracts.ReadRequest(pending));
+                EmitHarnessLine(new { v = 1, run_id = RunId ?? "", @event = "progress", status = "recording", job_id = JobId });
+            }
+            catch (Exception e)
+            {
+                EmitHarnessLine(new { v = 1, run_id = RunId ?? "", @event = "error", status = "error", message = e.Message });
             }
         }
 
@@ -202,7 +253,7 @@ namespace Gdw.Replay.Editor
             try
             {
                 var session = ReplaySession.Current;
-                string state = session != null ? session.State : "idle";
+                string state = session != null ? session.State : (RecordPending ? "starting" : "idle");
                 int frame = -1;
                 long tick = 0;
 
@@ -248,6 +299,7 @@ namespace Gdw.Replay.Editor
                 }
 
                 // Clear persistent state
+                SessionState.EraseString(PendingRecordKey);
                 JobId = null;
                 RunId = null;
                 RequestPath = null;

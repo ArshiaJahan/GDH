@@ -22,6 +22,10 @@ namespace Gdw.Replay
         bool _record;
         bool _active;
         string _initialHash;
+        // Provider id -> schema digest, taken when recording starts: an adapter can unregister its
+        // provider (unity.input) before the archive is written.
+        readonly System.Collections.Generic.Dictionary<string, string> _providerSchemas =
+            new System.Collections.Generic.Dictionary<string, string>(StringComparer.Ordinal);
         ReplayOptions _options;
         IReplayInputAdapter _adapter;
 
@@ -46,6 +50,8 @@ namespace Gdw.Replay
                 var adapter = ReplayInput.Create(Path.GetDirectoryName(session.OutputPath));
                 adapter.StartCapture();
                 session._adapter = adapter;
+                foreach (var id in ReplayRegistry.Instance.Ids)
+                    session._providerSchemas[id] = ReplayRegistry.Instance.SchemaSha256(id);
 
                 session.StartLoop(null);
                 return session;
@@ -210,7 +216,7 @@ namespace Gdw.Replay
 
         void WriteArchive(ReplayLoopResult result)
         {
-            var header = BuildHeader(_initialHash);
+            var header = BuildHeader(_initialHash, result.Frames.Count > 0 ? result.Frames[0].Providers.Keys : null);
             string finalHash = result.Frames.Count > 0 ? result.Frames[result.Frames.Count - 1].Hash : "";
             var manifest = BuildManifest(result, finalHash);
 
@@ -220,7 +226,7 @@ namespace Gdw.Replay
             ReplayArchive.Write(OutputPath, header, result.Frames, result.Markers, traceBytes, manifest);
         }
 
-        ReplayHeader BuildHeader(string initialHash)
+        ReplayHeader BuildHeader(string initialHash, System.Collections.Generic.IEnumerable<string> frameProviderIds)
         {
             var header = new ReplayHeader
             {
@@ -242,28 +248,91 @@ namespace Gdw.Replay
             header.Cpu.Model = SystemInfo.processorType;
             header.Cpu.Architecture = "";
             header.Cpu.Cores = SystemInfo.processorCount;
+            string root = ProjectRoot();
+            string scenePath = !string.IsNullOrEmpty(_options.ScenePath)
+                ? _options.ScenePath
+                : UnityEngine.SceneManagement.SceneManager.GetActiveScene().path ?? "";
             header.Project.Id = Application.identifier;
             header.Project.Name = Application.productName;
-            header.Project.ContentSha256 = "";
+            header.Project.ContentSha256 = ProjectContentSha256(root);
             header.Project.Dirty = false;
-            header.Scene.Guid = "";
-            header.Scene.Path = _options.ScenePath ?? "";
-            header.Scene.ContentSha256 = "";
+            header.Scene.Guid = SceneGuid(root, scenePath);
+            header.Scene.Path = scenePath;
+            header.Scene.ContentSha256 = FileSha256(root, scenePath);
+            header.Packages.LockSha256 = FileSha256(root, "Packages/packages-lock.json");
+            // Input settings, actions and layouts are not captured yet: the empty-input digest says so.
+            header.Input.SettingsSha256 = EmptySha256;
+            header.Input.ActionsSha256 = EmptySha256;
+            header.Input.LayoutsSha256 = EmptySha256;
+            header.Coverage.Notes = "input settings, actions and layouts digests are not captured (sha256 of empty input)";
             header.Input.SystemVersion = "1.20.1";
             header.ResetAdapter.Id = "scene-reset";
             header.ResetAdapter.InitialStateSha256 = initialHash ?? "";
             header.StateHash.Algorithm = "sha256";
             header.StateHash.Encoding = "gdw-replay-state/1";
-            foreach (var id in ReplayRegistry.Instance.Ids)
+            // The header lists the providers the frames hold, so the two always agree.
+            var ids = new System.Collections.Generic.List<string>(frameProviderIds ?? ReplayRegistry.Instance.Ids);
+            ids.Sort(StringComparer.Ordinal);
+            foreach (var id in ids)
             {
+                string schema;
+                if (!_providerSchemas.TryGetValue(id, out schema))
+                    schema = ReplayRegistry.Instance.IsRegistered(id) ? ReplayRegistry.Instance.SchemaSha256(id) : EmptySha256;
                 header.Providers.Add(new ReplayProviderInfo
                 {
                     Id = id,
-                    SchemaSha256 = "",
+                    SchemaSha256 = schema,
                     Gameplay = !id.StartsWith("unity.", StringComparison.Ordinal),
                 });
             }
             return header;
+        }
+
+        static readonly string EmptySha256 = Digest.Sha256Hex(new byte[0]);
+
+        static string ProjectRoot() => Path.GetDirectoryName(Application.dataPath) ?? "";
+
+        /// <summary>SHA-256 of a project-relative file's bytes; the empty-input digest when it's missing.</summary>
+        static string FileSha256(string root, string relativePath)
+        {
+            if (string.IsNullOrEmpty(relativePath)) return EmptySha256;
+            try
+            {
+                string path = Path.Combine(root, relativePath);
+                return File.Exists(path) ? Digest.Sha256Hex(File.ReadAllBytes(path)) : EmptySha256;
+            }
+            catch (Exception) { return EmptySha256; }
+        }
+
+        /// <summary>Digest over the package manifest, lock file and core project settings.</summary>
+        static string ProjectContentSha256(string root)
+        {
+            var parts = new[]
+            {
+                "Packages/manifest.json", "Packages/packages-lock.json",
+                "ProjectSettings/ProjectSettings.asset", "ProjectSettings/ProjectVersion.txt",
+            };
+            var sb = new System.Text.StringBuilder();
+            foreach (var rel in parts) sb.Append(rel).Append(' ').Append(FileSha256(root, rel)).Append('\n');
+            return Digest.Sha256Hex(Digest.Utf8(sb.ToString()));
+        }
+
+        /// <summary>The scene's GUID from its .meta file (lowercase), or "" when unknown.</summary>
+        static string SceneGuid(string root, string scenePath)
+        {
+            if (string.IsNullOrEmpty(scenePath)) return "";
+            try
+            {
+                string meta = Path.Combine(root, scenePath + ".meta");
+                if (!File.Exists(meta)) return "";
+                foreach (var line in File.ReadAllLines(meta))
+                {
+                    if (line.StartsWith("guid:", StringComparison.Ordinal))
+                        return line.Substring(5).Trim().ToLowerInvariant();
+                }
+            }
+            catch (Exception) { }
+            return "";
         }
 
         static ReplayManifest BuildManifest(ReplayLoopResult result, string finalHash)

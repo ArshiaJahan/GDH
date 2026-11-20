@@ -40,7 +40,7 @@ Pinned: Unity 6000.3.21f1, Input System 1.20.1, Test Framework 1.6.0.
 ## One-time setup
 
 1. `unity op=replay_install` installs the `com.gdw.replay` package
-   (`Packages/com.gdw.replay`, version `0.1.0`). It needs setup consent. It
+   (`Packages/com.gdw.replay`, version `0.1.1`). It needs setup consent. It
    refuses to install when a shipped file was edited in the project. An older
    package is updated in place. It adds any missing `com.unity.test-framework`,
    `com.unity.inputsystem` and physics module entries to
@@ -76,7 +76,9 @@ Pinned: Unity 6000.3.21f1, Input System 1.20.1, Test Framework 1.6.0.
 2. **Record.** `unity op=record [seed=42] [fixed_dt=0.016666667]
    [subjects=["game.hp","game.inventory"]]`. The session resets to the build
    scene, seeds RNG, loads the scene, and records input + checkpoint hashes at
-   every frame. Recording is live-Editor only and needs change permission (the
+   every frame. From Edit Mode it opens the scene, enters Play Mode and starts
+   recording once Play Mode is running (`replay_status` shows `starting` until
+   then). Recording is live-Editor only and needs change permission (the
    code is shown first). The call returns once recording has started. Stop it
    with `unity op=replay_stop run_id=...`; it also stops by itself after
    `[unity.replay] max_seconds` (default 600). Output: `<project>/Logs/harness/

@@ -1,0 +1,91 @@
+{
+  "coverage": {
+    "notes": "input settings, actions and layouts digests are not captured (sha256 of empty input)",
+    "unsupported": []
+  },
+  "cpu": {
+    "architecture": "",
+    "cores": 10,
+    "model": "Apple M4"
+  },
+  "created_utc": "2026-11-20T03:44:40Z",
+  "devices": [],
+  "features": {
+    "optional": [],
+    "required": []
+  },
+  "fixed_dt": {
+    "den": 60,
+    "num": 1
+  },
+  "format": "gdwreplay",
+  "input": {
+    "actions_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "layouts_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "settings_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "system_version": "1.20.1"
+  },
+  "major": 1,
+  "minor": 0,
+  "os": {
+    "platform": "Mac OS X 26.6.2",
+    "version": ""
+  },
+  "packages": {
+    "lock_sha256": "1f2658d43086676af8b664706be0648bd595b2fda80dfe69b6145fd9c6c7972b",
+    "versions": {}
+  },
+  "project": {
+    "content_sha256": "9fe9d8b1d520d0f824e24e1d3d884c048989d159618c21922059f1d4f9f185cc",
+    "dirty": false,
+    "id": "com.DefaultCompany.Coin-Dash",
+    "name": "Coin Dash"
+  },
+  "providers": [
+    {
+      "gameplay": true,
+      "id": "game.score",
+      "schema_sha256": "a9562dd7aa592358f317ecc19abacc4b89007b7d53f2e31425640ba8af3e2552"
+    },
+    {
+      "gameplay": true,
+      "id": "player.dash",
+      "schema_sha256": "5db0ed0dba7baf17a0eca6182a8f984e59e4f270913bfcb3b84f84d154a0afef"
+    },
+    {
+      "gameplay": false,
+      "id": "unity.input",
+      "schema_sha256": "8342f00e8f88be550b4236726132f3dff43e0e114b7d5cdcefdeb2901b8a529c"
+    },
+    {
+      "gameplay": false,
+      "id": "unity.transforms",
+      "schema_sha256": "82f0b2e482f43fafa8de06acb4054d331205b07c96627fcba76b9fdc7a91768e"
+    }
+  ],
+  "render_dt": {
+    "den": 60,
+    "num": 1
+  },
+  "reset_adapter": {
+    "id": "scene-reset",
+    "initial_state_sha256": "9ea9f5d7aba5eb4a009427055d9ae88f71a033949c9f8fbff310384506ba22f1"
+  },
+  "run_id": "rr_seed42_3s_main",
+  "scene": {
+    "content_sha256": "9934dcb71c258ff7d9e296c98982e811b117eae3adb23678d09eaff9cca2e90a",
+    "guid": "d0b9abed8355a403281ae081d2fe2ba5",
+    "path": "Assets/Scenes/Main.unity"
+  },
+  "seed": 42,
+  "state_hash": {
+    "algorithm": "sha256",
+    "encoding": "gdw-replay-state/1"
+  },
+  "tool_version": "0.1.0",
+  "unity": {
+    "revision": "",
+    "scripting_backend": "mono",
+    "version": "6000.3.21f1"
+  }
+}

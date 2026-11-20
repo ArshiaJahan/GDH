@@ -47,6 +47,16 @@ namespace Gdw.Replay
 
         public bool IsRegistered(string id) => id != null && _providers.ContainsKey(id);
 
+        /// <summary>SHA-256 of the provider id and the field names and tags it writes now.</summary>
+        public string SchemaSha256(string id)
+        {
+            if (id == null || !_providers.TryGetValue(id, out var provider))
+                throw new ReplayStateException("unknown provider: " + id);
+            var writer = new StateWriter();
+            provider.WriteState(writer);
+            return Digest.Sha256Hex(Digest.Concat(Digest.Utf8(id + "\n"), writer.SchemaBytes()));
+        }
+
         public IReadOnlyList<string> Ids => _providers.Keys.OrderBy(x => x, StringComparer.Ordinal).ToList();
 
         public string ComputeHash(string id)
