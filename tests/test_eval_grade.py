@@ -166,3 +166,42 @@ async def test_cli_grade_and_validate(task, tmp_path, capsys):
     assert await run(["validate", str(task.dir), "--markdown", "--mutants", "3"]) == 0
     out = capsys.readouterr().out
     assert "| scores-task | pass |" in out
+
+
+def test_only_code_is_turned_into_flawed_solutions():
+    patch = ("diff --git a/ci.yml b/ci.yml\n--- a/ci.yml\n+++ b/ci.yml\n@@ -1 +1 @@\n-x: 1\n+x: 2 == 2\n"
+             "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-a\n+b and c\n"
+             "diff --git a/s.py b/s.py\n--- a/s.py\n+++ b/s.py\n@@ -1 +1 @@\n-v = 1\n+v = 2 if a == b else 3\n"
+             "@@ -9 +9 @@\n-w = 1\n+w = 5\n")
+    for m in eval_validate.mutants(patch, 20):
+        assert "+x: 2 == 2" in m.patch and "+b and c" in m.patch  # YAML and Markdown left alone
+    ps = eval_validate.partials(patch, 20)
+    assert len(ps) == 2 and all("s.py" in p.description for p in ps)
+
+
+def test_mutants_skip_strings_comments_docstrings_and_generics():
+    patch = ("diff --git a/s.py b/s.py\n--- a/s.py\n+++ b/s.py\n@@ -1 +1,9 @@\n"
+             '+def f(v):\n+    """Clamp: v < 0 becomes 0 and True stays."""\n'
+             '+    msg = "a < b and c"  # x < y\n+    if v < 0:\n+        return 0\n'
+             "diff --git a/A.cs b/A.cs\n--- a/A.cs\n+++ b/A.cs\n@@ -1 +1 @@\n"
+             "+    public static Func<string, int> Make => (s) => s.Length;\n")
+    ms = eval_validate.mutants(patch, 30)
+    touched = [next(b for a, b in zip(patch.splitlines(), m.patch.splitlines()) if a != b) for m in ms]
+    assert touched and all(t.startswith("+    if v") or t.startswith("+        return") for t in touched), touched
+
+
+def test_a_hung_test_run_is_the_candidates_failure():
+    assert eval_grade._env_failure(None, "", True) is False  # the reference finished in time; this one hung
+    assert eval_grade._env_failure(127, "bash: pytest: command not found", False) is True
+
+
+def test_python_prose_in_strings_outside_the_hunk_isnt_mutated():
+    after = 'X = 1\nDOC = """Notes\nread from a or b when x < 1\n"""\nif X == 1:\n    pass\n'
+    rows = eval_validate.python_code_lines(after)
+    assert rows == {1, 2, 5, 6}  # line 3 is inside the string; line 4 closes it (the STRING token starts on 2)
+    patch = ("diff --git a/m.py b/m.py\n--- a/m.py\n+++ b/m.py\n@@ -3,1 +3,1 @@\n-old prose\n"
+             "+read from a or b when x < 1\n@@ -5,1 +5,1 @@\n-if X != 1:\n+if X == 1:\n")
+    ms = eval_validate.mutants(patch, 10, {"m.py": rows})
+    assert ms and all("read from a or b" not in next(b for a, b in zip(patch.splitlines(), m.patch.splitlines()) if a != b)
+                      for m in ms)
+    assert any("if X != 1:" in m.patch.split("+if")[0] or "+if X != 1:" in m.patch for m in ms)

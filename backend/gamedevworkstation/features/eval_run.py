@@ -235,7 +235,7 @@ def _validation(task: LoadedTask) -> dict | None:
 async def run_trial(task: LoadedTask, agent_name: str, agent: AgentFn, n: int, out_dir: Path, *,
                     repo: Path | None = None, unity_replay=None, rubric=None) -> Trial:
     started = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    src = Path(repo or task.task.source.repo)
+    src = eval_grade.resolve_repo(task, repo)
     logdir = out_dir / task.task.id / agent_name
     logdir.mkdir(parents=True, exist_ok=True)
     t0 = time.monotonic()

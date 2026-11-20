@@ -84,3 +84,10 @@ def test_clone_url_and_cli(task, tmp_path, capsys):
     assert eval_cli.cli(["export", str(task.dir), "--out", str(tmp_path / "h2")]) == 0
     assert "scores-task:" in capsys.readouterr().out
     assert eval_cli.cli(["export", str(task.dir), "--out", str(tmp_path / "h2")]) == 1  # already there
+
+
+def test_docker_setup_is_image_only(task, tmp_path):
+    d = eval_export.export(task, tmp_path / "harbor", docker_setup="pip install -e . pytest-asyncio")
+    df = (d / "environment/Dockerfile").read_text(encoding="utf-8")
+    assert df.rstrip().endswith("RUN pip install -e . pytest-asyncio") and df.index("WORKDIR /app") < df.index("RUN pip install -e")
+    assert eval_task.load(task.dir).task.grader.setup == ""  # the task itself is unchanged

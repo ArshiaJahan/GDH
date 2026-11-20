@@ -48,7 +48,7 @@ async def test_a_rewrite_is_filtered_too(repo, tmp_path):
 
     t = eval_task.load(await eval_forge.forge(repo, "HEAD", tmp_path / "suite", rewrite=rewrite,
                                               rewritten_by="fake"))
-    assert t.prompt.strip() == "Make sure scores can't drop below zero. You could add [new name] for it."
+    assert t.prompt.startswith("Make sure scores can't drop below zero. You could add [new name] for it.")
     assert t.task.forge.rewritten_by == "fake"
 
 
@@ -142,3 +142,20 @@ async def test_route_lists_the_suite(repo, tmp_path):
     r = TestClient(app).get("/api/evals/tasks", params={"suite": str(tmp_path / "suite")})
     assert r.status_code == 200 and r.json()["tasks"][0]["id"] == "scores-task"
     assert TestClient(app).get("/api/evals/tasks", params={"suite": str(tmp_path / "nope")}).status_code == 400
+
+
+async def test_the_interface_the_hidden_tests_need_is_named(repo, tmp_path):
+    t = eval_task.load(await eval_forge.forge(repo, "HEAD", tmp_path / "suite"))
+    # apply_penalty gained a parameter the tests call; clamp_score is only used inside the solution.
+    assert "Interface the tests use" in t.prompt and "- `def apply_penalty(v, p, hi=100):`" in t.prompt
+    assert "clamp_score" not in t.prompt and "return" not in t.prompt.split("Interface")[1]
+
+
+def test_interface_takes_declarations_not_bodies():
+    patch = ("+public sealed class Dash\n+{\n+    public float Multiplier => IsDashing ? 3f : 1f;\n"
+             "+    public bool TryStart(bool moving)\n+    {\n+        return moving;\n+    }\n"
+             "+    private void Hidden() { }\n")
+    tests = {"t.cs": b"var d = new Dash(); d.TryStart(moving: true); _ = d.Multiplier;"}
+    assert eval_forge.interface(patch, tests) == [("Dash", "public sealed class Dash"),
+                                                  ("Multiplier", "public float Multiplier"),
+                                                  ("TryStart", "public bool TryStart(bool moving)")]

@@ -32,7 +32,9 @@ _DEFS = re.compile(r"\b(?:def|class|function|interface|enum|struct|record)\s+([A
                    r"|\b(?:const|let|var)\s+([A-Za-z_]\w{2,})\s*="
                    r"|^\s*(?:public|private|internal|protected|static|readonly|async|override|virtual|\s)+"
                    r"[\w<>\[\],?]+\s+([A-Z]\w{2,})\s*\("
-                   r"|^\s*([A-Z][A-Z0-9_]{3,})\s*[:=]", re.M)
+                   r"|^\s*([A-Z][A-Z0-9_]{3,})\s*[:=]"
+                   r"|^\s*public\s+(?:static\s+|readonly\s+|const\s+|override\s+|virtual\s+)*[\w<>\[\],?]+\s+"
+                   r"([A-Z]\w{2,})\s*(?:=>|\{|=|;)", re.M)
 
 
 class ForgeError(RuntimeError):
@@ -94,6 +96,27 @@ def solution_only_names(repo: Path, parent: str, patch: str) -> list[str]:
         r = subprocess.run(["git", "-C", str(repo), "grep", "-q", "-w", "-F", n, parent], capture_output=True, timeout=60)
         if r.returncode == 1:  # not found at the parent: the solution introduced it
             out.append(n)
+    return out
+
+
+def interface(patch: str, grader_files: dict[str, bytes], limit: int = 20) -> list[tuple[str, str]]:
+    """[(name, declaration)] for definitions the change adds or changes that the hidden tests use: the tests can't
+    be passed without them, so the task names them. Declarations only (bodies are cut), in patch order."""
+    tests = "\n".join(d.decode("utf-8", "replace") for d in grader_files.values())
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for line in _added_lines(patch).splitlines():
+        m = _DEFS.search(line)
+        name = next((g for g in m.groups() if g), None) if m else None
+        if not name or name in seen or not re.search(rf"\b{re.escape(name)}\b", tests):
+            continue
+        seen.add(name)
+        decl = re.split(r"\s*(?:=>|\{)", line.strip(), maxsplit=1)[0].rstrip(";").strip()
+        if re.match(r"^[A-Z][A-Z0-9_]{3,}\s*[:=]", decl):
+            decl = decl.split("=")[0].split(":")[0].strip()  # a constant's name, not its value
+        out.append((name, decl))
+        if len(out) >= limit:
+            break
     return out
 
 
@@ -185,7 +208,9 @@ async def forge(repo: Path, rev: str, out_root: Path, *, task_id: str | None = N
     grader_files = {p: bytes(_git(repo, "show", f"{ch.commit}:{p}", binary=True)) for p in tests}
     solution = str(_git(repo, "diff", "--binary", "--no-renames", ch.parent, ch.commit, "--", *source_paths))
     body = text if text is not None else ch.message
-    names = solution_only_names(repo, ch.parent, solution)
+    api = interface(solution, grader_files)
+    needed = {n for n, _ in api}
+    names = [n for n in solution_only_names(repo, ch.parent, solution) if n not in needed]
     new_paths = [p for p in ch.added if p in source_paths]
     hidden = _test_names(grader_files) + tests
     prompt, removed = leak_filter(body, names=names, paths=new_paths, tests=hidden)
@@ -194,6 +219,9 @@ async def forge(repo: Path, rev: str, out_root: Path, *, task_id: str | None = N
         removed += [r for r in more if r not in removed]
     if not prompt.strip():
         raise ForgeError("the task text is empty after the leak filter; pass --text with a description")
+    if api:
+        prompt += ("\n\nInterface the tests use (declarations only; the change adds or changes these):\n"
+                   + "\n".join(f"- `{d}`" for _, d in api))
     title = body.strip().splitlines()[0][:120] if body.strip() else ch.commit[:12]
     tid = task_id or f"{_slug(title)}-{ch.commit[:7]}"
     task = Task(

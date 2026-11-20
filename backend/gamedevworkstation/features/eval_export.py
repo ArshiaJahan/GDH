@@ -73,7 +73,7 @@ def solve_sh() -> str:
             "exit 0\n")
 
 
-def dockerfile(task: LoadedTask, *, base_image: str, clone_url: str | None) -> str:
+def dockerfile(task: LoadedTask, *, base_image: str, clone_url: str | None, docker_setup: str = "") -> str:
     g = task.task.grader
     out = [f"FROM {base_image}",
            "RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates "
@@ -86,8 +86,9 @@ def dockerfile(task: LoadedTask, *, base_image: str, clone_url: str | None) -> s
     else:
         out += [f"COPY repo/ {APP}/"]
     out.append(f"WORKDIR {APP}")
-    if g.setup:
-        out.append(f"RUN {g.setup}")
+    for cmd in (g.setup, docker_setup):  # the task's own setup, then image-only setup (dependencies)
+        if cmd:
+            out.append(f"RUN {cmd}")
     return "\n".join(out) + "\n"
 
 
@@ -111,7 +112,7 @@ def _snapshot(repo: Path, commit: str, dest: Path) -> int:
 
 
 def export(task: LoadedTask, out_root: Path, *, repo: Path | None = None, base_image: str = "python:3.12-slim",
-           clone_url: str | None = None, org: str = "gdh") -> Path:
+           clone_url: str | None = None, org: str = "gdh", docker_setup: str = "") -> Path:
     t = task.task
     d = Path(out_root) / t.id
     if d.exists():
@@ -141,10 +142,13 @@ def export(task: LoadedTask, out_root: Path, *, repo: Path | None = None, base_i
     (d / "task.toml").write_text(tomli_w.dumps(config), encoding="utf-8")
     (d / "instruction.md").write_text(task.prompt.rstrip() + f"\n\nThe project is in {APP}. Don't commit.\n",
                                       encoding="utf-8")
-    (d / "environment" / "Dockerfile").write_text(dockerfile(task, base_image=base_image, clone_url=clone_url),
+    (d / "environment" / "Dockerfile").write_text(dockerfile(task, base_image=base_image, clone_url=clone_url,
+                                                             docker_setup=docker_setup),
                                                   encoding="utf-8")
     if not clone_url:
-        _snapshot(Path(repo or t.source.repo), t.source.parent, d / "environment" / "repo")
+        from .eval_grade import resolve_repo
+
+        _snapshot(resolve_repo(task, repo), t.source.parent, d / "environment" / "repo")
     (d / "solution" / "solve.sh").write_text(solve_sh(), encoding="utf-8")
     (d / "solution" / "solution.patch").write_text(task.solution, encoding="utf-8")
     (d / "tests" / "test.sh").write_text(test_sh(task), encoding="utf-8")

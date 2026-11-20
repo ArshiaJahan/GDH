@@ -14,8 +14,11 @@ equivalent (they don't change behaviour); a survivor is a reason to look, not pr
 """
 from __future__ import annotations
 
+import io
 import json
 import re
+import subprocess
+import tokenize
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,12 +30,12 @@ REPORT_FILE = "validation.json"
 
 # (pattern on an added line, replacement, label). Applied one at a time, first match on the line.
 MUTATIONS: tuple[tuple[str, str, str], ...] = (
-    (r"==", "!=", "== to !="),
-    (r"!=", "==", "!= to =="),
-    (r"<=", "<", "<= to <"),
-    (r">=", ">", ">= to >"),
-    (r"(?<![<>=!-])<(?![<=])", "<=", "< to <="),
-    (r"(?<![<>=!-])>(?![>=])", ">=", "> to >="),
+    (r"(?<=\s)==(?=\s)", "!=", "== to !="),
+    (r"(?<=\s)!=(?=\s)", "==", "!= to =="),
+    (r"(?<=\s)<=(?=\s)", "<", "<= to <"),
+    (r"(?<=\s)>=(?=\s)", ">", ">= to >"),
+    (r"(?<=\s)<(?=\s)", "<=", "< to <="),     # spaced only: not generics, tags or arrows
+    (r"(?<=\s)>(?=\s)", ">=", "> to >="),
     (r"\bTrue\b", "False", "True to False"),
     (r"\bFalse\b", "True", "False to True"),
     (r"\btrue\b", "false", "true to false"),
@@ -46,6 +49,10 @@ MUTATIONS: tuple[tuple[str, str, str], ...] = (
     (r"(?<=[\w)\]])\s*\+\s*(?=[\w(])", " - ", "+ to -"),
     (r"(?<=[\w)\]])\s+-\s+(?=[\w(])", " + ", "- to +"),
 )
+# Flawed solutions are made from code only: leaving out a README or CI hunk, or flipping a YAML value, isn't a flaw
+# the task's tests are meant to catch, and counting it would make every grader look weak.
+CODE_EXT = (".py", ".cs", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".go", ".rs", ".java", ".kt", ".swift", ".c", ".cc",
+            ".cpp", ".h", ".hpp", ".rb", ".php", ".lua", ".gd", ".shader", ".hlsl", ".cginc")
 _SKIP_LINE = re.compile(r"^\s*(#|//|/\*|\*|import |from |using |\"\"\"|'''|$)")
 
 
@@ -121,10 +128,19 @@ def join_hunks(files: list[tuple[str, list[str]]]) -> str:
     return "".join(h + "".join(hs) for h, hs in files if hs or "GIT binary patch" in h or "Binary files" in h)
 
 
+def _path(header: str) -> str:
+    m = re.search(r" b/(\S+)", header)
+    return m.group(1) if m else ""
+
+
+def is_code(path: str) -> bool:
+    return path.lower().endswith(CODE_EXT)
+
+
 def partials(patch: str, limit: int) -> list[Candidate]:
-    """The reference with one hunk left out (only when there's more than one hunk to choose from)."""
+    """The reference with one code hunk left out (only when there's more than one hunk to choose from)."""
     files = split_hunks(patch)
-    spots = [(fi, hi) for fi, (_, hs) in enumerate(files) for hi in range(len(hs))]
+    spots = [(fi, hi) for fi, (h, hs) in enumerate(files) if is_code(_path(h)) for hi in range(len(hs))]
     if len(spots) < 2:
         return []
     out = []
@@ -136,26 +152,103 @@ def partials(patch: str, limit: int) -> list[Candidate]:
     return out
 
 
+def _in_string(text: str, pos: int) -> bool:
+    """Whether `pos` is inside a quoted string or after a line comment on this line (a rough, per-line check)."""
+    quote = None
+    i = 0
+    while i < pos:
+        c = text[i]
+        if quote:
+            if c == "\\":
+                i += 1
+            elif c == quote:
+                quote = None
+        elif c in "\"'`":
+            quote = c
+        elif c == "#" or text.startswith("//", i):
+            return True
+        i += 1
+    return quote is not None
+
+
 def _mutate_line(text: str, pattern: str, repl: str | None) -> str | None:
-    if repl is None:  # constant +1
-        m = re.search(pattern, text)
-        if not m:
-            return None
-        return text[:m.start(1)] + str(int(m.group(1)) + 1) + text[m.end(1):]
-    new = re.sub(pattern, repl, text, count=1)
-    return new if new != text else None
+    """The line with the first match of `pattern` that's in code (not in a string or comment) mutated."""
+    for m in re.finditer(pattern, text):
+        if _in_string(text, m.start()):
+            continue
+        if repl is None:  # constant +1
+            return text[:m.start(1)] + str(int(m.group(1)) + 1) + text[m.end(1):]
+        new = text[:m.start()] + m.expand(repl) + text[m.end():]
+        return new if new != text else None
+    return None
 
 
-def mutants(patch: str, limit: int) -> list[Candidate]:
-    """One mutation per candidate, on added code lines, spread across the patch (each line used once)."""
+def python_code_lines(source: str) -> set[int] | None:
+    """1-based numbers of the lines that hold Python code tokens (not only strings, comments or blank space);
+    None when the file doesn't tokenize."""
+    rows: set[int] = set()
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+            if tok.type in (tokenize.NAME, tokenize.OP, tokenize.NUMBER):
+                rows.add(tok.start[0])
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return None
+    return rows
+
+
+def code_line_map(repo: Path, commit: str, patch: str) -> dict[str, set[int]]:
+    """{path: code line numbers} for the patch's Python files as they are after the change."""
+    out: dict[str, set[int]] = {}
+    for header, _ in split_hunks(patch):
+        path = _path(header)
+        if not path.endswith(".py"):
+            continue
+        r = subprocess.run(["git", "-C", str(repo), "show", f"{commit}:{path}"], capture_output=True, timeout=60)
+        if r.returncode == 0 and (rows := python_code_lines(r.stdout.decode("utf-8", "replace"))) is not None:
+            out[path] = rows
+    return out
+
+
+def mutants(patch: str, limit: int, code_map: dict[str, set[int]] | None = None) -> list[Candidate]:
+    """One mutation per candidate, on added code lines, spread across the patch (each line used once).
+
+    With `code_map` (path -> code line numbers after the change), a Python line is only mutated when it holds
+    code, so prose in a docstring or a multi-line string whose quotes sit outside the hunk is left alone."""
     lines = patch.splitlines(keepends=True)
     out: list[Candidate] = []
     used_lines: set[int] = set()
+    code_lines: set[int] = set()
+    current, in_doc, new_no = "", False, 0
+    for i, line in enumerate(lines):
+        if line.startswith("diff --git "):
+            current, in_doc = _path(line), False
+            continue
+        if line.startswith("@@"):
+            m = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)", line)
+            new_no = int(m.group(1)) if m else 0
+            continue
+        if line.startswith(("---", "+++")):
+            continue
+        if line.startswith("-"):
+            continue
+        row, new_no = new_no, new_no + 1
+        if not is_code(current) or not line.startswith("+"):
+            continue
+        body = line[1:]
+        fences = body.count('"""') + body.count("'''")
+        known = (code_map or {}).get(current)
+        if known is not None:
+            if row in known and not fences:
+                code_lines.add(i)
+        elif not in_doc and not fences:
+            code_lines.add(i)
+        if fences % 2:  # a Python docstring opens or closes on this line
+            in_doc = not in_doc
     for pattern, repl, label in MUTATIONS:
         for i, line in enumerate(lines):
             if len(out) >= limit:
                 return out
-            if i in used_lines or not line.startswith("+") or line.startswith("+++"):
+            if i in used_lines or i not in code_lines or not line.startswith("+") or line.startswith("+++"):
                 continue
             body = line[1:]
             if _SKIP_LINE.match(body) or "\"" in body and pattern.startswith(r"(?<![\w.])(\d"):
@@ -171,10 +264,15 @@ def mutants(patch: str, limit: int) -> list[Candidate]:
     return out
 
 
-def flawed_candidates(task: LoadedTask, *, max_partials: int = 6, max_mutants: int = 12) -> list[Candidate]:
+def flawed_candidates(task: LoadedTask, *, max_partials: int = 6, max_mutants: int = 12,
+                      repo: Path | None = None) -> list[Candidate]:
     c = [Candidate("noop", "noop", "no change: the start state", "")]
     c += partials(task.solution, max_partials)
-    c += mutants(task.solution, max_mutants)
+    try:
+        code_map = code_line_map(eval_grade.resolve_repo(task, repo), task.task.source.commit, task.solution)
+    except eval_grade.GradeError:
+        code_map = None
+    c += mutants(task.solution, max_mutants, code_map)
     if task.task.grader.tests:
         c.append(Candidate("tamper-delete", "tamper", "no fix; deletes the hidden tests", "", tamper="delete"))
         c.append(Candidate("tamper-skip", "tamper", "no fix; rewrites the hidden tests to pass", "", tamper="skip"))
@@ -202,7 +300,7 @@ async def validate(task: LoadedTask, *, repo: Path | None = None, unity_replay=N
                    max_partials: int = 6, max_mutants: int = 12, write_report: bool = True) -> Report:
     ref = await eval_grade.grade_patch(task, task.solution, repo=repo, unity_replay=unity_replay, rubric=rubric)
     outcomes: list[Outcome] = []
-    for cand in flawed_candidates(task, max_partials=max_partials, max_mutants=max_mutants):
+    for cand in flawed_candidates(task, max_partials=max_partials, max_mutants=max_mutants, repo=repo):
         g = await eval_grade.grade_patch(task, cand.patch, repo=repo, unity_replay=unity_replay, rubric=rubric,
                                          prepare=_tamper(task, cand.tamper) if cand.tamper else None)
         outcomes.append(Outcome(cand.id, cand.kind, cand.description, g.passed, g.environment_failure, g.tampered,

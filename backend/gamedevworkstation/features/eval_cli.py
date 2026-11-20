@@ -188,7 +188,8 @@ def _export_cmd(args: argparse.Namespace) -> int:
         task = eval_task.load(d)
         try:
             out = eval_export.export(task, Path(args.out), repo=Path(args.repo) if args.repo else None,
-                                     base_image=args.base_image, clone_url=args.clone_url, org=args.org)
+                                     base_image=args.base_image, clone_url=args.clone_url, org=args.org,
+                                     docker_setup=args.docker_setup or "")
             print(f"{task.task.id}: {out}")
         except eval_export.ExportError as e:
             print(f"{task.task.id}: skipped: {e}", file=sys.stderr)
@@ -301,6 +302,7 @@ def parser() -> argparse.ArgumentParser:
     x.add_argument("--base-image", default="python:3.12-slim")
     x.add_argument("--clone-url", help="have the image clone this URL instead of copying a snapshot of the repo")
     x.add_argument("--org", default="gdh", help="the [task] name prefix (org/name)")
+    x.add_argument("--docker-setup", help="an extra RUN line for the image only, e.g. installing dependencies")
     x.set_defaults(fn=_export_cmd)
     ls = sub.add_parser("list", help="list the suite's tasks and check each one loads")
     ls.add_argument("--suite", default=DEFAULT_SUITE)

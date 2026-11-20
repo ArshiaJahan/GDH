@@ -91,8 +91,9 @@ def run_shell(command: str, cwd: Path, timeout_s: float) -> tuple[int | None, st
 
 
 def _env_failure(code: int | None, output: str, timed_out: bool) -> bool:
-    """Exit 126/127 (can't run / not found), a timeout, or a missing module/tool: the environment's fault."""
-    if timed_out or code in (126, 127):
+    """Exit 126/127 (can't run / not found) or a missing module/tool: the environment's fault. A test command that
+    runs past its time limit is the candidate's: its code hung (the reference finished within the limit)."""
+    if code in (126, 127):
         return True
     return bool(re.search(r"command not found|No module named pytest|ModuleNotFoundError: No module named '(pytest|"
                           r"vitest)'|ENOENT|Permission denied|No space left on device|Could not resolve host",
@@ -108,6 +109,23 @@ def _git(repo: Path, *args: str, input_text: str | None = None, check: bool = Tr
     if check and r.returncode != 0:
         raise GradeError(f"git {' '.join(args[:2])} failed: {r.stderr.strip()[:300]}")
     return r
+
+
+def resolve_repo(task: LoadedTask, repo: Path | None = None) -> Path:
+    """The local git repo holding the task's start commit: `repo` if given, else source.repo when it's a local
+    folder, else the current directory (a suite checked into the repo it was forged from)."""
+    if repo is not None:
+        return Path(repo)
+    src = Path(task.task.source.repo).expanduser()
+    if src.is_dir():
+        return src
+    here = Path.cwd()
+    r = subprocess.run(["git", "-C", str(here), "cat-file", "-e", f"{task.task.source.parent}^{{commit}}"],
+                       capture_output=True, timeout=60)
+    if r.returncode == 0:
+        return here
+    raise GradeError(f"can't find the start commit {task.task.source.parent[:12]} of {task.task.id}: pass --repo "
+                     f"(a clone of {task.task.source.repo})")
 
 
 @contextlib.contextmanager
@@ -196,8 +214,9 @@ def overlay_tests(task: LoadedTask, tree: Path) -> list[str]:
 
 
 def _existed_at_start(task: LoadedTask, rel: str) -> bool:
-    repo = Path(task.task.source.repo)
-    if not (repo / ".git").exists():
+    try:
+        repo = resolve_repo(task)
+    except GradeError:
         return False
     r = subprocess.run(["git", "-C", str(repo), "cat-file", "-e", f"{task.task.source.parent}:{rel}"],
                        capture_output=True, timeout=60)
@@ -277,7 +296,7 @@ async def grade(task: LoadedTask, tree: Path, *, reference: Path | None = None, 
         steps.append(Step("tests", "command", code == 0, code, dt, out, environment=code != 0 and _env_failure(code, out, to)))
     for c in g.checks:
         code, out, dt, to = run_shell(c.command, tree, g.timeout_s)
-        steps.append(Step(c.name, "check", code == c.expect_exit, code, dt, out, environment=to or code in (126, 127)))
+        steps.append(Step(c.name, "check", code == c.expect_exit, code, dt, out, environment=code in (126, 127)))
     if g.differential is not None:
         if reference is None:
             raise GradeError("differential grading needs the reference tree")
@@ -298,7 +317,7 @@ async def grade(task: LoadedTask, tree: Path, *, reference: Path | None = None, 
 async def grade_patch(task: LoadedTask, patch: str, *, repo: Path | None = None, unity_replay: UnityReplay | None = None,
                       rubric: Rubric | None = None, prepare: Callable[[Path], None] | None = None) -> Grade:
     """Check out the task's start commit, apply `patch` (and `prepare`, e.g. a tampering edit), grade it."""
-    src = Path(repo or task.task.source.repo)
+    src = resolve_repo(task, repo)
     with checkout(src, task.task.source.parent) as tree:
         if task.task.grader.setup:
             code, out, dt, to = run_shell(task.task.grader.setup, tree, task.task.grader.timeout_s)
