@@ -584,6 +584,13 @@ def _utc(epoch: float | None) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
 def _read_existing_report(path: Path) -> dict | None:
     """A report someone else (the Unity package) already wrote is never replaced."""
     try:
@@ -612,7 +619,7 @@ def _artifact_paths(root: Path, out_dir: Path, request: dict, result: "BridgeRes
 
 def build_replay_report(root: Path, run_id: str, op: str, request: dict, result: "BridgeResult",
                         *, archive: Any | None = None, replay_cfg: dict | None = None,
-                        status_override: str | None = None) -> dict | None:
+                        status_override: str | None = None, since: float | None = None) -> dict | None:
     """Assemble ReplayReport v1 (contract §2), write it atomically, and return it.
 
     Never writes over an existing valid report (the Unity package owns that file). Returns None
@@ -623,7 +630,9 @@ def build_replay_report(root: Path, run_id: str, op: str, request: dict, result:
     out_dir = _replay_output_dir(root, run_id)
     report_path = out_dir / "report.json"
     existing = _read_existing_report(report_path)
-    if existing is not None:
+    # Keep a report the Unity package wrote (it has no "op"). A report this module wrote for an earlier
+    # op (a verify before this render) is stale: returning it would report that op's result, not this one's.
+    if existing is not None and (since is None or not existing.get("op") or _mtime(report_path) >= since):
         return existing
     if status_override is None and result.status == "skipped":
         return None
@@ -834,7 +843,34 @@ def _record_replay_evidence(app: "AppState", session: dict, request: dict, repor
 # --------------------------------------------------------------------------- tool output
 
 
-def _tool_output(op: str, run_id: str, result: "BridgeResult | None", report: dict | None) -> ToolOutput:
+def _export_capture(root: Path, run_id: str, request: dict) -> dict | None:
+    """Encode the PNG frames a render wrote (capture/frames/frame-%06d.png) into the requested MP4/GIF."""
+    capture = request.get("capture")
+    if not isinstance(capture, dict) or not capture.get("formats"):
+        return None
+    from . import replay_media
+
+    out_dir = _replay_output_dir(root, run_id)
+    frames_dir = out_dir / "capture" / "frames"
+    frames = sorted(frames_dir.glob("frame-*.png")) if frames_dir.is_dir() else []
+    if not frames:
+        return {"ok": False, "outputs": [], "error": "the render wrote no frames"}
+    replay_root = root / "Logs" / "harness" / "replay"
+    export_dir = out_dir / "exports" / datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    try:
+        plan = replay_media.build_export_steps(frames_dir, export_dir, {**capture, "total_frames": len(frames)},
+                                               replay_root=replay_root)
+        res = replay_media.execute_steps(plan, replay_root=replay_root)
+    except Exception as exc:  # noqa: BLE001 — reported to the agent, frames are kept
+        return {"ok": False, "outputs": [], "error": str(exc)}
+    done = [r["output"] for r in res["results"] if r.get("ok") and r.get("output")]
+    error = next((r["error"] for r in res["results"] if r.get("error")), "")
+    return {"ok": bool(res["ok"]), "outputs": [_rel_posix(root, p) for p in done], "error": error,
+            "frames": len(frames), "warnings": res.get("warnings") or []}
+
+
+def _tool_output(op: str, run_id: str, result: "BridgeResult | None", report: dict | None,
+                 export: dict | None = None) -> ToolOutput:
     status = (report or {}).get("status") or (result.status if result is not None else "error")
     summary = (report or {}).get("message") or (result.summary if result is not None else "")
     route = (result.mode if result is not None else "") or (report or {}).get("route") or ""
@@ -842,6 +878,10 @@ def _tool_output(op: str, run_id: str, result: "BridgeResult | None", report: di
                             "summary": summary}
     if report is not None:
         head["report"] = report
+    if export is not None:
+        head["export"] = export
+        if not export.get("ok"):
+            summary = f"{summary} Export failed: {export.get('error') or 'unknown error'}".strip()
     text = f"Replay {op}: {status}. {summary}\n" + json.dumps(head, default=str, indent=1)[:8000]
     is_error = bool(result is not None and result.status in ("error", "skipped")) or status in ("error", "incompatible")
     return ToolOutput(text, is_error=is_error)
@@ -1037,13 +1077,19 @@ async def run_replay_op(app: "AppState", session: dict, op: str, args: dict,
         _index_artifacts(app, session, [request_path, out_dir / "report.json"])
         return _tool_output(op, run_id, synthetic, report)
 
+    started = time.time()
     result = await br.run_replay(session, op, {**request, "_request_path": str(request_path)},
                                  consent=consent, cancel=cancel)
-    report = build_replay_report(root, run_id, op, request, result, archive=archive, replay_cfg=replay_cfg)
-    _index_artifacts(app, session, [request_path, out_dir / "report.json", root / request["replay_path"]])
+    # A render passes only when its replay matched every checkpoint, so encode before the report is
+    # written: the report then lists the exports.
+    export = _export_capture(root, run_id, request) if op == "render" and result.status == "pass" else None
+    report = build_replay_report(root, run_id, op, request, result, archive=archive, replay_cfg=replay_cfg,
+                                 since=started)
+    exported = [root / p for p in (export or {}).get("outputs", [])]
+    _index_artifacts(app, session, [request_path, out_dir / "report.json", root / request["replay_path"], *exported])
     if op == "verify" and report is not None:
         _record_replay_evidence(app, session, request, report)
-    return _tool_output(op, run_id, result, report)
+    return _tool_output(op, run_id, result, report, export)
 
 
 # --------------------------------------------------------------------------- REST routes

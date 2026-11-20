@@ -40,7 +40,7 @@ Pinned: Unity 6000.3.21f1, Input System 1.20.1, Test Framework 1.6.0.
 ## One-time setup
 
 1. `unity op=replay_install` installs the `com.gdw.replay` package
-   (`Packages/com.gdw.replay`, version `0.1.1`). It needs setup consent. It
+   (`Packages/com.gdw.replay`, version `0.1.2`). It needs setup consent. It
    refuses to install when a shipped file was edited in the project. An older
    package is updated in place. It adds any missing `com.unity.test-framework`,
    `com.unity.inputsystem` and physics module entries to

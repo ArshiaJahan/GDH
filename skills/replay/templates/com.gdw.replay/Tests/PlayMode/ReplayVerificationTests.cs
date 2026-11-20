@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Text.RegularExpressions;
 using NUnit.Framework;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -99,6 +100,21 @@ namespace Gdw.Replay.Tests
                 yield return null;
             }
 
+            // --- Frame capture (render requests) ---
+            bool capturing = request.Capture != null && request.Capture.Formats.Count > 0;
+            if (capturing)
+            {
+                Assert.IsNotNull(ReplayCaptureHooks.Start, "Frame capture needs the Editor (Gdw.Replay.Editor not loaded)");
+                // ReplayCapture logs its start and stop; they aren't unexpected console output.
+                LogAssert.Expect(LogType.Log, new Regex(@"^\[REPLAY\] capture started"));
+                LogAssert.Expect(LogType.Log, new Regex(@"^\[REPLAY\] capture stopped"));
+                string framesDir = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(request.ReplayPath)), "capture", "frames");
+                string started = ReplayCaptureHooks.Start(framesDir, archive.Frames.Count, request.Capture.Fps,
+                    request.Capture.Width, request.Capture.Height);
+                Assert.AreEqual("ok", started, "Frame capture didn't start");
+                ReplayLoop.AfterCheckpoint = () => ReplayCaptureHooks.CaptureFrame();
+            }
+
             // --- Begin replay ---
             ReplaySession session = null;
             try
@@ -116,12 +132,18 @@ namespace Gdw.Replay.Tests
             ReplayResult result = null;
             session.Finished += r => result = r;
 
-            float timeout = 120f;
+            // Writing a PNG per frame is slow; give capture runs time for it.
+            float timeout = capturing ? 120f + archive.Frames.Count * 0.25f : 120f;
             float elapsed = 0f;
             while (result == null && elapsed < timeout)
             {
                 yield return new WaitForSecondsRealtime(0.1f);
                 elapsed += 0.1f;
+            }
+            if (capturing)
+            {
+                ReplayLoop.AfterCheckpoint = null;
+                ReplayCaptureHooks.Stop?.Invoke();
             }
 
             // --- Assert results ---

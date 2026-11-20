@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 PACKAGE_NAME = "com.gdw.replay"
-PACKAGE_VERSION = "0.1.1"
+PACKAGE_VERSION = "0.1.2"
 PACKAGE_DIR = "Packages/com.gdw.replay"
 VERSION_FILE = "package.json"
 MARKER = f"{PACKAGE_DIR}/.gdw-installed.json"

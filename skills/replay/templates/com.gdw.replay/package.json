@@ -1,6 +1,6 @@
 {
     "name": "com.gdw.replay",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "displayName": "GDW Replay",
     "description": "Deterministic record/replay runtime for GameDevWorkstation. Runtime core (no Input System dependency here).",
     "unity": "6000.3",

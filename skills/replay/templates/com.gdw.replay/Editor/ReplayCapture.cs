@@ -37,12 +37,27 @@ namespace Gdw.Replay
         static RenderTexture s_RenderTexture;
         static Texture2D s_ReadTexture;
 
+        static ReplayCapture()
+        {
+            ReplayCaptureHooks.Start = Start;
+            ReplayCaptureHooks.CaptureFrame = CaptureFrame;
+            ReplayCaptureHooks.Stop = Stop;
+        }
+
+        /// <summary>Start a capture session at the camera's screen size (or 1920x1080 in batch).</summary>
+        public static string Start(string outputDir, int totalFrames, int fps)
+        {
+            return Start(outputDir, totalFrames, fps, 0, 0);
+        }
+
         /// <summary>Start a capture session.</summary>
         /// <param name="outputDir">Absolute path to the capture/frames/ directory.</param>
         /// <param name="totalFrames">Total number of frames to capture.</param>
         /// <param name="fps">Frame rate (determines capture delta-time).</param>
         /// <returns>"ok" or "error: ..."</returns>
-        public static string Start(string outputDir, int totalFrames, int fps)
+        /// <param name="width">Batch render width; 0 uses the screen width.</param>
+        /// <param name="height">Batch render height; 0 uses the screen height.</param>
+        public static string Start(string outputDir, int totalFrames, int fps, int width, int height)
         {
             if (s_Active)
                 return "error: capture already active";
@@ -72,8 +87,8 @@ namespace Gdw.Replay
             else if (cam != null)
             {
                 s_CaptureCamera = cam;
-                int w = Screen.width > 0 ? Screen.width : 1920;
-                int h = Screen.height > 0 ? Screen.height : 1080;
+                int w = width > 0 ? width : (Screen.width > 0 ? Screen.width : 1920);
+                int h = height > 0 ? height : (Screen.height > 0 ? Screen.height : 1080);
                 s_RenderTexture = new RenderTexture(w, h, 24, RenderTextureFormat.ARGB32);
                 s_RenderTexture.Create();
                 s_ReadTexture = new Texture2D(w, h, TextureFormat.RGBA32, false);

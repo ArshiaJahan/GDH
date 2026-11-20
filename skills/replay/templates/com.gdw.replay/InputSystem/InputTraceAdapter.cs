@@ -49,6 +49,10 @@ namespace Gdw.Replay
         int _frameEventCount;
         long _eventsDelivered;
         long _framesProcessed;
+        // True only inside the replay loop's own InputSystem.Update(). The Editor also runs input updates of its
+        // own (many per game frame while it has focus); those must not add frame markers to the trace or advance
+        // the replay controller, or record and replay disagree on which events land in which frame.
+        bool _inLoopUpdate;
         bool _hasOldestEventTime;
         double _oldestEventTime;
 
@@ -225,6 +229,8 @@ namespace Gdw.Replay
                     _controller.OnEvent(RetimestampReplayEvent);
                     _controller.OnFinished(OnReplayFinished);
                     _controller.PlayAllFramesOneByOne();
+                    // Advance only during the replay loop's own input update (see _inLoopUpdate).
+                    _controller.paused = true;
                 }
                 else
                 {
@@ -258,7 +264,7 @@ namespace Gdw.Replay
             if (_mode == Mode.Recording)
             {
                 long before = _trace.eventCount;
-                InputSystem.Update();
+                RunLoopUpdate();
                 long after = _trace.eventCount;
                 SetFrameInfo(before, after - before);
                 _framesProcessed++;
@@ -271,7 +277,9 @@ namespace Gdw.Replay
                 SuppressPhysicalDevices();
                 EnsurePlayerInputPairing();
                 int before = _controller != null ? _controller.position : 0;
-                InputSystem.Update();
+                if (_controller != null) _controller.paused = false;
+                try { RunLoopUpdate(); }
+                finally { if (_controller != null) _controller.paused = true; }
                 int after = _controller != null ? _controller.position : 0;
                 SetFrameInfo(before, after - before);
                 _framesProcessed++;
@@ -279,6 +287,13 @@ namespace Gdw.Replay
             }
 
             throw new ReplayStateException("input trace adapter is not capturing or replaying");
+        }
+
+        void RunLoopUpdate()
+        {
+            _inLoopUpdate = true;
+            try { InputSystem.Update(); }
+            finally { _inLoopUpdate = false; }
         }
 
         /// <summary>Stops recording and atomically writes the trace file. Safe to call more than once.</summary>
@@ -444,7 +459,8 @@ namespace Gdw.Replay
         bool FilterRecordedEvent(InputEventPtr eventPtr, InputDevice device)
         {
             if (!eventPtr.valid) return false;
-            if (eventPtr.type == InputEventTrace.FrameMarkerEvent) return true;
+            // One frame marker per replay-loop input update; markers from the Editor's own updates are dropped.
+            if (eventPtr.type == InputEventTrace.FrameMarkerEvent) return _inLoopUpdate;
             if (device == null || !device.added) return false;
             // Keep only state transitions; text/IME and other event kinds are outside the v1 replay contract.
             int eventType = (int)eventPtr.type;

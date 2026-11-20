@@ -665,6 +665,19 @@ namespace Gdw.Replay
         }
     }
 
+    /// <summary>
+    /// Frame capture for render requests. The Editor assembly installs these at load (the Runtime assembly
+    /// can't reference it); they stay null in a player build, where render isn't available.
+    /// </summary>
+    public static class ReplayCaptureHooks
+    {
+        /// <summary>(framesDir, totalFrames, fps, width, height) -> "ok" or "error: ...".</summary>
+        public static Func<string, int, int, int, int, string> Start;
+        /// <summary>Writes the current frame; returns "ok", "done" or "error: ...".</summary>
+        public static Func<string> CaptureFrame;
+        public static Action Stop;
+    }
+
     public sealed class ReplayCaptureOptions
     {
         public List<string> Formats = new List<string>();

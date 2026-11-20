@@ -43,6 +43,8 @@ namespace Gdw.Replay
 
         /// <summary>Called at each checkpoint to fill input_update / event_start / event_count.</summary>
         internal static Func<FrameInputInfo> InputInfo;
+        /// <summary>Called after each replayed frame's checkpoint (render uses it to write that frame).</summary>
+        internal static Action AfterCheckpoint;
 
         static Mode _mode = Mode.None;
         static ReplaySession _session;
@@ -283,6 +285,7 @@ namespace Gdw.Replay
 
                 CompareFrame(frame, _replayFrames, _replayFrameIndex);
                 _replayFrameIndex++;
+                AfterCheckpoint?.Invoke();
                 if (_replayFrameIndex >= _replayFrames.Count)
                 {
                     Finish();
