@@ -413,7 +413,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d52a594746e2940a696b32ce39f1218a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: CoinDash::CoinDash.GameState
-  coinCount: 8
+  coinCount: 10
 --- !u!4 &963870474
 Transform:
   m_ObjectHideFlags: 0

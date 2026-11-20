@@ -4,6 +4,8 @@ namespace CoinDash
     public sealed class ScoreBoard
     {
         public const int PointsPerCoin = 10;
+        /// <summary>Every BonusEvery-th coin is worth double.</summary>
+        public const int BonusEvery = 5;
 
         public int Score { get; private set; }
         public int CoinsCollected { get; private set; }
@@ -16,7 +18,7 @@ namespace CoinDash
         {
             if (Won) return;
             CoinsCollected++;
-            Score += PointsPerCoin;
+            Score += CoinsCollected % BonusEvery == 0 ? 2 * PointsPerCoin : PointsPerCoin;
         }
     }
 }
