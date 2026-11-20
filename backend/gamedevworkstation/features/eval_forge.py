@@ -132,7 +132,7 @@ def leak_filter(text: str, *, names: list[str], paths: list[str], tests: list[st
 
 
 def default_command(tests: list[str]) -> str:
-    py = [t for t in tests if t.endswith(".py")]
+    py = [t for t in tests if t.endswith(".py") and not t.endswith(("__init__.py", "conftest.py"))]
     js = [t for t in tests if re.search(r"\.(test|spec)\.[jt]sx?$", t)]
     if py:
         return "python -m pytest -q " + " ".join(shlex.quote(t) for t in py)

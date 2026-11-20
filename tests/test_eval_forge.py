@@ -1,54 +1,19 @@
 """Eval Forge v0, part 1: the task format, `gdw eval forge` and the leak filter."""
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
 
 from gamedevworkstation.features import eval_cli, eval_forge, eval_task
 
-MESSAGE = """Clamp scores to the board's range
-
-Scores could go negative after a penalty. Add clamp_score so every update
-stays within 0..max, and use it in apply_penalty.
-
-```python
-def clamp_score(v, hi):
-    return max(0, min(v, hi))
-```
-
-Tested in tests/test_scores.py (test_penalty_never_goes_negative).
-
-Co-Authored-By: Someone <someone@example.com>
-"""
-
-
-def _git(repo: Path, *args: str) -> str:
-    return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True,
-                          encoding="utf-8").stdout.strip()
+from .evalrepo import git as _git
+from .evalrepo import make_repo
 
 
 @pytest.fixture
 def repo(tmp_path):
-    r = tmp_path / "game"
-    (r / "src").mkdir(parents=True)
-    _git(tmp_path, "init", "-q", "-b", "main", str(r))
-    _git(r, "config", "user.email", "t@example.com")
-    _git(r, "config", "user.name", "T")
-    (r / "src" / "scores.py").write_text("def apply_penalty(v, p):\n    return v - p\n", encoding="utf-8")
-    _git(r, "add", "-A")
-    _git(r, "commit", "-q", "-m", "Start")
-    (r / "src" / "scores.py").write_text(
-        "def clamp_score(v, hi):\n    return max(0, min(v, hi))\n\n\n"
-        "def apply_penalty(v, p, hi=100):\n    return clamp_score(v - p, hi)\n", encoding="utf-8")
-    (r / "tests").mkdir()
-    (r / "tests" / "test_scores.py").write_text(
-        "from src.scores import apply_penalty\n\n\n"
-        "def test_penalty_never_goes_negative():\n    assert apply_penalty(3, 10) == 0\n", encoding="utf-8")
-    _git(r, "add", "-A")
-    _git(r, "commit", "-q", "-m", MESSAGE)
-    return r
+    return make_repo(tmp_path)
 
 
 async def test_a_commit_becomes_a_task(repo, tmp_path):
@@ -56,7 +21,7 @@ async def test_a_commit_becomes_a_task(repo, tmp_path):
     t = eval_task.load(out)
     head, parent = _git(repo, "rev-parse", "HEAD"), _git(repo, "rev-parse", "HEAD^")
     assert t.task.source.commit == head and t.task.source.parent == parent
-    assert t.task.grader.tests == ["tests/test_scores.py"]
+    assert t.task.grader.tests == ["tests/__init__.py", "tests/test_scores.py"]
     assert t.task.grader.command == "python -m pytest -q tests/test_scores.py"
     assert t.grader_file("tests/test_scores.py").read_text(encoding="utf-8").startswith("from src.scores")
     # The reference solution is the source change only: the tests stay hidden in the grader.

@@ -2,6 +2,8 @@
 
     gdw eval forge <commit> | --pr N --github OWNER/NAME  [--repo PATH] [--out evals/suite] [--rewrite]
     gdw eval list [--suite evals/suite]
+    gdw eval grade <task> --patch FILE       grade one candidate change
+    gdw eval validate <task>... | --suite DIR  the reference must pass, flawed solutions must fail
 """
 from __future__ import annotations
 
@@ -18,7 +20,7 @@ from fastapi import APIRouter, FastAPI, HTTPException
 from ..agent.tools import wrap_untrusted
 from ..core.effort import EffortApprovalRequired, check_effort
 from ..core.types import EFFORT_LEVELS, ChatRequest, Message, TextBlock, Usage
-from . import eval_forge, eval_task
+from . import eval_forge, eval_grade, eval_task, eval_validate
 
 if TYPE_CHECKING:
     from ..app import AppState
@@ -52,6 +54,89 @@ def make_rewrite(app: "AppState", *, model: str | None = None, effort: str = "lo
         return resp.message().text()
 
     return rewrite, m
+
+
+RUBRIC_SYSTEM = (
+    "You grade a code change against a rubric. Read the rubric, then the diff. Reply with one JSON object: "
+    '{"pass": true|false, "score": 0-1, "reasons": "<one or two sentences>"}. Pass only when every rubric item '
+    "is met by the diff itself; don't give credit for intent or comments.")
+
+
+def make_rubric(app: "AppState", *, model: str | None = None, effort: str = "low") -> eval_grade.Rubric:
+    """The LLM rubric grader (through the effort gate, recorded in usage)."""
+    m = model or app.config.resolve("claude.standard")
+    run_id = "eval-rubric-" + secrets.token_hex(4)
+    check_effort(effort, None, run_id)
+
+    async def judge(rubric: str, diff: str) -> dict:
+        check_effort(effort, None, run_id)
+        mcfg = app.config.model(m)
+        profile = app.config.profiles(mcfg.provider)[0]
+        prov = app.providers.for_model(m, profile)
+        body = f"Rubric:\n{rubric}\n\n" + wrap_untrusted(diff[-60_000:], "candidate diff")
+        req = ChatRequest(model=m, messages=[Message(role="user", content=[TextBlock(text=body)])], system=RUBRIC_SYSTEM,
+                          effort=effort, max_tokens=600, show_thinking=False,  # type: ignore[arg-type]
+                          metadata={"run_id": run_id, "cache_key": "eval_rubric"})
+        resp = await prov.complete(req)
+        app.usage.record(provider=mcfg.provider, model=m, usage=resp.usage, role="assistant", profile=profile,
+                         run_id=run_id, effort=effort, feature="eval_rubric", latency_ms=resp.latency_ms)
+        from .pi_contracts import loads_reply
+
+        try:
+            verdict = loads_reply(resp.message().text())
+        except ValueError:
+            return {"pass": False, "reasons": "the judge's reply wasn't JSON"}
+        return verdict if isinstance(verdict, dict) else {"pass": False, "reasons": "the judge's reply wasn't an object"}
+
+    return judge
+
+
+def _rubric_for(args: argparse.Namespace) -> eval_grade.Rubric | None:
+    if not getattr(args, "rubric_model", None):
+        return None
+    from ..app import AppState
+
+    return make_rubric(AppState(), model=args.rubric_model, effort=args.effort)
+
+
+def _grade_cmd(args: argparse.Namespace) -> int:
+    task = eval_task.load(args.task)
+    patch = sys.stdin.read() if args.patch == "-" else Path(args.patch).read_text(encoding="utf-8")
+    g = asyncio.run(eval_grade.grade_patch(task, patch, repo=Path(args.repo) if args.repo else None,
+                                           rubric=_rubric_for(args)))
+    if args.json:
+        print(json.dumps(g.to_dict(), indent=1))
+    else:
+        for st in g.steps:
+            print(f"{'PASS' if st.passed else 'FAIL'} {st.kind:12} {st.name}" + (" (environment)" if st.environment and not st.passed else ""))
+        if g.tampered:
+            print(f"tampered with hidden tests: {', '.join(g.tampered)} (graded against the originals)")
+        print("passed" if g.passed else "failed")
+    return 0 if g.passed else 1
+
+
+def _validate_cmd(args: argparse.Namespace) -> int:
+    dirs = [Path(t) for t in args.tasks] or eval_task.discover(args.suite)
+    if not dirs:
+        print("gdw eval validate: no tasks given and none in the suite", file=sys.stderr)
+        return 2
+    reports = []
+    for d in dirs:
+        task = eval_task.load(d)
+        rep = asyncio.run(eval_validate.validate(task, repo=Path(args.repo) if args.repo else None,
+                                                 rubric=_rubric_for(args), max_mutants=args.mutants,
+                                                 max_partials=args.partials))
+        reports.append(rep)
+        if not args.markdown and not args.json:
+            print(f"{task.task.id}: reference {'pass' if rep.reference_passed else 'FAIL'}, "
+                  f"{rep.killed}/{rep.flawed} flawed caught ({rep.kill_rate:.0%})")
+            for o in rep.survivors:
+                print(f"  survived: {o.id} ({o.description})")
+    if args.json:
+        print(json.dumps([r.to_dict() for r in reports], indent=1))
+    elif args.markdown:
+        print(eval_validate.render_markdown(reports))
+    return 0 if all(r.ok for r in reports) else 1
 
 
 def _forge_cmd(args: argparse.Namespace) -> int:
@@ -118,6 +203,25 @@ def parser() -> argparse.ArgumentParser:
     f.add_argument("--model")
     f.add_argument("--effort", default="low", choices=list(EFFORT_LEVELS))
     f.set_defaults(fn=_forge_cmd)
+    g = sub.add_parser("grade", help="grade one candidate change against a task")
+    g.add_argument("task", help="the task directory")
+    g.add_argument("--patch", required=True, help="the candidate's diff against the start commit ('-' = stdin)")
+    g.add_argument("--repo", help="the git repository holding the start commit (default: the task's source.repo)")
+    g.add_argument("--json", action="store_true")
+    g.add_argument("--rubric-model", help="grade rubric.md with this model (effort gate applies)")
+    g.add_argument("--effort", default="low", choices=list(EFFORT_LEVELS))
+    g.set_defaults(fn=_grade_cmd)
+    v = sub.add_parser("validate", help="check graders: the reference passes, flawed solutions fail")
+    v.add_argument("tasks", nargs="*", help="task directories (default: every task in --suite)")
+    v.add_argument("--suite", default=DEFAULT_SUITE)
+    v.add_argument("--repo", help="the git repository holding the start commits (default: each task's source.repo)")
+    v.add_argument("--mutants", type=int, default=12)
+    v.add_argument("--partials", type=int, default=6)
+    v.add_argument("--markdown", action="store_true")
+    v.add_argument("--json", action="store_true")
+    v.add_argument("--rubric-model")
+    v.add_argument("--effort", default="low", choices=list(EFFORT_LEVELS))
+    v.set_defaults(fn=_validate_cmd)
     ls = sub.add_parser("list", help="list the suite's tasks and check each one loads")
     ls.add_argument("--suite", default=DEFAULT_SUITE)
     ls.add_argument("--json", action="store_true")
@@ -132,7 +236,7 @@ def cli(argv: list[str]) -> int:
         return int(e.code or 0) if isinstance(e.code, int) else 2
     try:
         return int(args.fn(args))
-    except (eval_forge.ForgeError, eval_task.EvalTaskError, OSError) as e:
+    except (eval_forge.ForgeError, eval_task.EvalTaskError, eval_grade.GradeError, OSError) as e:
         print(f"gdw eval {args.cmd}: {e}", file=sys.stderr)
         return 2
     except EffortApprovalRequired as e:

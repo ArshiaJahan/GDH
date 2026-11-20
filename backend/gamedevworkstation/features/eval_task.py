@@ -74,13 +74,14 @@ class Differential(_M):
 class UnityGrader(_M):
     """Unity tasks: a replay of `replay` (project-relative .gdwreplay) must verify with every frame hash matching,
     and each `assert` must hold on the project's text assets (scene/prefab YAML)."""
-    replay: str = ""
+    project: str = Field("", description="the Unity project's folder inside the repo ('' = the repo root)")
+    replay: str = Field("", description="project-relative .gdwreplay the grader replays")
     asserts: list["AssetAssert"] = Field(default_factory=list)
 
-    @field_validator("replay")
+    @field_validator("replay", "project")
     @classmethod
     def _replay(cls, v: str) -> str:
-        return _rel(v, "unity.replay") if v else v
+        return _rel(v, "unity path") if v else v
 
 
 class AssetAssert(_M):
