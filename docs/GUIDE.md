@@ -54,7 +54,7 @@ Every feature at a glance; the sections below have the details. The README lists
 | **New session screen** | "What should we work on?": type a task, pick **Chat only** or a **Folder** (or a recent one), the Claude model, effort and mode, and send. New sessions from this screen use your Claude subscription; scheduled tasks, campaigns, fleet and subagents keep the built-in loop. Existing sessions keep their harness. |
 | **Claude Code sessions** | Run your own `claude` CLI and login (checked against claude 2.1.308 on a claude.ai subscription), with GDW tools, approvals, Plan mode and `--resume`. Subscription estimates stay outside spend limits; API key logins record `billing='api'` and check spend limits before each turn. See [Claude Code sessions](docs/GUIDE.md#claude-code-sessions). |
 | **CI failure triage** | `gdw triage <run-id\|log>` sorts a failed CI run's failures into compile, test, flaky, infra, dependency and timeout, and names the file and line. It reads GitHub Actions, pytest, vitest, tsc, cargo, npm and uv logs, plus Unity Editor.log and NUnit XML. Rules come first, and a model handles only what the rules can't place. A GitHub Action posts the report on failed PRs. On 26 labelled failed logs the rules got 24/26 categories right before tuning and 26/26 after. See [CI failure triage](docs/GUIDE.md#ci-failure-triage). |
-| **Eval Forge** | `gdw eval forge <commit>` turns a merged commit or PR into an agent task: the start state, a leak-filtered prompt and the commit's tests as hidden graders, plus differential, Unity (EditMode tests, scene asserts, replay hashes) and rubric graders. `gdw eval validate` checks each grader: the reference must pass and generated flawed solutions (mutants, partial fixes, test tampering) must fail. `gdw eval run` runs Claude Code, Codex and the built-in agent for pass@k, cost, time and tool calls, and blames each failure on the agent, the environment or the grader. Tasks export to the Harbor / Terminal-Bench 2.0 format. On the 14-task seed suite every reference passes and 121 of 183 flawed solutions are caught. See [Eval Forge](docs/GUIDE.md#eval-forge). |
+| **Eval Forge** | `gdw eval forge <commit>` turns a merged commit or PR into an agent task: the start state, a leak-filtered prompt and the commit's tests as hidden graders, plus differential, Unity (EditMode tests, scene asserts, replay hashes) and rubric graders. `gdw eval validate` checks each grader: the reference must pass and generated flawed solutions (mutants, partial fixes, test tampering) must fail. `gdw eval run` runs Claude Code, Codex and the built-in agent for pass@k, cost, time and tool calls, and blames each failure on the agent, the environment or the grader. Tasks export to the Harbor / Terminal-Bench 2.0 format. On the 13-task seed suite every reference passes and 111 of 168 flawed solutions are caught. See [Eval Forge](docs/GUIDE.md#eval-forge). |
 | **Cost control** | Daily and per-session spend limits, job budgets, approval for high effort, and a My usage page per model. |
 | **Trailer maker** | Brief → beat sheet → scripted Play Mode capture (Unity Recorder) → ffmpeg edit from a JSON edit list → ElevenLabs music cut to the beat sheet → three reviewers → Steam, YouTube and vertical exports. |
 | **Record and replay** | Record instrumented Unity sessions in the open Editor, replay them with frame-by-frame checkpoint verification (SHA-256 state hashes), and export silent gameplay GIF/MP4. Input System only; the guarantee is same-environment repeatability for the state you register, and a mismatch is reported, not refused. |
@@ -1486,11 +1486,13 @@ and rubric graders need GameDevWorkstation, so they're left out of an export and
 own command expects (for the GDH tasks: `pip install -e . pytest-asyncio respx`). A Unity task's command
 runs the Unity CLI, so its image needs Unity and a licence.
 
-**The seed suite** (`evals/suite/`) has 12 tasks forged from GameDevWorkstation's own history and 2 Unity tasks
+**The seed suite** (`evals/suite/`) has 11 tasks forged from GameDevWorkstation's own history and 2 Unity tasks
 on the bundled Coin Dash sample, graded with the Unity CLI's EditMode tests and a scene assert. GDH tasks run
 with `PYTHONPATH=backend` so the tests import the candidate's code, not the installed app.
 
-Grader validation of the seed suite, run on 2026-11-20 (macOS, Apple M4; the Unity tasks with Unity 6000.3.21f1 through the Unity CLI): every reference passes, and 121 of 183 generated flawed solutions fail (66%; the Unity tasks 15/15). No candidate failed for the environment. Each task's survivors are listed in its `validation.json`. Most are real gaps in the original commit's tests, such as an untested `>=` boundary, a UI handler or a logging flag, so this is a measure of those tests as much as of Eval Forge.
+A task names every new file its hidden tests use, and the declarations they call, grouped by file. Forge refuses a commit whose description is only a title (pass `--text`): a one-line spec can't say what the tests check. Both rules came from the first agent run on 2026-11-20, which found one task whose test imported a module the prompt never named and one whose 71 tests sat behind a one-line commit title. The second task was dropped from the suite.
+
+Grader validation of the seed suite, run on 2026-11-20 (macOS, Apple M4; the Unity tasks with Unity 6000.3.21f1 through the Unity CLI): every reference passes, and 111 of 168 generated flawed solutions fail (66%; the Unity tasks 15/15). No candidate failed for the environment. Each task's survivors are listed in its `validation.json`. Most are real gaps in the original commit's tests, such as an untested `>=` boundary, a UI handler or a logging flag, so this is a measure of those tests as much as of Eval Forge.
 
 | Task | Kind | Reference | Flawed solutions caught |
 |---|---|---|---|
@@ -1504,11 +1506,10 @@ Grader validation of the seed suite, run on 2026-11-20 (macOS, Apple M4; the Uni
 | `replay-live-recordings-verify-and-render-writes-b4264b2` | code | pass | 10/15 (67%) |
 | `replay-make-live-recording-work-end-to-end-7ece383` | code | pass | 5/14 (36%) |
 | `skipper-mode-and-central-doc-for-folder-sessions-2447f98` | code | pass | 9/15 (60%) |
-| `trailer-maker-skill-workflow-edit-list-renderer-e077cb4` | code | pass | 10/15 (67%) |
 | `tune-the-prompt-improver-against-a-real-model-18689d1` | code | pass | 9/13 (69%) |
 | `unity-dash-with-cooldown-c1e0f9b` | unity | pass | 8/8 (100%) |
 | `unity-streak-bonus-and-coin-field-9606c5a` | unity | pass | 7/7 (100%) |
-| **All 14** | | **14/14 pass** | **121/183 (66%)** |
+| **All 13** | | **13/13 pass** | **111/168 (66%)** |
 
 No agent results are published yet: a run uses real model time, so it happens only when asked, and the table
 will carry the date, models, k and raw logs.

@@ -147,15 +147,48 @@ async def test_route_lists_the_suite(repo, tmp_path):
 async def test_the_interface_the_hidden_tests_need_is_named(repo, tmp_path):
     t = eval_task.load(await eval_forge.forge(repo, "HEAD", tmp_path / "suite"))
     # apply_penalty gained a parameter the tests call; clamp_score is only used inside the solution.
-    assert "Interface the tests use" in t.prompt and "- `def apply_penalty(v, p, hi=100):`" in t.prompt
+    assert "Interface the tests use" in t.prompt and "  - `def apply_penalty(v, p, hi=100):`" in t.prompt
     assert "clamp_score" not in t.prompt and "return" not in t.prompt.split("Interface")[1]
 
 
 def test_interface_takes_declarations_not_bodies():
-    patch = ("+public sealed class Dash\n+{\n+    public float Multiplier => IsDashing ? 3f : 1f;\n"
+    patch = ("+++ b/Assets/Dash.cs\n"
+             "+public sealed class Dash\n+{\n+    public float Multiplier => IsDashing ? 3f : 1f;\n"
              "+    public bool TryStart(bool moving)\n+    {\n+        return moving;\n+    }\n"
              "+    private void Hidden() { }\n")
     tests = {"t.cs": b"var d = new Dash(); d.TryStart(moving: true); _ = d.Multiplier;"}
-    assert eval_forge.interface(patch, tests) == [("Dash", "public sealed class Dash"),
-                                                  ("Multiplier", "public float Multiplier"),
-                                                  ("TryStart", "public bool TryStart(bool moving)")]
+    assert [(n, d) for n, d, _ in eval_forge.interface(patch, tests)] == [
+        ("Dash", "public sealed class Dash"), ("Multiplier", "public float Multiplier"),
+        ("TryStart", "public bool TryStart(bool moving)")]
+
+
+def test_new_files_the_tests_import_are_named_and_calls_are_not_declarations():
+    # 2026-11-20: a forged task hid `release_feed.py` as "[new file]" while its hidden test imported it, and listed
+    # `return Path(...)` / `raise HTTPException(...)` as declarations.
+    patch = ("+++ b/backend/app/features/release_feed.py\n+API = 'x'\n+def asset_name(v):\n+    return Path(v)\n"
+             "+    raise HTTPException(400, 'no')\n+++ b/backend/app/features/helper.py\n+def private_bit():\n")
+    tests = {"tests/t.py": b"from app.features import release_feed as F\nF.asset_name('1'); F.API; Path; HTTPException"}
+    new = ["backend/app/features/release_feed.py", "backend/app/features/helper.py"]
+    used = eval_forge.files_tests_use(new, tests)
+    api = eval_forge.interface(patch, tests)
+    assert used == ["backend/app/features/release_feed.py"]
+    assert [n for n, _, _ in api] == ["API", "asset_name"]  # short constants count; calls don't
+    text = eval_forge.interface_text(api, used, new)
+    assert text.splitlines()[1:] == ["- `backend/app/features/release_feed.py` (new file):", "  - `API`",
+                                     "  - `def asset_name(v):`"]
+    # prose in docs isn't a declaration ("record items in" is not a C# record)
+    assert eval_forge.interface("+++ b/SKILL.md\n+record items in the log\n", {"t.py": b"items"}) == []
+    js = "+++ b/a.ts\n+export const LIMIT = 3\n+export function run() {\n+  const seen = new Set()\n+}\n"
+    assert [n for n, _, _ in eval_forge.interface(js, {"t.ts": b"LIMIT run seen"})] == ["LIMIT", "run"]
+    # files the tests read by name (not only imports) count too
+    assert eval_forge.files_tests_use(["skills/x/SKILL.md"], {"t.py": b"(ROOT / 'SKILL.md').read_text()"})
+    # C# tests need the class, not the file it's in
+    assert eval_forge.files_tests_use(["Assets/Scripts/Dash.cs"], {"T.cs": b"new Dash()"}) == []
+
+
+async def test_a_title_alone_is_not_a_task(repo, tmp_path):
+    with pytest.raises(eval_forge.ForgeError, match="only a title"):
+        await eval_forge.forge(repo, "HEAD", tmp_path / "suite", text="Clamp scores")
+    t = eval_task.load(await eval_forge.forge(repo, "HEAD", tmp_path / "suite2", text=(
+        "Clamp scores\n\nScores could go negative after a penalty; keep every update within zero and the max.")))
+    assert t.prompt.startswith("Clamp scores")

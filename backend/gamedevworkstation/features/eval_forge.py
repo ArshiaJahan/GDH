@@ -32,7 +32,7 @@ _DEFS = re.compile(r"\b(?:def|class|function|interface|enum|struct|record)\s+([A
                    r"|\b(?:const|let|var)\s+([A-Za-z_]\w{2,})\s*="
                    r"|^\s*(?:public|private|internal|protected|static|readonly|async|override|virtual|\s)+"
                    r"[\w<>\[\],?]+\s+([A-Z]\w{2,})\s*\("
-                   r"|^\s*([A-Z][A-Z0-9_]{3,})\s*[:=]"
+                   r"|^\s*([A-Z][A-Z0-9_]{2,})\s*[:=]"
                    r"|^\s*public\s+(?:static\s+|readonly\s+|const\s+|override\s+|virtual\s+)*[\w<>\[\],?]+\s+"
                    r"([A-Z]\w{2,})\s*(?:=>|\{|=|;)", re.M)
 
@@ -99,25 +99,73 @@ def solution_only_names(repo: Path, parent: str, patch: str) -> list[str]:
     return out
 
 
-def interface(patch: str, grader_files: dict[str, bytes], limit: int = 20) -> list[tuple[str, str]]:
-    """[(name, declaration)] for definitions the change adds or changes that the hidden tests use: the tests can't
-    be passed without them, so the task names them. Declarations only (bodies are cut), in patch order."""
+MIN_DESCRIPTION_WORDS = 12
+_STATEMENT = re.compile(r"^(?:return|raise|throw|await|yield|new|else|case|assert|if|elif|while|for|with|del|print)\b")
+_CODE_SUFFIXES = (".py", ".ts", ".tsx", ".js", ".jsx", ".cs", ".rs", ".go")
+_MODULE_SUFFIXES = (".py", ".ts", ".tsx", ".js", ".jsx", ".rs", ".go")  # the file name is the import (not C#)
+
+
+def _added_by_file(patch: str) -> list[tuple[str, str]]:
+    """[(path, added line)] in patch order."""
+    out, path = [], ""
+    for line in patch.splitlines():
+        if line.startswith("+++ "):
+            path = line[6:] if line.startswith("+++ b/") else ""
+        elif line.startswith("+"):
+            out.append((path, line[1:]))
+    return out
+
+
+def files_tests_use(paths: list[str], grader_files: dict[str, bytes]) -> list[str]:
+    """The new files the hidden tests reach by path, file name or module name (where the file is the import):
+    the tests can't be passed without them, so the task names them."""
     tests = "\n".join(d.decode("utf-8", "replace") for d in grader_files.values())
-    out: list[tuple[str, str]] = []
+    out = []
+    for path in paths:
+        p = Path(path)
+        if (path in tests or re.search(rf"(?<![\w.-]){re.escape(p.name)}\b", tests)
+                or (p.suffix in _MODULE_SUFFIXES and re.search(rf"\b{re.escape(p.stem)}\b", tests))):
+            out.append(path)
+    return out
+
+
+def interface(patch: str, grader_files: dict[str, bytes], limit: int = 20) -> list[tuple[str, str, str]]:
+    """[(name, declaration, path)] for definitions the change adds or changes that the hidden tests use: the tests
+    can't be passed without them, so the task names them. Declarations only (bodies are cut), in patch order."""
+    tests = "\n".join(d.decode("utf-8", "replace") for d in grader_files.values())
+    out: list[tuple[str, str, str]] = []
     seen: set[str] = set()
-    for line in _added_lines(patch).splitlines():
+    for path, line in _added_by_file(patch):
+        if Path(path).suffix not in _CODE_SUFFIXES or _STATEMENT.match(line.strip()):
+            continue  # `return Path(x)` or `raise Error(...)` is a call, not a declaration
         m = _DEFS.search(line)
         name = next((g for g in m.groups() if g), None) if m else None
+        if m and m.group(2) and line[:1].isspace():
+            continue  # a local `const x = ...` inside a function body isn't part of the interface
         if not name or name in seen or not re.search(rf"\b{re.escape(name)}\b", tests):
             continue
         seen.add(name)
         decl = re.split(r"\s*(?:=>|\{)", line.strip(), maxsplit=1)[0].rstrip(";").strip()
-        if re.match(r"^[A-Z][A-Z0-9_]{3,}\s*[:=]", decl):
+        if re.match(r"^[A-Z][A-Z0-9_]{2,}\s*[:=]", decl):
             decl = decl.split("=")[0].split(":")[0].strip()  # a constant's name, not its value
-        out.append((name, decl))
+        out.append((name, decl, path))
         if len(out) >= limit:
             break
     return out
+
+
+def interface_text(api: list[tuple[str, str, str]], used_files: list[str], new_paths: list[str]) -> str:
+    """The prompt section that names what the hidden tests use, grouped by file."""
+    if not api and not used_files:
+        return ""
+    new = set(new_paths)
+    files = list(dict.fromkeys([p for _, _, p in api] + used_files))
+    lines = ["Interface the tests use (declarations only; the change adds or changes these):"]
+    for f in files:
+        decls = [d for _, d, p in api if p == f]
+        lines.append(f"- `{f}`" + (" (new file)" if f in new else "") + (":" if decls else ""))
+        lines += [f"  - `{d}`" for d in decls]
+    return "\n".join(lines)
 
 
 def _test_names(grader_files: dict[str, bytes]) -> list[str]:
@@ -209,9 +257,11 @@ async def forge(repo: Path, rev: str, out_root: Path, *, task_id: str | None = N
     solution = str(_git(repo, "diff", "--binary", "--no-renames", ch.parent, ch.commit, "--", *source_paths))
     body = text if text is not None else ch.message
     api = interface(solution, grader_files)
-    needed = {n for n, _ in api}
+    needed = {n for n, _, _ in api}
     names = [n for n in solution_only_names(repo, ch.parent, solution) if n not in needed]
     new_paths = [p for p in ch.added if p in source_paths]
+    used_files = files_tests_use(new_paths, grader_files)
+    new_paths = [p for p in new_paths if p not in used_files]  # named in the interface, so not hidden
     hidden = _test_names(grader_files) + tests
     prompt, removed = leak_filter(body, names=names, paths=new_paths, tests=hidden)
     if rewrite is not None:
@@ -219,9 +269,13 @@ async def forge(repo: Path, rev: str, out_root: Path, *, task_id: str | None = N
         removed += [r for r in more if r not in removed]
     if not prompt.strip():
         raise ForgeError("the task text is empty after the leak filter; pass --text with a description")
-    if api:
-        prompt += ("\n\nInterface the tests use (declarations only; the change adds or changes these):\n"
-                   + "\n".join(f"- `{d}`" for _, d in api))
+    if len(prompt.split()) < MIN_DESCRIPTION_WORDS:
+        # A title alone can't specify what the hidden tests check (2026-11-20: a one-line commit had 71 tests).
+        raise ForgeError(f"the task text is only a title (under {MIN_DESCRIPTION_WORDS} words); "
+                         "pass --text with what the change must do")
+    section = interface_text(api, used_files, [p for p in ch.added if p in source_paths])
+    if section:
+        prompt += "\n\n" + section
     title = body.strip().splitlines()[0][:120] if body.strip() else ch.commit[:12]
     tid = task_id or f"{_slug(title)}-{ch.commit[:7]}"
     task = Task(

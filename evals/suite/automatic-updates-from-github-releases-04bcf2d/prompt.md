@@ -14,15 +14,16 @@ Automatic updates from GitHub Releases
   runs it silently and starts the app again.
 
 Interface the tests use (declarations only; the change adds or changes these):
-- `def asset_name(version: str, platform: str | None = None) -> str | None:`
-- `def latest_release(repo: str, fetch: Fetch = _http_get) -> dict | None:`
-- `def download(url: str, dest: Path, size: int | None, fetch: Fetch = _http_get) -> Path:`
-- `class ReleaseFeed:`
-- `def due(self, now: float | None = None) -> bool:`
-- `def poll(self, d: Path, current: str, *, is_newer: Callable[[Any, Any], bool],`
-- `return Path(buf.value)`
-- `def windows_helper_script(*, app_pid: int, backend_pid: int, installer: Path, app_exe: Path | None) -> str:`
-- `def auto_install_enabled(self) -> bool:`
-- `def busy(self) -> int:`
-- `async def maybe_auto_install(self) -> dict | None:`
-- `raise HTTPException(400, f"`
+- `backend/gamedevworkstation/features/release_feed.py` (new file):
+  - `API`
+  - `def asset_name(version: str, platform: str | None = None) -> str | None:`
+  - `def latest_release(repo: str, fetch: Fetch = _http_get) -> dict | None:`
+  - `def download(url: str, dest: Path, size: int | None, fetch: Fetch = _http_get) -> Path:`
+  - `class ReleaseFeed:`
+  - `def due(self, now: float | None = None) -> bool:`
+  - `def poll(self, d: Path, current: str, *, is_newer: Callable[[Any, Any], bool],`
+- `backend/gamedevworkstation/features/updates.py`:
+  - `def windows_helper_script(*, app_pid: int, backend_pid: int, installer: Path, app_exe: Path | None) -> str:`
+  - `def auto_install_enabled(self) -> bool:`
+  - `def busy(self) -> int:`
+  - `async def maybe_auto_install(self) -> dict | None:`

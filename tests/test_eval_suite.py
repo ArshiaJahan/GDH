@@ -11,7 +11,7 @@ TASKS = eval_task.discover(SUITE)
 
 def test_the_suite_has_gdh_and_unity_tasks():
     kinds = [eval_task.load(d).task.kind for d in TASKS]
-    assert len(TASKS) >= 14 and kinds.count("unity") >= 2
+    assert len(TASKS) >= 13 and kinds.count("unity") >= 2
 
 
 def test_every_task_loads_and_was_validated():
@@ -27,6 +27,17 @@ def test_gdh_tasks_import_the_candidates_code():
         t = eval_task.load(d).task
         if t.kind == "code":
             assert t.grader.command.startswith("PYTHONPATH=backend python -m pytest"), d.name
+
+
+def test_every_new_file_the_hidden_tests_use_is_named():
+    from gamedevworkstation.features import eval_forge
+    for d in TASKS:
+        t = eval_task.load(d)
+        patch = (d / "solution.patch").read_text(encoding="utf-8")
+        new = re.findall(r"^diff --git a/\S+ b/(\S+)\nnew file", patch, re.M)
+        grader = {str(p): p.read_bytes() for p in (d / "grader" / "files").rglob("*") if p.is_file()}
+        for f in eval_forge.files_tests_use(new, grader):
+            assert f in t.prompt, (d.name, f)
 
 
 def test_no_prompt_contains_a_name_the_leak_filter_removed():

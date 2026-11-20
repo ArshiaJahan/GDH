@@ -13,23 +13,20 @@ New-session screen: Claude-style composer, Claude subscription by default
 - README and GUIDE updated.
 
 Interface the tests use (declarations only; the change adds or changes these):
-- `raise CampaignError(400, "Workflows run on the built-in loop with an API key, so they aren't "`
-- `def work_dir(sid: str) -> Path:`
-- `raise ValueError(f"Bad session id`
-- `def session_cwd(s: dict) -> Path:`
-- `return Path(s["folder"])`
-- `def account_full_name() -> str:`
-- `def greeting_name(full: str) -> str | None:`
-- `async def greeting() -> dict:`
-- `def new_session_harness(config: Any) -> str:`
-- `export function harnessName(v: string): string`
-- `export function ClaudeStatusNotice(`
-- `const cmd = "claude auth login"`
-- `export function Composer(`
-- `const subscription = !!draft || session.harness === "claude_code"`
-- `const update = async (body:`
-- `const chips = (atts.length > 0 || skill || workflow) && (`
-- `export function recentFolders(sessions: Session[], max = RECENT_MAX): string[]`
-- `const seen = new Set<string>()`
-- `export function NewSession()`
-- `const appState = useStore((s)`
+- `backend/gamedevworkstation/features/claude_code.py`:
+  - `def work_dir(sid: str) -> Path:`
+  - `def session_cwd(s: dict) -> Path:`
+- `backend/gamedevworkstation/features/session_routes.py`:
+  - `def account_full_name() -> str:`
+  - `def greeting_name(full: str) -> str | None:`
+  - `async def greeting() -> dict:`
+- `backend/gamedevworkstation/server.py`:
+  - `def new_session_harness(config: Any) -> str:`
+- `frontend/src/components/ClaudeCode.tsx`:
+  - `export function harnessName(v: string): string`
+  - `export function ClaudeStatusNotice(`
+- `frontend/src/components/Composer.tsx`:
+  - `export function Composer(`
+- `frontend/src/components/NewSession.tsx` (new file):
+  - `export function recentFolders(sessions: Session[], max = RECENT_MAX): string[]`
+  - `export function NewSession()`
