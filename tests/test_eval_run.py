@@ -176,3 +176,30 @@ async def test_builtin_that_cant_start_reports_why(tmp_path):
 def test_cli_rejects_unknown_agents(tmp_path):
     assert eval_cli.cli(["run", "--agents", "gpt9", "--suite", str(tmp_path)]) == 2
     assert eval_cli.cli(["run", "--agents", "codex", "--suite", str(tmp_path / "empty")]) == 2
+
+
+def test_claude_stream_counts_glm_helper_calls_and_model():
+    lines = [{"type": "system", "subtype": "init", "model": "claude-opus-5-5"},
+             {"type": "assistant", "message": {"content": [
+                 {"type": "tool_use", "name": "Bash", "input": {"command": "arkcli +chat --model glm-5-3-flash-260828 \"sum\""}},
+                 {"type": "tool_use", "name": "Bash", "input": {"command": "pytest -q"}}]}},
+             {"type": "result", "is_error": False, "total_cost_usd": 0.1, "usage": {}}]
+    r = eval_run.parse_claude_stream("\n".join(json.dumps(x) for x in lines))
+    assert (r.tool_calls, r.helper_calls, r.model) == (2, 1, "claude-opus-5-5")
+
+
+async def test_claude_code_glm_tells_claude_about_the_helpers(tmp_path, monkeypatch):
+    seen = tmp_path / "prompt.txt"
+    fake = tmp_path / "claude"
+    fake.write_text("#!/bin/bash\nprintf '%s' \"$2\" > " + str(seen) + "\n"
+                    "echo '{\"type\":\"result\",\"is_error\":false,\"total_cost_usd\":0.0}'\n", encoding="utf-8")
+    fake.chmod(0o755)
+    monkeypatch.setattr(eval_run.shutil, "which", lambda name: str(fake) if name in ("claude", "arkcli") else None)
+    r = await eval_run.claude_code_agent(helper_model="glm-5-3-flash-260828")("Fix it.", tmp_path, Limits())
+    text = seen.read_text(encoding="utf-8")
+    assert r.error == "" and "arkcli +chat --model glm-5-3-flash-260828" in text and text.endswith("Fix it.")
+    plain = await eval_run.claude_code_agent()("Fix it.", tmp_path, Limits())
+    assert plain.error == "" and "arkcli" not in seen.read_text(encoding="utf-8")
+    monkeypatch.setattr(eval_run.shutil, "which", lambda name: str(fake) if name == "claude" else None)
+    r = await eval_run.claude_code_agent(helper_model="glm-5-3-flash-260828")("Fix it.", tmp_path, Limits())
+    assert "arkcli isn't installed" in r.error

@@ -142,7 +142,8 @@ def _validate_cmd(args: argparse.Namespace) -> int:
     return 0 if all(r.ok for r in reports) else 1
 
 
-AGENTS = ("builtin", "claude_code", "codex")
+AGENTS = ("builtin", "claude_code", "claude_code_glm", "codex")
+GLM_MODEL = "glm-5-3-flash-260828"
 
 
 def _run_cmd(args: argparse.Namespace) -> int:
@@ -157,7 +158,7 @@ def _run_cmd(args: argparse.Namespace) -> int:
         return 2
     tasks = [eval_task.load(d) for d in dirs]
     app = None
-    if "builtin" in names or "claude_code" in names:
+    if {"builtin", "claude_code", "claude_code_glm"} & set(names):
         from ..app import AppState
 
         app = AppState()
@@ -167,6 +168,8 @@ def _run_cmd(args: argparse.Namespace) -> int:
             agents[n] = eval_run.builtin_agent(app, tier=args.tier, effort=args.effort)  # type: ignore[arg-type]
         elif n == "claude_code":
             agents[n] = eval_run.claude_code_agent(app, model=args.claude_model)
+        elif n == "claude_code_glm":
+            agents[n] = eval_run.claude_code_agent(app, model=args.claude_model, helper_model=args.glm_model)
         else:
             agents[n] = eval_run.codex_agent(model=args.codex_model)
     out = Path(args.out or f"evals/runs/{time.strftime('%Y%m%d-%H%M%S')}")
@@ -291,6 +294,7 @@ def parser() -> argparse.ArgumentParser:
     r.add_argument("--tier", default="claude.standard", help="builtin: the model tier")
     r.add_argument("--claude-model", help="claude_code: --model for the CLI")
     r.add_argument("--codex-model", help="codex: -m for the CLI")
+    r.add_argument("--glm-model", default=GLM_MODEL, help="claude_code_glm: the arkcli model id for the helpers")
     r.add_argument("--rubric-model")
     r.add_argument("--effort", default="low", choices=list(EFFORT_LEVELS))
     r.set_defaults(fn=_run_cmd)

@@ -7,6 +7,8 @@ any) is attributed, and the trial is written to <out>/<task>/<agent>/trial-<n>.j
 Agents
 - claude_code  the user's `claude` CLI in print mode, logged in with their subscription (no API keys reach it);
                Bash and file tools allowed inside the trial worktree. Its cost is the CLI's API-equivalent figure.
+- claude_code_glm  the same, told it may hand side work (reading, summarizing, drafting) to GLM Flash subagents
+               through `arkcli +chat` from Bash; each trial counts those calls.
 - codex        `codex exec` in its workspace-write sandbox (it can only write inside the trial worktree).
 - builtin      GameDevWorkstation's own subagent loop with file tools (read, search, write, edit, delete) and no
                shell, so it can't run tests itself; spend caps and the effort gate apply as in the app.
@@ -48,6 +50,8 @@ class AgentResult:
     tool_calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
+    helper_calls: int = 0  # subagent calls the agent made through a helper CLI (claude_code_glm: arkcli +chat)
+    model: str = ""        # the model the agent reported using, when it says
     log: str = ""          # raw output (stream-json / JSONL / transcript), saved next to the trial
 
 
@@ -73,6 +77,8 @@ class Trial:
     failed_steps: list[str] = field(default_factory=list)
     diff_lines: int = 0
     started_at: str = ""
+    helper_calls: int = 0
+    model: str = ""
 
 
 def pass_at_k(n: int, c: int, k: int) -> float:
@@ -112,10 +118,14 @@ def parse_claude_stream(text: str) -> AgentResult:
             ev = json.loads(line)
         except ValueError:
             continue
-        if ev.get("type") == "assistant":
+        if ev.get("type") == "system" and ev.get("subtype") == "init" and ev.get("model"):
+            r.model = str(ev["model"])
+        elif ev.get("type") == "assistant":
             for block in (ev.get("message") or {}).get("content") or []:
                 if isinstance(block, dict) and block.get("type") == "tool_use":
                     r.tool_calls += 1
+                    if block.get("name") == "Bash" and "arkcli +chat" in str((block.get("input") or {}).get("command")):
+                        r.helper_calls += 1
         elif ev.get("type") == "result":
             r.cost_usd = ev.get("total_cost_usd", ev.get("cost_usd"))
             u = ev.get("usage") or {}
@@ -148,14 +158,26 @@ def parse_codex_jsonl(text: str) -> AgentResult:
     return r
 
 
-def claude_code_agent(app: "AppState | None" = None, *, model: str | None = None) -> AgentFn:
+GLM_HELPER = ("You can hand side work to cheap GLM Flash subagents and run several at once: reading or summarizing "
+              "large files, drafting boilerplate, first-pass reviews. Call one from Bash with\n"
+              "  arkcli +chat --model {model} --no-progress --thinking disabled --instructions \"<role>\" \"<task>\"\n"
+              "(add --input @<file> to attach a file; the answer is printed). Check what they return before you use "
+              "it; you're responsible for the result. Do the judgement and the final edits yourself.\n\n")
+
+
+def claude_code_agent(app: "AppState | None" = None, *, model: str | None = None,
+                      helper_model: str | None = None) -> AgentFn:
+    """The claude CLI on a trial; with `helper_model`, it's told it may use GLM Flash subagents via arkcli."""
     from .claude_cli import child_env, find_cli
 
     async def run(prompt: str, tree: Path, limits: Limits) -> AgentResult:
         cli = find_cli(app.config) if app is not None else shutil.which("claude")
         if not cli:
             return AgentResult(error="the claude CLI isn't installed")
-        argv = [cli, "-p", TASK_PREAMBLE + prompt, "--output-format", "stream-json", "--verbose",
+        if helper_model and not shutil.which("arkcli"):
+            return AgentResult(error="arkcli isn't installed, so the GLM helpers can't run")
+        preamble = TASK_PREAMBLE + (GLM_HELPER.format(model=helper_model) if helper_model else "")
+        argv = [cli, "-p", preamble + prompt, "--output-format", "stream-json", "--verbose",
                 "--permission-mode", "acceptEdits", "--allowedTools", "Bash,Read,Edit,Write,MultiEdit,Glob,Grep,LS",
                 "--max-budget-usd", f"{limits.max_cost_usd:g}"]
         if model:
@@ -268,6 +290,7 @@ async def run_trial(task: LoadedTask, agent_name: str, agent: AgentFn, n: int, o
                   cost_usd=round(res.cost_usd, 4) if res.cost_usd is not None else None, tool_calls=res.tool_calls,
                   input_tokens=res.input_tokens, output_tokens=res.output_tokens, agent_error=res.error,
                   timed_out=res.timed_out, tampered=grade.tampered if grade else [],
+                  helper_calls=res.helper_calls, model=res.model,
                   failed_steps=[s.name for s in grade.steps if not s.passed] if grade else [],
                   diff_lines=sum(1 for l in diff.splitlines() if l[:1] in "+-" and l[:3] not in ("+++", "---")),
                   started_at=started)
@@ -309,17 +332,21 @@ def summarize(results: list[Trial], k: int) -> list[dict]:
                      "mean_cost_usd": round(sum(costs) / len(costs), 4) if costs else None,
                      "mean_wall_s": round(sum(r.wall_s for r in rs) / len(rs), 1),
                      "mean_tool_calls": round(sum(r.tool_calls for r in rs) / len(rs), 1),
+                     "mean_helper_calls": round(sum(r.helper_calls for r in rs) / len(rs), 1),
+                     "models": sorted({r.model for r in rs if r.model}),
                      "blame": {b: sum(1 for r in rs if r.blame == b) for b in ("agent", "environment", "grader")}})
     return rows
 
 
 def render_markdown(results: list[Trial], k: int) -> str:
     rows = summarize(results, k)
-    out = [f"| Agent | Tasks | pass@1 | pass@{k} | Mean cost | Mean wall | Mean tool calls | Failures: agent / env / grader |",
-           "|---|---|---|---|---|---|---|---|"]
+    out = [f"| Agent | Tasks | pass@1 | pass@{k} | Mean cost | Mean wall | Mean tool calls | Mean helper calls | "
+           "Failures: agent / env / grader |",
+           "|---|---|---|---|---|---|---|---|---|"]
     for r in rows:
         cost = f"${r['mean_cost_usd']:.3f}" if r["mean_cost_usd"] is not None else "n/a"
         b = r["blame"]
         out.append(f"| {r['agent']} | {r['tasks']} | {r['pass@1']:.0%} | {r[f'pass@{k}']:.0%} | {cost} | "
-                   f"{r['mean_wall_s']:.0f}s | {r['mean_tool_calls']:.0f} | {b['agent']} / {b['environment']} / {b['grader']} |")
+                   f"{r['mean_wall_s']:.0f}s | {r['mean_tool_calls']:.0f} | {r['mean_helper_calls']:.1f} | "
+                   f"{b['agent']} / {b['environment']} / {b['grader']} |")
     return "\n".join(out)
