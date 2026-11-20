@@ -4,6 +4,7 @@
     gdw eval list [--suite evals/suite]
     gdw eval grade <task> --patch FILE       grade one candidate change
     gdw eval validate <task>... | --suite DIR  the reference must pass, flawed solutions must fail
+    gdw eval run --agents claude_code,codex,builtin --trials K [<task>... | --suite DIR]
 """
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ import asyncio
 import json
 import secrets
 import sys
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -20,7 +22,7 @@ from fastapi import APIRouter, FastAPI, HTTPException
 from ..agent.tools import wrap_untrusted
 from ..core.effort import EffortApprovalRequired, check_effort
 from ..core.types import EFFORT_LEVELS, ChatRequest, Message, TextBlock, Usage
-from . import eval_forge, eval_grade, eval_task, eval_validate
+from . import eval_forge, eval_grade, eval_run, eval_task, eval_validate
 
 if TYPE_CHECKING:
     from ..app import AppState
@@ -139,6 +141,42 @@ def _validate_cmd(args: argparse.Namespace) -> int:
     return 0 if all(r.ok for r in reports) else 1
 
 
+AGENTS = ("builtin", "claude_code", "codex")
+
+
+def _run_cmd(args: argparse.Namespace) -> int:
+    names = [a.strip() for a in args.agents.split(",") if a.strip()]
+    bad = [a for a in names if a not in AGENTS]
+    if not names or bad:
+        print(f"gdw eval run: --agents takes {', '.join(AGENTS)}", file=sys.stderr)
+        return 2
+    dirs = [Path(t) for t in args.tasks] or eval_task.discover(args.suite)
+    if not dirs:
+        print("gdw eval run: no tasks given and none in the suite", file=sys.stderr)
+        return 2
+    tasks = [eval_task.load(d) for d in dirs]
+    app = None
+    if "builtin" in names or "claude_code" in names:
+        from ..app import AppState
+
+        app = AppState()
+    agents: dict[str, eval_run.AgentFn] = {}
+    for n in names:
+        if n == "builtin":
+            agents[n] = eval_run.builtin_agent(app, tier=args.tier, effort=args.effort)  # type: ignore[arg-type]
+        elif n == "claude_code":
+            agents[n] = eval_run.claude_code_agent(app, model=args.claude_model)
+        else:
+            agents[n] = eval_run.codex_agent(model=args.codex_model)
+    out = Path(args.out or f"evals/runs/{time.strftime('%Y%m%d-%H%M%S')}")
+    out.mkdir(parents=True, exist_ok=True)
+    results = asyncio.run(eval_run.run_suite(tasks, agents, args.trials, out, repo=Path(args.repo) if args.repo else None,
+                                             parallel=args.parallel, rubric=_rubric_for(args)))
+    print(eval_run.render_markdown(results, args.trials))
+    print(f"\nraw trials, logs and diffs: {out}")
+    return 0
+
+
 def _forge_cmd(args: argparse.Namespace) -> int:
     repo = Path(args.repo).expanduser()
     text, rev, pr, slug = None, args.target, None, args.source
@@ -222,6 +260,20 @@ def parser() -> argparse.ArgumentParser:
     v.add_argument("--rubric-model")
     v.add_argument("--effort", default="low", choices=list(EFFORT_LEVELS))
     v.set_defaults(fn=_validate_cmd)
+    r = sub.add_parser("run", help="run agents on tasks, k trials each; reports pass@k, cost, time, tool calls")
+    r.add_argument("tasks", nargs="*", help="task directories (default: every task in --suite)")
+    r.add_argument("--suite", default=DEFAULT_SUITE)
+    r.add_argument("--agents", required=True, help=f"comma-separated: {', '.join(AGENTS)}")
+    r.add_argument("--trials", type=int, default=1, help="k: trials per task and agent")
+    r.add_argument("--parallel", type=int, default=1)
+    r.add_argument("--out", help="results directory (default evals/runs/<time>)")
+    r.add_argument("--repo", help="the git repository holding the start commits (default: each task's source.repo)")
+    r.add_argument("--tier", default="claude.standard", help="builtin: the model tier")
+    r.add_argument("--claude-model", help="claude_code: --model for the CLI")
+    r.add_argument("--codex-model", help="codex: -m for the CLI")
+    r.add_argument("--rubric-model")
+    r.add_argument("--effort", default="low", choices=list(EFFORT_LEVELS))
+    r.set_defaults(fn=_run_cmd)
     ls = sub.add_parser("list", help="list the suite's tasks and check each one loads")
     ls.add_argument("--suite", default=DEFAULT_SUITE)
     ls.add_argument("--json", action="store_true")
