@@ -37,7 +37,7 @@ over MCP, and the app, not the model, decides when a task is done.**
 
 **Checked in CI** ([latest run on `main`](https://github.com/ArshiaJahan/GDH/actions/workflows/ci.yml?query=branch%3Amain), 2026-11-19):
 
-- **1,715 backend and 178 frontend tests** pass on every push (macOS runner); a Windows runner builds the installer and smoke-tests its backend.
+- **1,779 backend and 179 frontend tests** pass on every push (macOS runner); a Windows runner builds the installer and smoke-tests its backend.
 - **CI failure triage** sorts 26 of 26 labelled failed CI logs into the right category ([`tests/test_triage_fixtures.py`](tests/test_triage_fixtures.py); 24/26 before the rules were tuned, see the [guide](docs/GUIDE.md#ci-failure-triage)).
 - **4 releases** so far ([v0.6.0 to v0.7.2](https://github.com/ArshiaJahan/GDH/releases)), each with a macOS app and a Windows installer, published by CI.
 
