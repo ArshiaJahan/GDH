@@ -11,7 +11,7 @@ grader
 - deterministic graders passed and only the model rubric failed: the judge disagrees with the tests
 agent
 - everything else: the grader is validated and the environment was fine, so the work was wrong
-  (tampering with the hidden tests is noted in the reason)
+  (if it wrote or edited files at the hidden tests' paths, the reason notes that they were replaced)
 
 A pass is never attributed. Low kill rates don't move blame to the grader by themselves (a failing agent
 still failed the reference-validated tests); they're reported next to the score instead.
@@ -65,7 +65,9 @@ def attribute(grade: Grade | None, *, agent_error: str = "", agent_timed_out: bo
         return Attribution("grader", "the reference solution failed this grader in validation")
     if failed and all(s.kind == "rubric" for s in failed):
         return Attribution("grader", "only the model rubric failed; the deterministic graders passed")
-    tamper = f" (it also changed hidden tests: {', '.join(grade.tampered)})" if grade.tampered else ""
+    # Writing its own tests at those paths is normal; the grader used the originals either way.
+    tamper = (f" (its own versions of {', '.join(grade.tampered)} were replaced by the hidden tests)"
+              if grade.tampered else "")
     names = ", ".join(f"{s.kind} {s.name!r}" for s in failed) or "the grader"
     return Attribution("agent", f"failed {names}{tamper}")
 

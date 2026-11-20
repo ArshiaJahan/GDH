@@ -62,7 +62,7 @@ async def test_a_suite_run_scores_and_attributes(task, tmp_path):
     by = {r.agent: [x for x in results if x.agent == r.agent] for r in results}
     assert all(r.passed and r.blame == "" for r in by["solver"])
     assert all(not r.passed and r.blame == "agent" for r in by["idler"])
-    assert all(r.blame == "agent" and r.tampered == ["tests/test_scores.py"] and "hidden tests" in r.reason
+    assert all(r.blame == "agent" and r.tampered == ["tests/test_scores.py"] and "replaced by the hidden tests" in r.reason
                for r in by["tamperer"])
     assert all(r.blame == "environment" for r in by["logged_out"])
     assert all(r.blame == "agent" and "time limit" in r.reason for r in by["slowpoke"])
@@ -203,3 +203,9 @@ async def test_claude_code_glm_tells_claude_about_the_helpers(tmp_path, monkeypa
     monkeypatch.setattr(eval_run.shutil, "which", lambda name: str(fake) if name == "claude" else None)
     r = await eval_run.claude_code_agent(helper_model="glm-5-3-flash-260828")("Fix it.", tmp_path, Limits())
     assert "arkcli isn't installed" in r.error
+
+
+def test_k1_tables_dont_repeat_pass_at_1():
+    t = eval_run.Trial("t", "a", 1, True, "", "passed", 1.0, 0.1, 2, 0, 0, "", False)
+    md = eval_run.render_markdown([t], 1)
+    assert md.splitlines()[0].count("pass@1") == 1 and "| a | 1 | 100% | $0.100 |" in md

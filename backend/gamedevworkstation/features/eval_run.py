@@ -340,13 +340,15 @@ def summarize(results: list[Trial], k: int) -> list[dict]:
 
 def render_markdown(results: list[Trial], k: int) -> str:
     rows = summarize(results, k)
-    out = [f"| Agent | Tasks | pass@1 | pass@{k} | Mean cost | Mean wall | Mean tool calls | Mean helper calls | "
+    pk = f" pass@{k} |" if k > 1 else ""
+    out = [f"| Agent | Tasks | pass@1 |{pk} Mean cost | Mean wall | Mean tool calls | Mean helper calls | "
            "Failures: agent / env / grader |",
-           "|---|---|---|---|---|---|---|---|---|"]
+           "|---|---|---|" + ("---|" if k > 1 else "") + "---|---|---|---|---|"]
     for r in rows:
         cost = f"${r['mean_cost_usd']:.3f}" if r["mean_cost_usd"] is not None else "n/a"
         b = r["blame"]
-        out.append(f"| {r['agent']} | {r['tasks']} | {r['pass@1']:.0%} | {r[f'pass@{k}']:.0%} | {cost} | "
+        kcol = f" {r[f'pass@{k}']:.0%} |" if k > 1 else ""
+        out.append(f"| {r['agent']} | {r['tasks']} | {r['pass@1']:.0%} |{kcol} {cost} | "
                    f"{r['mean_wall_s']:.0f}s | {r['mean_tool_calls']:.0f} | {r['mean_helper_calls']:.1f} | "
                    f"{b['agent']} / {b['environment']} / {b['grader']} |")
     return "\n".join(out)
