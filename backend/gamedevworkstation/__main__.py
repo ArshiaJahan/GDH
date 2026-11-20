@@ -83,6 +83,10 @@ def _setup_logging() -> None:
 
 
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "eval":  # `gdw eval ...`: Eval Forge, no server
+        from .features import eval_cli
+
+        raise SystemExit(eval_cli.cli(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "triage":  # `gdw triage ...`: CI failure triage, no server
         from .features import ci_triage
 
