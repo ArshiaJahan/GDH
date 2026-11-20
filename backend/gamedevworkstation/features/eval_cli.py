@@ -5,6 +5,7 @@
     gdw eval grade <task> --patch FILE       grade one candidate change
     gdw eval validate <task>... | --suite DIR  the reference must pass, flawed solutions must fail
     gdw eval run --agents claude_code,codex,builtin --trials K [<task>... | --suite DIR]
+    gdw eval export [<task>... | --suite DIR] --out DIR   as Harbor tasks (the Terminal-Bench 2.0 format)
 """
 from __future__ import annotations
 
@@ -22,7 +23,7 @@ from fastapi import APIRouter, FastAPI, HTTPException
 from ..agent.tools import wrap_untrusted
 from ..core.effort import EffortApprovalRequired, check_effort
 from ..core.types import EFFORT_LEVELS, ChatRequest, Message, TextBlock, Usage
-from . import eval_forge, eval_grade, eval_run, eval_task, eval_validate
+from . import eval_export, eval_forge, eval_grade, eval_run, eval_task, eval_validate
 
 if TYPE_CHECKING:
     from ..app import AppState
@@ -177,6 +178,24 @@ def _run_cmd(args: argparse.Namespace) -> int:
     return 0
 
 
+def _export_cmd(args: argparse.Namespace) -> int:
+    dirs = [Path(t) for t in args.tasks] or eval_task.discover(args.suite)
+    if not dirs:
+        print("gdw eval export: no tasks given and none in the suite", file=sys.stderr)
+        return 2
+    code = 0
+    for d in dirs:
+        task = eval_task.load(d)
+        try:
+            out = eval_export.export(task, Path(args.out), repo=Path(args.repo) if args.repo else None,
+                                     base_image=args.base_image, clone_url=args.clone_url, org=args.org)
+            print(f"{task.task.id}: {out}")
+        except eval_export.ExportError as e:
+            print(f"{task.task.id}: skipped: {e}", file=sys.stderr)
+            code = 1
+    return code
+
+
 def _forge_cmd(args: argparse.Namespace) -> int:
     repo = Path(args.repo).expanduser()
     text, rev, pr, slug = None, args.target, None, args.source
@@ -274,6 +293,15 @@ def parser() -> argparse.ArgumentParser:
     r.add_argument("--rubric-model")
     r.add_argument("--effort", default="low", choices=list(EFFORT_LEVELS))
     r.set_defaults(fn=_run_cmd)
+    x = sub.add_parser("export", help="write tasks as Harbor tasks (the Terminal-Bench 2.0 format)")
+    x.add_argument("tasks", nargs="*", help="task directories (default: every task in --suite)")
+    x.add_argument("--suite", default=DEFAULT_SUITE)
+    x.add_argument("--out", required=True)
+    x.add_argument("--repo", help="the git repository holding the start commits (default: each task's source.repo)")
+    x.add_argument("--base-image", default="python:3.12-slim")
+    x.add_argument("--clone-url", help="have the image clone this URL instead of copying a snapshot of the repo")
+    x.add_argument("--org", default="gdh", help="the [task] name prefix (org/name)")
+    x.set_defaults(fn=_export_cmd)
     ls = sub.add_parser("list", help="list the suite's tasks and check each one loads")
     ls.add_argument("--suite", default=DEFAULT_SUITE)
     ls.add_argument("--json", action="store_true")
@@ -288,7 +316,8 @@ def cli(argv: list[str]) -> int:
         return int(e.code or 0) if isinstance(e.code, int) else 2
     try:
         return int(args.fn(args))
-    except (eval_forge.ForgeError, eval_task.EvalTaskError, eval_grade.GradeError, OSError) as e:
+    except (eval_forge.ForgeError, eval_task.EvalTaskError, eval_grade.GradeError, eval_export.ExportError,
+            OSError) as e:
         print(f"gdw eval {args.cmd}: {e}", file=sys.stderr)
         return 2
     except EffortApprovalRequired as e:
