@@ -4,7 +4,8 @@
 
 # GameDevWorkstation
 
-**A local AI agent workstation for solo Unity developers, on your Mac.**
+**A local agent workstation for Unity: Claude orchestrates Claude and Codex subagents, drives the Unity Editor
+over MCP, and the app, not the model, decides when a task is done.**
 
 [![CI](https://github.com/ArshiaJahan/GDH/actions/workflows/ci.yml/badge.svg)](https://github.com/ArshiaJahan/GDH/actions/workflows/ci.yml)
 [![macOS](https://img.shields.io/badge/macOS-13%2B%20·%20Apple%20Silicon-000000?logo=apple&logoColor=white)](#quick-start)
@@ -17,18 +18,30 @@
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](frontend/package.json)
 [![Tauri](https://img.shields.io/badge/Tauri-v2-24C8DB?logo=tauri&logoColor=white)](src-tauri/Cargo.toml)
 
+[Quick start](#quick-start) ·
 [Demo](#demo) ·
 [Highlights](#highlights) ·
 [Built for Unity](#built-for-unity) ·
 [Campaigns](#campaigns-and-workflows) ·
 [How it works](#how-it-works) ·
 [Security](#security-model) ·
-[Quick start](#quick-start) ·
 [Full guide](docs/GUIDE.md)
 
 </div>
 
 ---
+
+![A real task in a small Unity project: the orchestrator drives the Unity Editor over MCP, the quality ladder turns green, and a replay verify matches every state hash](docs/media/hero-unity-task.gif)
+
+<sub>Real runs on 2026-11-19, cut for length: Claude Code (claude.ai subscription) driving Unity 6000.3.21f1 through MCP for Unity 10.3, in a copy of the bundled <a href="examples/unity-sample">sample project</a>. Tool calls went through GameDevWorkstation's approval cards. Three sessions: an art pass on the scene, a compile and test pass, and a seeded record that replayed in batch mode with all 6,774 frame hashes matching.</sub>
+
+**Checked in CI** ([latest run on `main`](https://github.com/ArshiaJahan/GDH/actions/workflows/ci.yml?query=branch%3Amain), 2026-11-19):
+
+- **1,707 backend and 178 frontend tests** pass on every push (macOS runner); a Windows runner builds the installer and smoke-tests its backend.
+- **CI failure triage** sorts 26 of 26 labelled failed CI logs into the right category ([`tests/test_triage_fixtures.py`](tests/test_triage_fixtures.py); 24/26 before the rules were tuned, see the [guide](docs/GUIDE.md#ci-failure-triage)).
+- **4 releases** so far ([v0.6.0 to v0.7.2](https://github.com/ArshiaJahan/GDH/releases)), each with a macOS app and a Windows installer, published by CI.
+
+<p align="center"><a href="https://github.com/ArshiaJahan/GDH/releases/latest"><b>⬇ Download the latest release</b></a> · macOS 13+ (Apple Silicon) · Windows x64 (experimental)</p>
 
 Coding agents are good at writing C#; they are bad at knowing when a game change is actually
 *done*. GameDevWorkstation is a desktop app that puts Claude
@@ -38,11 +51,62 @@ when a turn may end: it enforces compile and test gates, asks for fresh evidence
 is marked done, and keeps your project's taste and past mistakes in front of the agent.
 Everything runs locally; the backend listens on `127.0.0.1` only.
 
-> [!IMPORTANT]
-> **Built for macOS.** GameDevWorkstation targets macOS 13 or later on Apple Silicon. A
-> [Windows x64 build](#windows-experimental) is experimental. CI builds its installer on every push and
-> checks that the bundled backend starts and serves sessions, but the desktop app hasn't been tested by
-> hand on Windows, and the built-in terminal is macOS-only. Linux is not supported.
+## Quick start
+
+**Download:** [the latest release](https://github.com/ArshiaJahan/GDH/releases/latest) has the macOS
+app (`-macos-arm64.dmg`) and the Windows installer (`-x64-setup.exe`). Neither is notarized or signed
+by a vendor: on macOS, right-click the app and choose Open the first time; on Windows, SmartScreen
+warns on first run. Release builds update themselves: they check for a newer release now and then,
+download it, and install it once no session is running (`[updates] auto_install = false` turns that
+off, and Settings still offers Install & restart).
+
+To build from source:
+
+**Prerequisites:** macOS 13+ on Apple Silicon, Xcode Command Line Tools, Node 20+,
+[uv](https://docs.astral.sh/uv/) (Python 3.11+), Rust stable (for the desktop app), and
+optionally the Codex CLI (`npm i -g @openai/codex`).
+
+```bash
+git clone https://github.com/ArshiaJahan/GDH.git
+cd GDH
+make dev        # build the UI, start the backend on 127.0.0.1:8765, open it in your browser
+```
+
+Add keys in **Settings → Accounts** (Anthropic required; OpenAI and ElevenLabs optional). To
+click around without keys, run with `GDW_FAKE_PROVIDERS=1`.
+
+| Command | What it does |
+|---|---|
+| `make dev` | Build the UI and run the backend in your browser |
+| `make backend` + `make ui` | Backend plus hot-reloading UI on :5173 |
+| `make live` | The desktop window from this checkout, with UI hot reload |
+| `make app` | Build `dist/GameDevWorkstation.app` and `dist/GameDevWorkstation.dmg` (ad-hoc signed) |
+| `make install` | Copy the built app to `/Applications` |
+| `make release` | Bump the version and publish to the local updates folder (the running app installs it when idle) |
+| `make test` | Backend tests, UI type check and UI tests |
+
+### Windows (experimental)
+
+Each [release](https://github.com/ArshiaJahan/GDH/releases/latest) has an NSIS installer, and every CI
+run on `main` also uploads one as the `GameDevWorkstation-windows-x64` artifact. It's unsigned, so
+SmartScreen warns on first run. To build it yourself on Windows with Node 20+, uv, Rust (MSVC) and the Visual Studio
+C++ build tools:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1   # dist\GameDevWorkstation-<version>-x64-setup.exe
+```
+
+On Windows, data lives in `%APPDATA%\GameDevWorkstation`, API keys in Windows Credential Manager, agent
+commands run in PowerShell, and cancelling a job ends its process tree (`taskkill /T`). Updates run
+the new installer silently and restart the app; rollback is macOS-only. The terminal drawer isn't
+available there yet, and the Unity MCP and CLI routes haven't been tried on Windows.
+
+**For Unity:** install `com.coplaydev.unity-mcp` in your project, run
+`uvx --from mcpforunityserver==10.3.0 mcp-for-unity` once while online to cache the server, open
+the Editor, and invoke `unity-router` from the composer's skill button or with `/skill unity-router`.
+Or skip MCP: with the official Unity CLI installed (Unity Hub ships it), set the Unity backend to
+CLI in Settings → Unity; batch jobs need nothing in the project, the live Editor route needs the
+`com.unity.pipeline` package (the chip offers to add it).
 
 ## Demo
 
@@ -63,29 +127,26 @@ the Skills & MCP page.
 <sub>Recorded from this repository's own UI in a browser, against a small demo Unity folder; the Claude
 Code reply is a real run.</sub>
 
+> [!IMPORTANT]
+> **Built for macOS.** GameDevWorkstation targets macOS 13 or later on Apple Silicon. A
+> [Windows x64 build](#windows-experimental) is experimental. CI builds its installer on every push and
+> checks that the bundled backend starts and serves sessions, but the desktop app hasn't been tested by
+> hand on Windows, and the built-in terminal is macOS-only. Linux is not supported.
+
 ## Highlights
+
+The eight that matter most; [all 19 features](docs/GUIDE.md#all-features) are in the guide.
 
 | | |
 |---|---|
 | **Orchestrator + subagents** | Claude plans the job and delegates units to Claude and OpenAI subagents (API or Codex CLI), choosing model tier and effort per unit, with parallel git worktrees for code. |
 | **Unity skill pack** | 18 Unity 6 skills behind a router: compile/fix loops, Play Mode verification, record and replay, headless builds, safe scene/prefab edits, perf and game-feel passes, trailers, shipping. |
-| **Unity: MCP or CLI** | Drive Unity through MCP for Unity or the official Unity CLI (live Editor via `com.unity.pipeline`, or batch when it's closed), switchable per project and session, with a status chip and one `unity` tool for the agent. |
-| **Hooks and gates** | A hooks engine runs checks at fixed points of a turn: compile before finishing, tests in verify phases, blocked edits to generated files. |
 | **Quality ladder L1-L4** | Stories reach `done` only with fresh, app-observed evidence: compile, tests, play evidence and screenshots, design critique. |
-| **Taste and scars** | `TASTE.md`, `POSTMORTEMS.md` and an anti-pattern ratchet keep design judgement and past failures in the loop. |
-| **Campaigns and workflows** | Multi-session goals with a plan you approve, phases whose checks the app evaluates itself, a campaign file in the project (decisions, discoveries, handoffs), checkpoints, autopilot with budget and stall breakers; or a one-session workflow with `/workflow`. 9 Unity templates ship, including a trailer workflow. |
-| **Fleet** | Parallel waves of subagents in their own worktrees, each with a claimed scope, scope-checked merges, a conflict circuit breaker and discoveries relayed to the next wave. |
-| **Progressive skill disclosure** | A compact skill index in the system prompt; full skill text is loaded only when used and survives compaction. |
-| **Prompt improver (game dev)** | On by default. When a game-dev request in a Unity session is unclear, it checks your project first, then asks up to 3 grounded questions with recommended options, and drafts a task card (goal, acceptance, quality level, route). A Backlog task is created automatically only after you answer a question; start a message with `*` to skip the improver for that turn. |
-| **Task board** | A Kanban board (Tasks tab) you and the agent share: tasks with codes like `Task00001`, subtasks and checklists, comments, history and linked sessions, live updates. In chat: `/task new`, `/task <code>`, `/task move`, `/task done`, `/task list`, `/task link`; the agent uses `task_*` tools. Scheduled prompts live on the Schedule page. |
-| **New session screen** | "What should we work on?": type a task, pick **Chat only** or a **Folder** (or a recent one), the Claude model, effort and mode, and send. New sessions from this screen use your Claude subscription; scheduled tasks, campaigns, fleet and subagents keep the built-in loop. Existing sessions keep their harness. |
-| **Claude Code sessions** | Run your own `claude` CLI and login (checked against claude 2.1.308 on a claude.ai subscription), with GDW tools, approvals, Plan mode and `--resume`. Subscription estimates stay outside spend limits; API key logins record `billing='api'` and check spend limits before each turn. See [Claude Code sessions](docs/GUIDE.md#claude-code-sessions). |
-| **CI failure triage** | `gdw triage <run-id\|log>` sorts a failed CI run's failures into compile, test, flaky, infra, dependency and timeout, and names the file and line. It reads GitHub Actions, pytest, vitest, tsc, cargo, npm and uv logs, plus Unity Editor.log and NUnit XML. Rules come first, and a model handles only what the rules can't place. A GitHub Action posts the report on failed PRs. On 26 labelled failed logs the rules got 24/26 categories right before tuning and 26/26 after. See [CI failure triage](docs/GUIDE.md#ci-failure-triage). |
-| **Cost control** | Daily and per-session spend limits, job budgets, approval for high effort, and a My usage page per model. |
-| **Trailer maker** | Brief → beat sheet → scripted Play Mode capture (Unity Recorder) → ffmpeg edit from a JSON edit list → ElevenLabs music cut to the beat sheet → three reviewers → Steam, YouTube and vertical exports. |
 | **Record and replay** | Record instrumented Unity sessions in the open Editor, replay them with frame-by-frame checkpoint verification (SHA-256 state hashes), and export silent gameplay GIF/MP4. Input System only; the guarantee is same-environment repeatability for the state you register, and a mismatch is reported, not refused. |
-| **ElevenLabs** | Speech, transcription, sound effects and music (including composition plans with exact section lengths), in chat and on their own page. |
-| **Native shell, local updates** | Tauri v2 app with a frozen FastAPI backend, keys in the macOS Keychain and in-app updates from GitHub Releases or a local folder. |
+| **Fleet** | Parallel waves of subagents in their own worktrees, each with a claimed scope, scope-checked merges, a conflict circuit breaker and discoveries relayed to the next wave. |
+| **CI failure triage** | `gdw triage <run-id\|log>` sorts a failed CI run's failures into compile, test, flaky, infra, dependency and timeout, and names the file and line. It reads GitHub Actions, pytest, vitest, tsc, cargo, npm and uv logs, plus Unity Editor.log and NUnit XML. Rules come first, and a model handles only what the rules can't place. A GitHub Action posts the report on failed PRs. On 26 labelled failed logs the rules got 24/26 categories right before tuning and 26/26 after. See [CI failure triage](docs/GUIDE.md#ci-failure-triage). |
+| **Claude Code sessions** | Run your own `claude` CLI and login (checked against claude 2.1.308 on a claude.ai subscription), with GDW tools, approvals, Plan mode and `--resume`. Subscription estimates stay outside spend limits; API key logins record `billing='api'` and check spend limits before each turn. See [Claude Code sessions](docs/GUIDE.md#claude-code-sessions). |
+| **Cost control** | Daily and per-session spend limits, job budgets, approval for high effort, and a My usage page per model. |
 
 ### Claude Code sessions
 
@@ -300,64 +361,7 @@ reconnect. Config and data live under `~/Library/Application Support/GameDevWork
 - **Isolation.** Hook files need trust by hash; the app's own git calls disable repository hooks;
   `web_fetch` refuses private and local addresses.
 
-## Quick start
-
-**Download:** [the latest release](https://github.com/ArshiaJahan/GDH/releases/latest) has the macOS
-app (`-macos-arm64.dmg`) and the Windows installer (`-x64-setup.exe`). Neither is notarized or signed
-by a vendor: on macOS, right-click the app and choose Open the first time; on Windows, SmartScreen
-warns on first run. Release builds update themselves: they check for a newer release now and then,
-download it, and install it once no session is running (`[updates] auto_install = false` turns that
-off, and Settings still offers Install & restart).
-
-To build from source:
-
-**Prerequisites:** macOS 13+ on Apple Silicon, Xcode Command Line Tools, Node 20+,
-[uv](https://docs.astral.sh/uv/) (Python 3.11+), Rust stable (for the desktop app), and
-optionally the Codex CLI (`npm i -g @openai/codex`).
-
-```bash
-git clone https://github.com/ArshiaJahan/GameDevWorkstation.git
-cd GameDevWorkstation
-make dev        # build the UI, start the backend on 127.0.0.1:8765, open it in your browser
-```
-
-Add keys in **Settings → Accounts** (Anthropic required; OpenAI and ElevenLabs optional). To
-click around without keys, run with `GDW_FAKE_PROVIDERS=1`.
-
-| Command | What it does |
-|---|---|
-| `make dev` | Build the UI and run the backend in your browser |
-| `make backend` + `make ui` | Backend plus hot-reloading UI on :5173 |
-| `make live` | The desktop window from this checkout, with UI hot reload |
-| `make app` | Build `dist/GameDevWorkstation.app` and `dist/GameDevWorkstation.dmg` (ad-hoc signed) |
-| `make install` | Copy the built app to `/Applications` |
-| `make release` | Bump the version and publish to the local updates folder (the running app installs it when idle) |
-| `make test` | Backend tests, UI type check and UI tests |
-
-### Windows (experimental)
-
-Each [release](https://github.com/ArshiaJahan/GDH/releases/latest) has an NSIS installer, and every CI
-run on `main` also uploads one as the `GameDevWorkstation-windows-x64` artifact. It's unsigned, so
-SmartScreen warns on first run. To build it yourself on Windows with Node 20+, uv, Rust (MSVC) and the Visual Studio
-C++ build tools:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1   # dist\GameDevWorkstation-<version>-x64-setup.exe
-```
-
-On Windows, data lives in `%APPDATA%\GameDevWorkstation`, API keys in Windows Credential Manager, agent
-commands run in PowerShell, and cancelling a job ends its process tree (`taskkill /T`). Updates run
-the new installer silently and restart the app; rollback is macOS-only. The terminal drawer isn't
-available there yet, and the Unity MCP and CLI routes haven't been tried on Windows.
-
-**For Unity:** install `com.coplaydev.unity-mcp` in your project, run
-`uvx --from mcpforunityserver==10.3.0 mcp-for-unity` once while online to cache the server, open
-the Editor, and invoke `unity-router` from the composer's skill button or with `/skill unity-router`.
-Or skip MCP: with the official Unity CLI installed (Unity Hub ships it), set the Unity backend to
-CLI in Settings → Unity; batch jobs need nothing in the project, the live Editor route needs the
-`com.unity.pipeline` package (the chip offers to add it).
-
-### Configuration
+## Configuration
 
 Defaults ship with the app; [`config.example.toml`](config.example.toml) lists them with
 comments. Your `config.toml` holds only what you change, and most of it is editable in Settings:
@@ -421,7 +425,10 @@ troubleshooting.
 - The campaign file sections, exit-evidence table, discovery records, scope claims, lifecycle hook
   ideas and postmortem format are adapted from [Citadel](https://github.com/SethGammon/Citadel)
   by Seth Gammon (MIT). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-- Unity Editor control uses [MCP for Unity](https://github.com/CoplayDev/unity-mcp) by Coplay.
+- Unity Editor control uses [MCP for Unity](https://github.com/CoplayDev/unity-mcp) by Coplay. The
+  `unity-mcp-orchestrator` skill is adapted from its `unity-mcp-skill` (MIT).
+- The `graphify` skill is adapted from [graphify](https://github.com/Graphify-Labs/graphify) by Safi Shamsi
+  and the Graphify contributors (Apache-2.0).
 - Built with [Tauri](https://tauri.app), [FastAPI](https://fastapi.tiangolo.com),
   [React](https://react.dev) and [Vite](https://vite.dev).
 

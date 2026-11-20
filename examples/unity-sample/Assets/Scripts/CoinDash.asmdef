@@ -1,0 +1,6 @@
+{
+    "name": "CoinDash",
+    "rootNamespace": "CoinDash",
+    "references": ["Unity.InputSystem", "Gdw.Replay.Runtime"],
+    "autoReferenced": true
+}

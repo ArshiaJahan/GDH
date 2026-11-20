@@ -1,0 +1,13 @@
+/Library/
+/Temp/
+/Obj/
+/Logs/
+/UserSettings/
+/Build/
+/Builds/
+/MemoryCaptures/
+/Packages/packages-lock.json
+*.csproj
+*.sln
+.vs/
+.idea/

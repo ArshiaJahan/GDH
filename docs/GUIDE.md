@@ -10,6 +10,7 @@ transcription, sound and music. Everything runs locally; the backend listens on 
 
 ## Contents
 
+- [All features](#all-features)
 - [Prerequisites](#prerequisites)
 - [Setup and development](#setup-and-development)
 - [Adding API keys](#adding-api-keys)
@@ -31,6 +32,32 @@ transcription, sound and music. Everything runs locally; the backend listens on 
 - [Where things live](#where-things-live)
 - [Notes and differences from the original spec](#notes-and-differences-from-the-original-spec)
 - [Troubleshooting](#troubleshooting)
+
+## All features
+
+Every feature at a glance; the sections below have the details. The README lists the top eight.
+
+| | |
+|---|---|
+| **Orchestrator + subagents** | Claude plans the job and delegates units to Claude and OpenAI subagents (API or Codex CLI), choosing model tier and effort per unit, with parallel git worktrees for code. |
+| **Unity skill pack** | 18 Unity 6 skills behind a router: compile/fix loops, Play Mode verification, record and replay, headless builds, safe scene/prefab edits, perf and game-feel passes, trailers, shipping. |
+| **Unity: MCP or CLI** | Drive Unity through MCP for Unity or the official Unity CLI (live Editor via `com.unity.pipeline`, or batch when it's closed), switchable per project and session, with a status chip and one `unity` tool for the agent. |
+| **Hooks and gates** | A hooks engine runs checks at fixed points of a turn: compile before finishing, tests in verify phases, blocked edits to generated files. |
+| **Quality ladder L1-L4** | Stories reach `done` only with fresh, app-observed evidence: compile, tests, play evidence and screenshots, design critique. |
+| **Taste and scars** | `TASTE.md`, `POSTMORTEMS.md` and an anti-pattern ratchet keep design judgement and past failures in the loop. |
+| **Campaigns and workflows** | Multi-session goals with a plan you approve, phases whose checks the app evaluates itself, a campaign file in the project (decisions, discoveries, handoffs), checkpoints, autopilot with budget and stall breakers; or a one-session workflow with `/workflow`. 9 Unity templates ship, including a trailer workflow. |
+| **Fleet** | Parallel waves of subagents in their own worktrees, each with a claimed scope, scope-checked merges, a conflict circuit breaker and discoveries relayed to the next wave. |
+| **Progressive skill disclosure** | A compact skill index in the system prompt; full skill text is loaded only when used and survives compaction. |
+| **Prompt improver (game dev)** | On by default. When a game-dev request in a Unity session is unclear, it checks your project first, then asks up to 3 grounded questions with recommended options, and drafts a task card (goal, acceptance, quality level, route). A Backlog task is created automatically only after you answer a question; start a message with `*` to skip the improver for that turn. |
+| **Task board** | A Kanban board (Tasks tab) you and the agent share: tasks with codes like `Task00001`, subtasks and checklists, comments, history and linked sessions, live updates. In chat: `/task new`, `/task <code>`, `/task move`, `/task done`, `/task list`, `/task link`; the agent uses `task_*` tools. Scheduled prompts live on the Schedule page. |
+| **New session screen** | "What should we work on?": type a task, pick **Chat only** or a **Folder** (or a recent one), the Claude model, effort and mode, and send. New sessions from this screen use your Claude subscription; scheduled tasks, campaigns, fleet and subagents keep the built-in loop. Existing sessions keep their harness. |
+| **Claude Code sessions** | Run your own `claude` CLI and login (checked against claude 2.1.308 on a claude.ai subscription), with GDW tools, approvals, Plan mode and `--resume`. Subscription estimates stay outside spend limits; API key logins record `billing='api'` and check spend limits before each turn. See [Claude Code sessions](docs/GUIDE.md#claude-code-sessions). |
+| **CI failure triage** | `gdw triage <run-id\|log>` sorts a failed CI run's failures into compile, test, flaky, infra, dependency and timeout, and names the file and line. It reads GitHub Actions, pytest, vitest, tsc, cargo, npm and uv logs, plus Unity Editor.log and NUnit XML. Rules come first, and a model handles only what the rules can't place. A GitHub Action posts the report on failed PRs. On 26 labelled failed logs the rules got 24/26 categories right before tuning and 26/26 after. See [CI failure triage](docs/GUIDE.md#ci-failure-triage). |
+| **Cost control** | Daily and per-session spend limits, job budgets, approval for high effort, and a My usage page per model. |
+| **Trailer maker** | Brief → beat sheet → scripted Play Mode capture (Unity Recorder) → ffmpeg edit from a JSON edit list → ElevenLabs music cut to the beat sheet → three reviewers → Steam, YouTube and vertical exports. |
+| **Record and replay** | Record instrumented Unity sessions in the open Editor, replay them with frame-by-frame checkpoint verification (SHA-256 state hashes), and export silent gameplay GIF/MP4. Input System only; the guarantee is same-environment repeatability for the state you register, and a mismatch is reported, not refused. |
+| **ElevenLabs** | Speech, transcription, sound effects and music (including composition plans with exact section lengths), in chat and on their own page. |
+| **Native shell, local updates** | Tauri v2 app with a frozen FastAPI backend, keys in the macOS Keychain and in-app updates from GitHub Releases or a local folder. |
 
 ## Prerequisites
 
