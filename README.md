@@ -31,13 +31,13 @@ over MCP, and the app, not the model, decides when a task is done.**
 
 ---
 
-![A real task in a small Unity project: the orchestrator drives the Unity Editor over MCP, the quality ladder turns green, and a replay verify matches every state hash](docs/media/hero-unity-task.gif)
+![A real task in a small Unity project: Codex generates the textures, Claude Code applies them in the Unity Editor over MCP, then a seeded run is recorded, replayed in batch with every frame hash matching, and rendered to video](docs/media/hero-unity-task.gif)
 
-<sub>Real runs on 2026-11-19, cut for length: Claude Code (claude.ai subscription) driving Unity 6000.3.21f1 through MCP for Unity 10.3, in a copy of the bundled <a href="examples/unity-sample">sample project</a>. Tool calls went through GameDevWorkstation's approval cards. Three sessions: an art pass on the scene, a compile and test pass, and a seeded record that replayed in batch mode with all 6,774 frame hashes matching.</sub>
+<sub>One real session on 2026-11-19, cut for length: Claude Code (claude.ai subscription) driving Unity 6000.3.21f1 through MCP for Unity 10.3, in a copy of the bundled <a href="examples/unity-sample">sample project</a>, with tool calls going through GameDevWorkstation's approval cards. Codex CLI (<code>codex exec</code> with image generation) made the three textures. The gameplay clip is the <code>replay_render</code> export of a seed-42 recording whose batch replay matched all 1,968 frame hashes; a demo-only autopilot script (not part of the sample) steers the player.</sub>
 
 **Checked in CI** ([latest run on `main`](https://github.com/ArshiaJahan/GDH/actions/workflows/ci.yml?query=branch%3Amain), 2026-11-19):
 
-- **1,707 backend and 178 frontend tests** pass on every push (macOS runner); a Windows runner builds the installer and smoke-tests its backend.
+- **1,715 backend and 178 frontend tests** pass on every push (macOS runner); a Windows runner builds the installer and smoke-tests its backend.
 - **CI failure triage** sorts 26 of 26 labelled failed CI logs into the right category ([`tests/test_triage_fixtures.py`](tests/test_triage_fixtures.py); 24/26 before the rules were tuned, see the [guide](docs/GUIDE.md#ci-failure-triage)).
 - **4 releases** so far ([v0.6.0 to v0.7.2](https://github.com/ArshiaJahan/GDH/releases)), each with a macOS app and a Windows installer, published by CI.
 
