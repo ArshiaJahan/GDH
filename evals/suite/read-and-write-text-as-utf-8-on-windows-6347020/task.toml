@@ -1,0 +1,36 @@
+schema = "gdw.eval.task/1"
+id = "read-and-write-text-as-utf-8-on-windows-6347020"
+title = "Read and write text as UTF-8 on Windows"
+kind = "code"
+tags = [
+    "gdh",
+    "python",
+]
+
+[source]
+repo = "ArshiaJahan/GDH"
+commit = "6347020038c1178eec0013c1c84cc08eb7c05310"
+parent = "30388dd4ca5fb81db072a267bb4b29f04cea8d5d"
+title = "Read and write text as UTF-8 on Windows"
+
+[grader]
+command = "PYTHONPATH=backend python -m pytest -q -p no:cacheprovider tests/test_text_encoding.py"
+tests = [
+    "tests/test_text_encoding.py",
+    "scripts/app_test.py",
+]
+checks = []
+rubric = false
+setup = ""
+timeout_s = 300
+
+[limits]
+agent_timeout_s = 1800
+max_cost_usd = 2.0
+
+[forge]
+removed = [
+    "test: tests/test_text_encoding.py",
+]
+rewritten_by = ""
+forged_at = "2026-11-20T08:37:52Z"

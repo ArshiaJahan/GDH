@@ -1,0 +1,47 @@
+schema = "gdw.eval.task/1"
+id = "claude-code-sessions-verified-against-the-live-c-153be82"
+title = "Claude Code sessions: verified against the live claude CLI"
+kind = "code"
+tags = [
+    "gdh",
+    "python",
+]
+
+[source]
+repo = "ArshiaJahan/GDH"
+commit = "153be82ed3154538e40470b8965d66f653a38a42"
+parent = "9ed4dbda191d7fb6b655c7bea4d8612207f03432"
+title = "Claude Code sessions: verified against the live claude CLI"
+
+[grader]
+command = "PYTHONPATH=backend python -m pytest -q -p no:cacheprovider tests/test_claude_code.py tests/test_rv3_data.py"
+tests = [
+    "tests/fixtures/claude_stream/ask_user_question.jsonl",
+    "tests/fixtures/claude_stream/auth_status.jsonl",
+    "tests/fixtures/claude_stream/hello.jsonl",
+    "tests/fixtures/claude_stream/init.jsonl",
+    "tests/fixtures/claude_stream/initialize.jsonl",
+    "tests/fixtures/claude_stream/interrupt.jsonl",
+    "tests/fixtures/claude_stream/mcp_handshake.jsonl",
+    "tests/fixtures/claude_stream/plan_e2e.jsonl",
+    "tests/fixtures/claude_stream/prompt_tool.jsonl",
+    "tests/fixtures/claude_stream/resume_failed.jsonl",
+    "tests/fixtures/claude_stream/sigint.jsonl",
+    "tests/fixtures/claude_stream/tools.jsonl",
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+    "tests/test_rv3_data.py",
+]
+checks = []
+rubric = false
+setup = ""
+timeout_s = 300
+
+[limits]
+agent_timeout_s = 1800
+max_cost_usd = 2.0
+
+[forge]
+removed = []
+rewritten_by = ""
+forged_at = "2026-11-20T08:37:46Z"

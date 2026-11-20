@@ -1,0 +1,266 @@
+{
+ "task": "replay-live-recordings-verify-and-render-writes-b4264b2",
+ "validated_at": "2026-11-20T10:02:41Z",
+ "reference_passed": true,
+ "flawed": 15,
+ "killed": 10,
+ "kill_rate": 0.667,
+ "survivors": [
+  {
+   "id": "mutant-2",
+   "kind": "mutant",
+   "description": "!= to == in: if (_controller != null) _controller.paused = false;",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-3",
+   "kind": "mutant",
+   "description": ">= to > in: if existing is not None and (since is None or not existing.get(\"op\") or _mtime(r",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-4",
+   "kind": "mutant",
+   "description": "> to >= in: int w = width > 0 ? width : (Screen.width > 0 ? Screen.width : 1920);",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-6",
+   "kind": "mutant",
+   "description": "true to false in: _controller.paused = true;",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-7",
+   "kind": "mutant",
+   "description": "false to true in: finally { _inLoopUpdate = false; }",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+   ],
+   "failed_steps": []
+  }
+ ],
+ "outcomes": [
+  {
+   "id": "noop",
+   "kind": "noop",
+   "description": "no change: the start state",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-1",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/features/replay.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-2",
+   "kind": "partial",
+   "description": "leaves out hunk 2 of backend/gamedevworkstation/features/replay.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-3",
+   "kind": "partial",
+   "description": "leaves out hunk 3 of backend/gamedevworkstation/features/replay.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-4",
+   "kind": "partial",
+   "description": "leaves out hunk 4 of backend/gamedevworkstation/features/replay.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-1",
+   "kind": "mutant",
+   "description": "== to != in: export = _export_capture(root, run_id, request) if op == \"render\" and result.sta",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-2",
+   "kind": "mutant",
+   "description": "!= to == in: if (_controller != null) _controller.paused = false;",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-3",
+   "kind": "mutant",
+   "description": ">= to > in: if existing is not None and (since is None or not existing.get(\"op\") or _mtime(r",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-4",
+   "kind": "mutant",
+   "description": "> to >= in: int w = width > 0 ? width : (Screen.width > 0 ? Screen.width : 1920);",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-5",
+   "kind": "mutant",
+   "description": "False to True in: return {\"ok\": False, \"outputs\": [], \"error\": \"the render wrote no frames\"}",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-6",
+   "kind": "mutant",
+   "description": "true to false in: _controller.paused = true;",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-7",
+   "kind": "mutant",
+   "description": "false to true in: finally { _inLoopUpdate = false; }",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-8",
+   "kind": "mutant",
+   "description": "and to or in: done = [r[\"output\"] for r in res[\"results\"] if r.get(\"ok\") and r.get(\"output\")]",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "tamper-delete",
+   "kind": "tamper",
+   "description": "no fix; deletes the hidden tests",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "tamper-skip",
+   "kind": "tamper",
+   "description": "no fix; rewrites the hidden tests to pass",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_replay_render_export.py",
+    "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  }
+ ],
+ "reference_steps": [
+  {
+   "name": "tests",
+   "kind": "command",
+   "passed": true,
+   "exit": 0,
+   "duration_s": 1.881592916790396,
+   "output": "........                                                                 [100%]\n8 passed in 0.92s\n",
+   "environment": false,
+   "detail": {}
+  }
+ ],
+ "ok": true
+}

@@ -1,0 +1,295 @@
+{
+ "task": "skipper-mode-and-central-doc-for-folder-sessions-2447f98",
+ "validated_at": "2026-11-20T10:19:37Z",
+ "reference_passed": true,
+ "flawed": 15,
+ "killed": 9,
+ "kill_rate": 0.6,
+ "survivors": [
+  {
+   "id": "partial-3",
+   "kind": "partial",
+   "description": "leaves out hunk 3 of backend/gamedevworkstation/features/claude_code.py",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "partial-4",
+   "kind": "partial",
+   "description": "leaves out hunk 4 of backend/gamedevworkstation/features/claude_code.py",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-2",
+   "kind": "mutant",
+   "description": "True to False in: turn.saw_output = True",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-4",
+   "kind": "mutant",
+   "description": "true to false in: ...(r.skipper ? { skipper: true } : {}), ...(r.central_doc ? { central_doc: true",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-5",
+   "kind": "mutant",
+   "description": "false to true in: const NO_PREFS: Prefs = { location: \"chat\", folder: null, model: null, effort: n",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-7",
+   "kind": "mutant",
+   "description": "&& to || in: const folders = folder && !recents.includes(folder) ? [folder, ...recents] : rec",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  }
+ ],
+ "outcomes": [
+  {
+   "id": "noop",
+   "kind": "noop",
+   "description": "no change: the start state",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-1",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/features/claude_code.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-2",
+   "kind": "partial",
+   "description": "leaves out hunk 2 of backend/gamedevworkstation/features/claude_code.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-3",
+   "kind": "partial",
+   "description": "leaves out hunk 3 of backend/gamedevworkstation/features/claude_code.py",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "partial-4",
+   "kind": "partial",
+   "description": "leaves out hunk 4 of backend/gamedevworkstation/features/claude_code.py",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-1",
+   "kind": "mutant",
+   "description": "== to != in: modes = {k: True for k in (\"skipper\", \"central_doc\") if body.get(k) is True and ",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-2",
+   "kind": "mutant",
+   "description": "True to False in: turn.saw_output = True",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-3",
+   "kind": "mutant",
+   "description": "False to True in: quiet: bool = False  # a Skipper / central-doc step: text only, nothing shown in",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-4",
+   "kind": "mutant",
+   "description": "true to false in: ...(r.skipper ? { skipper: true } : {}), ...(r.central_doc ? { central_doc: true",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-5",
+   "kind": "mutant",
+   "description": "false to true in: const NO_PREFS: Prefs = { location: \"chat\", folder: null, model: null, effort: n",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-6",
+   "kind": "mutant",
+   "description": "and to or in: if turn and turn.quiet:",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-7",
+   "kind": "mutant",
+   "description": "&& to || in: const folders = folder && !recents.includes(folder) ? [folder, ...recents] : rec",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-8",
+   "kind": "mutant",
+   "description": "or to and in: st, out = s.get(\"settings\") or {}, []",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "tamper-delete",
+   "kind": "tamper",
+   "description": "no fix; deletes the hidden tests",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "tamper-skip",
+   "kind": "tamper",
+   "description": "no fix; rewrites the hidden tests to pass",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  }
+ ],
+ "reference_steps": [
+  {
+   "name": "tests",
+   "kind": "command",
+   "passed": true,
+   "exit": 0,
+   "duration_s": 48.62927991570905,
+   "output": "........................................................................ [ 59%]\n..................................................                       [100%]\n122 passed in 45.91s\n",
+   "environment": false,
+   "detail": {}
+  }
+ ],
+ "ok": true
+}

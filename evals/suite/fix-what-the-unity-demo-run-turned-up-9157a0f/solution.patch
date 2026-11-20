@@ -1,0 +1,435 @@
+diff --git a/backend/gamedevworkstation/approvals.py b/backend/gamedevworkstation/approvals.py
+index 59e2a99..79804ad 100644
+--- a/backend/gamedevworkstation/approvals.py
++++ b/backend/gamedevworkstation/approvals.py
+@@ -94,6 +94,11 @@ class Approvals:
+         except asyncio.TimeoutError:
+             self.resolve(aid, "deny")
+             return {"status": "denied", "timed_out": True}
++        except asyncio.CancelledError:
++            # The caller gave up (a tool call the client aborted, a cancelled task): nothing will act on an
++            # answer now, so the card mustn't stay open looking live.
++            self.expire(aid)
++            raise
+ 
+     def expire_session(self, session_id: str) -> int:
+         """A stopped run can't act on its open cards any more. Returns how many were open."""
+diff --git a/backend/gamedevworkstation/features/claude_code.py b/backend/gamedevworkstation/features/claude_code.py
+index 7758d46..03bc37d 100644
+--- a/backend/gamedevworkstation/features/claude_code.py
++++ b/backend/gamedevworkstation/features/claude_code.py
+@@ -519,7 +519,8 @@ class Proc:
+         resets = info.get("resetsAt") if isinstance(info.get("resetsAt"), (int, float)) else None
+         window = str(info.get("rateLimitType") or "").replace("_", " ")
+         text = ("Claude plan limit reached" if status == "rejected" else "Close to the Claude plan limit") + \
+-            (f" ({window})" if window else "") + (time.strftime(", resets at %H:%M", time.localtime(resets)) if resets else "")
++            (f" ({window})" if window else "") + (time.strftime(", resets %a %H:%M" if resets - time.time() > 86400 else ", resets at %H:%M",
++                           time.localtime(resets)) if resets else "")
+         self.app.bus.publish("agent.status", {"kind": "rate_limit", "text": text, "until": resets,
+                                               "retry_in_s": round(max(0.0, resets - time.time()), 1) if resets else None},
+                              self.sid)
+diff --git a/backend/gamedevworkstation/features/gdw_mcp.py b/backend/gamedevworkstation/features/gdw_mcp.py
+index 764cb67..6a09ec1 100644
+--- a/backend/gamedevworkstation/features/gdw_mcp.py
++++ b/backend/gamedevworkstation/features/gdw_mcp.py
+@@ -124,9 +124,15 @@ class GdwMcp:
+         return f"http://127.0.0.1:{int(port)}{PATH}"
+ 
+     def config_json(self, token: str) -> dict:
+-        """The --mcp-config document for one claude process (`type` is required for URL servers [docs])."""
++        """The --mcp-config document for one claude process (`type` is required for URL servers [docs]).
++
++        `timeout` (ms) lifts Claude Code's 300 s idle limit for this server only: a Unity batch run or an
++        approval card the user hasn't answered yet sends nothing for minutes, and the CLI would abort the call
++        while the work (or the card) carried on."""
++        from .claude_cli import MCP_TOOL_TIMEOUT_MS
+         return {"mcpServers": {SERVER: {"type": "http", "url": self.url(),
+-                                        "headers": {"Authorization": f"Bearer {token}"}}}}
++                                        "headers": {"Authorization": f"Bearer {token}"},
++                                        "timeout": MCP_TOOL_TIMEOUT_MS}}}
+ 
+     # -------------------------------------------------------------- tools
+ 
+diff --git a/backend/gamedevworkstation/features/ladder.py b/backend/gamedevworkstation/features/ladder.py
+index a040154..97c13b1 100644
+--- a/backend/gamedevworkstation/features/ladder.py
++++ b/backend/gamedevworkstation/features/ladder.py
+@@ -706,6 +706,10 @@ class Level:
+                 "shots": self.shots}
+ 
+ 
++def _is_replay_test(name: str) -> bool:
++    return "ReplayVerificationTests" in name or "LogMatchesCheckpoints" in name
++
++
+ def _brief(r: dict, fresh: bool | None = None) -> dict:
+     d = r.get("detail") or {}
+     return {"id": r["id"], "level": r["level"], "status": r["status"], "source": r["source"], "observed": r["observed"],
+@@ -886,9 +890,14 @@ class Ladder:
+             st = crit["detail"]["results"][ac.id]
+             cands.append((crit["ts"], st == "PASS", [crit], f"check_criteria {st}"))
+         names = ac.values("test")
+-        if names:
++        # A replay verification test proves something only through a tool-observed replay_verified report:
++        # an EditMode run "covering" the milestone never ran it (it needs a recorded archive and a request).
++        replay_names = [n for n in names if _is_replay_test(n)]
++        test_names = [n for n in names if n not in replay_names]
++        tests_cand = None
++        if test_names:
+             got = []
+-            for name in names:
++            for name in test_names:
+                 hit = None
+                 for r in rows:
+                     d = r["detail"]
+@@ -906,11 +915,13 @@ class Ladder:
+                 if hit is None:
+                     break
+                 got.append(hit)
+-            if len(got) == len(names):
+-                cands.append((min(h[0] for h in got), all(h[1] for h in got), [h[2] for h in got],
+-                              "; ".join(h[3] for h in got if not h[1]) or "tests passed"))
++            if len(got) == len(test_names):
++                tests_cand = (min(h[0] for h in got), all(h[1] for h in got), [h[2] for h in got],
++                              "; ".join(h[3] for h in got if not h[1]) or "tests passed")
++        if tests_cand is not None and not replay_names:
++            cands.append(tests_cand)
+         # Replay-verified evidence for headless ACs with replay verification tests.
+-        if any("ReplayVerificationTests" in n or "LogMatchesCheckpoints" in n for n in names):
++        if replay_names:
+             for r in rows:
+                 d = r["detail"]
+                 if d.get("kind") != "replay_verified":
+@@ -934,7 +945,13 @@ class Ladder:
+                 detail = "replay_verified pass"
+                 if env == "differs":
+                     detail += " (environment differs)"
+-                cands.append((r["ts"], True, [r], detail))
++                if test_names:  # the AC also names ordinary tests: it needs both kinds of evidence
++                    if tests_cand is None:
++                        continue
++                    detail = f"{detail}; {tests_cand[3]}"
++                    cands.append((min(r["ts"], tests_cand[0]), tests_cand[1], [r, *tests_cand[2]], detail))
++                else:
++                    cands.append((r["ts"], True, [r], detail))
+         return cands
+ 
+     def _ac_level(self, ac: AC, story: Story, rows: list[dict], content: tuple[float, str | None], lv: Level,
+diff --git a/backend/gamedevworkstation/features/pi_contracts.py b/backend/gamedevworkstation/features/pi_contracts.py
+index b909059..28de443 100644
+--- a/backend/gamedevworkstation/features/pi_contracts.py
++++ b/backend/gamedevworkstation/features/pi_contracts.py
+@@ -226,13 +226,28 @@ def _fact_text(f: Any) -> str:
+     return str(f).strip() if isinstance(f, (int, float)) else ""
+ 
+ 
++def loads_reply(text: str) -> Any:
++    """A model's JSON reply: drops a code fence, accepts raw newlines/tabs inside strings (models write them in
++    multi-line fields) and, failing that, the outermost {...} when the model wrapped the object in prose."""
++    body = _FENCE.sub("", (text or "").strip())
++    try:
++        return json.loads(body, strict=False)
++    except json.JSONDecodeError as first:
++        start, end = body.find("{"), body.rfind("}")
++        if 0 <= start < end and (start, end) != (0, len(body) - 1):
++            try:
++                return json.loads(body[start:end + 1], strict=False)
++            except json.JSONDecodeError:
++                pass
++        raise first
++
++
+ def parse_eval(text: str) -> EvalResult:
+     """Parse the evaluator's reply (one JSON object, optional code fence) or raise PiFormatError."""
+     if not isinstance(text, str) or not text.strip():
+         raise PiFormatError("empty evaluator output")
+-    body = _FENCE.sub("", text.strip())
+     try:
+-        data: Any = json.loads(body)
++        data: Any = loads_reply(text)
+     except json.JSONDecodeError as e:
+         raise PiFormatError(f"not JSON: {e.msg}") from e
+     if not isinstance(data, dict):
+diff --git a/backend/gamedevworkstation/features/prompt_improver.py b/backend/gamedevworkstation/features/prompt_improver.py
+index fd4d27b..89123c5 100644
+--- a/backend/gamedevworkstation/features/prompt_improver.py
++++ b/backend/gamedevworkstation/features/prompt_improver.py
+@@ -18,7 +18,7 @@ from ..core.types import ChatRequest, Message, TextBlock, Usage
+ from ..providers.base import ProviderError
+ from ..usage import BudgetExceeded
+ from . import pi_research
+-from .pi_contracts import (COLLECTOR_VERSION, MAX_QUESTIONS, TEMPLATE_VERSION, Answer, EvalResult, ImproverOutcome,
++from .pi_contracts import (COLLECTOR_VERSION, loads_reply, MAX_QUESTIONS, TEMPLATE_VERSION, Answer, EvalResult, ImproverOutcome,
+                            PiFormatError, Question, TaskCard, parse_eval)
+ from .unity_bridge import is_unity_project
+ 
+@@ -264,8 +264,7 @@ def _question_payload(q: Question, i: int, n: int, run_id: str, message_id: str)
+ 
+ 
+ def _json_object(text: str) -> dict:
+-    body = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", (text or "").strip(), flags=re.I)
+-    data = json.loads(body)
++    data = loads_reply(text)
+     if not isinstance(data, dict):
+         raise ValueError("expected an object")
+     return data
+diff --git a/backend/gamedevworkstation/features/replay.py b/backend/gamedevworkstation/features/replay.py
+index 46d70f4..0ff6ffd 100644
+--- a/backend/gamedevworkstation/features/replay.py
++++ b/backend/gamedevworkstation/features/replay.py
+@@ -384,6 +384,19 @@ def _local_platform_name() -> str:
+     return {"Darwin": "macOS", "Windows": "Windows", "Linux": "Linux"}.get(name, name)
+ 
+ 
++def _os_family(name: str) -> str:
++    """macOS / Windows / Linux from a platform string: Unity writes SystemInfo.operatingSystem ("Mac OS X 26.6.2",
++    "Windows 11  (10.0.22631) 64bit"), Python writes "Darwin"; "" when unknown."""
++    n = name.lower()
++    if any(k in n for k in ("mac os", "macos", "darwin", "osx")):
++        return "macOS"
++    if "windows" in n:
++        return "Windows"
++    if "linux" in n:
++        return "Linux"
++    return ""
++
++
+ def _local_cpu_model() -> str | None:
+     try:
+         if platform.system() == "Darwin":
+@@ -419,14 +432,30 @@ def _manifest_dependencies(root: Path) -> dict[str, str] | None:
+ 
+ 
+ def _project_identifier(root: Path) -> str | None:
++    """Application.identifier as Unity reports it: the Standalone entry of applicationIdentifier, or, when the
++    project never set one (`applicationIdentifier: {}`), Unity's default com.<companyName>.<productName>."""
+     try:
+         text = (root / "ProjectSettings" / "ProjectSettings.asset").read_text(errors="replace", encoding="utf-8")
+     except OSError:
+         return None
+-    m = re.search(r"^\s*applicationIdentifier:\s*\n\s+[A-Za-z]+:\s*(\S+)", text, re.M)
+-    if not m:
+-        m = re.search(r"^\s*applicationIdentifier:\s*(\S+)", text, re.M)
+-    return m.group(1) if m else None
++    block = re.search(r"^\s*applicationIdentifier:[ \t]*\n((?:[ \t]+[A-Za-z]+:[^\n]*\n)+)", text, re.M)
++    if block:
++        entries = dict(re.findall(r"^\s+([A-Za-z]+):\s*(\S+)", block.group(1), re.M))
++        ident = entries.get("Standalone") or next(iter(entries.values()), None)
++        if ident:
++            return ident
++    one = re.search(r"^\s*applicationIdentifier:[ \t]*(\S+)", text, re.M)
++    if one and one.group(1) not in ("{}", "[]"):
++        return one.group(1)
++    company = re.search(r"^\s*companyName:[ \t]*(.+?)\s*$", text, re.M)
++    product = re.search(r"^\s*productName:[ \t]*(.+?)\s*$", text, re.M)
++    if not company or not product:
++        return None
++
++    def part(v: str) -> str:
++        return re.sub(r"[^A-Za-z0-9_.-]", "-", v.strip())
++
++    return f"com.{part(company.group(1))}.{part(product.group(1))}"
+ 
+ 
+ def _scene_guid(root: Path, scene_path: str | None) -> str | None:
+@@ -457,9 +486,9 @@ def environment_diff(root: Path, header: dict | None, *, scene_hint: str | None
+         diff.add("unity_version")
+ 
+     os_info = header.get("os") if isinstance(header.get("os"), dict) else {}
+-    recorded_platform = str(os_info.get("platform") or "")
+-    current_platform = _local_platform_name()
+-    if recorded_platform and current_platform and current_platform.lower() not in recorded_platform.lower():
++    recorded_platform = _os_family(str(os_info.get("platform") or ""))
++    current_platform = _os_family(_local_platform_name())
++    if recorded_platform and current_platform and recorded_platform != current_platform:
+         diff.add("os")
+ 
+     cpu = header.get("cpu") if isinstance(header.get("cpu"), dict) else {}
+@@ -889,12 +918,35 @@ def _tool_output(op: str, run_id: str, result: "BridgeResult | None", report: di
+ 
+ # --------------------------------------------------------------------------- ops
+ 
+-_WATCHDOGS: set[asyncio.Task] = set()
++_WATCHDOGS: dict[str, asyncio.Task] = {}  # session id -> the stop timer of its current recording
+ 
+ 
+-def _arm_record_limit(app: "AppState", session: dict, run_id: str, replay_cfg: dict) -> asyncio.Task | None:
+-    """[unity.replay] max_seconds: stop a live recording that runs past the limit (L3)."""
+-    limit = _cfg_int(replay_cfg, "max_seconds", 600)
++def _record_seconds(args: dict, replay_cfg: dict) -> int:
++    """How long a recording may run: the call's `max_seconds`, never above [unity.replay] max_seconds."""
++    cap = _cfg_int(replay_cfg, "max_seconds", 600)
++    value = args.get("max_seconds")
++    if value is None:
++        return cap
++    seconds = _as_int(value, field="max_seconds")
++    if seconds < 1 or (cap > 0 and seconds > cap):
++        raise ReplayOpError("bad_max_seconds",
++                            f"max_seconds must be 1-{cap} ([unity.replay] max_seconds), got {seconds}"
++                            if cap > 0 else f"max_seconds must be at least 1, got {seconds}")
++    return seconds
++
++
++def _disarm_record_limit(session_id: str) -> None:
++    task = _WATCHDOGS.pop(session_id, None)
++    if task is not None and not task.done():
++        task.cancel()
++
++
++def _arm_record_limit(app: "AppState", session: dict, run_id: str, replay_cfg: dict,
++                      seconds: int | None = None) -> asyncio.Task | None:
++    """Stop a live recording after `seconds` (default [unity.replay] max_seconds). One timer per session: a new
++    recording or a stop replaces it, so an old timer can't stop a later run."""
++    _disarm_record_limit(session["id"])
++    limit = _cfg_int(replay_cfg, "max_seconds", 600) if seconds is None else seconds
+     if limit <= 0:
+         return None
+ 
+@@ -903,19 +955,21 @@ def _arm_record_limit(app: "AppState", session: dict, run_id: str, replay_cfg: d
+         try:
+             from .unity_bridge import get_bridge
+             await get_bridge(app).replay_cancel(session, consent=_gate_consent(app, session))
+-            log.info("replay: recording %s stopped at [unity.replay] max_seconds=%s", run_id, limit)
++            log.info("replay: recording %s stopped after max_seconds=%s", run_id, limit)
+         except Exception:  # noqa: BLE001 — best effort
+             log.debug("replay: max_seconds stop failed", exc_info=True)
+ 
+     task = asyncio.create_task(_watch())
+-    _WATCHDOGS.add(task)
+-    task.add_done_callback(_WATCHDOGS.discard)
++    sid = session["id"]
++    _WATCHDOGS[sid] = task
++    task.add_done_callback(lambda t: _WATCHDOGS.pop(sid, None) if _WATCHDOGS.get(sid) is t else None)
+     return task
+ 
+ 
+ 
+ async def _op_stop(app: "AppState", session: dict, root: Path, run_id: str, br: Any) -> ToolOutput:
+     """Stop the job for this run_id and cancel any live Editor replay session."""
++    _disarm_record_limit(session["id"])
+     stopped_job = None
+     for job in app.jobs.list() or []:
+         if job.get("id") and job.get("status") in ("running", "queued") \
+@@ -1040,6 +1094,7 @@ async def run_replay_op(app: "AppState", session: dict, op: str, args: dict,
+         else:
+             request = _validated_request(op, args, replay_cfg=replay_cfg)
+             run_id = request["run_id"]
++            record_seconds = _record_seconds(args, replay_cfg) if op == "record" else None
+     except ReplayOpError as exc:
+         return ToolOutput(f"Replay {op}: {exc}", is_error=True)
+ 
+@@ -1062,7 +1117,7 @@ async def run_replay_op(app: "AppState", session: dict, op: str, args: dict,
+                                      consent=consent, cancel=cancel)
+         if result.status == "pass":
+             _index_artifacts(app, session, [request_path])
+-            _arm_record_limit(app, session, run_id, replay_cfg)
++            _arm_record_limit(app, session, run_id, replay_cfg, seconds=record_seconds)
+         return _tool_output(op, run_id, result, None)
+ 
+     archive, precheck_status, precheck_message = _read_archive(root, request, replay_cfg)
+@@ -1178,7 +1233,13 @@ def register(app_: "FastAPI", api: "APIRouter", S: "AppState") -> None:
+     async def record(sid: str, body: dict = Body(...)) -> dict:
+         s = _session(sid)
+         _root(s)
+-        return await _dispatch(s, "record", _prepare(s, "record", body))
++        request = _prepare(s, "record", body)
++        if body.get("max_seconds") is not None:  # a record-time limit, not part of the frozen request
++            try:
++                request["max_seconds"] = _record_seconds(body, get_bridge(S).cfg().get("replay") or {})
++            except ReplayOpError as exc:
++                raise HTTPException(exc.http_status, str(exc)) from exc
++        return await _dispatch(s, "record", request)
+ 
+     @api.post("/api/sessions/{sid}/replays/{run_id}/stop")
+     async def stop(sid: str, run_id: str) -> dict:
+diff --git a/backend/gamedevworkstation/features/unity_bridge.py b/backend/gamedevworkstation/features/unity_bridge.py
+index b34369d..b0b9166 100644
+--- a/backend/gamedevworkstation/features/unity_bridge.py
++++ b/backend/gamedevworkstation/features/unity_bridge.py
+@@ -1707,7 +1707,10 @@ class UnityBridge:
+             if problem:
+                 return BridgeResult("skipped", problem, "cli_batch")
+             xml = self._paths(root, f"replay-{op}", "xml")
+-            extra_args = ["-gdwReplayRequest", request_path] if request_path else []
++            log_path = xml.with_suffix(".log")
++            # The Editor's own log (the CLI prints only a JSON envelope): the report's log_sha256 hashes it, and
++            # L3 replay_verified evidence needs that digest.
++            extra_args = (["-gdwReplayRequest", request_path] if request_path else []) + ["-logFile", str(log_path)]
+             try:
+                 argv = uc.argv_test_batch(cli, root, platform, xml, t,
+                                           test_filter="Gdw.Replay.Tests.ReplayVerificationTests.LogMatchesCheckpoints",
+@@ -1717,7 +1720,6 @@ class UnityBridge:
+             if why := await self.ensure_allowed(session, gate_op, gate_key, route="cli_batch", argv=argv,
+                                                 consent=consent, capture=capture, detail=detail):
+                 return BridgeResult("skipped", f"replay didn't run: {why}", "cli_batch")
+-            log_path = xml.with_suffix(".log")
+             run = await self.runner.run(session, argv, project=root,
+                                         label=f"Unity replay · {op} · CLI batch",
+                                         timeout_s=t, log_path=log_path, cancel=cancel)
+diff --git a/backend/gamedevworkstation/features/unity_tool.py b/backend/gamedevworkstation/features/unity_tool.py
+index de3ac37..8c3b6b7 100644
+--- a/backend/gamedevworkstation/features/unity_tool.py
++++ b/backend/gamedevworkstation/features/unity_tool.py
+@@ -91,6 +91,9 @@ SCHEMA = obj({
+                     "description": "project-relative .gdwreplay path (default Logs/harness/replay/<run_id>/run.gdwreplay)"},
+     "seed": {"type": "integer", "minimum": 0, "maximum": 4294967295,
+              "description": "uint32 seed for deterministic RNG"},
++    "max_seconds": {"type": "integer", "minimum": 1,
++                    "description": "record: stop the recording after this many seconds "
++                                   "(at most [unity.replay] max_seconds, 600 by default)"},
+     "fixed_dt": {"type": "number", "exclusiveMinimum": 0, "maximum": 1,
+                  "description": "fixed timestep in seconds (0.001-1.0)"},
+     "capture": {"type": "object", "additionalProperties": False, "required": ["formats"],
+diff --git a/frontend/src/components/Chat.tsx b/frontend/src/components/Chat.tsx
+index 994d68e..eacc0df 100644
+--- a/frontend/src/components/Chat.tsx
++++ b/frontend/src/components/Chat.tsx
+@@ -21,15 +21,31 @@ import { EffortMeter, ProviderDot, fmtUsd, modelLabel, tiersOf, useModelCatalog
+ const EMPTY: Msg[] = [];
+ const STOPPABLE_JOBS = new Set(["subagent", "codex_cli", "command"]);
+ 
+-/** "Rate limited, retrying in Ns" with a live countdown. */
++/** A wait as people say it: 45s, 3m 20s, 2h 5m, 6d 7h. */
++export function formatWait(seconds: number): string {
++  const s = Math.max(0, Math.round(seconds));
++  if (s < 90) return `${s}s`;
++  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
++  if (s < 86400) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
++  return `${Math.floor(s / 86400)}d ${Math.floor((s % 86400) / 3600)}h`;
++}
++
++/** A retry ("Rate limited, retrying in 8s") counts down live; a plan-limit notice (no retry attempt) keeps its own
++ *  text and adds how long until the window resets. */
++export function statusText(s: AgentStatus, nowMs: number): string {
++  const left = s.until ? Math.max(0, Math.ceil(s.until - nowMs / 1000)) : null;
++  if (s.kind !== "rate_limit" || left == null) return s.text ?? "";
++  if (s.attempt == null) return s.text ? `${s.text} (in ${formatWait(left)})` : `Rate limited for ${formatWait(left)}`;
++  return `Rate limited, retrying in ${formatWait(left)}`;
++}
++
+ function StatusLine({ s }: { s: AgentStatus }) {
+   const [now, setNow] = useState(Date.now());
+   useEffect(() => {
+     const t = setInterval(() => setNow(Date.now()), 500);
+     return () => clearInterval(t);
+   }, []);
+-  const left = s.until ? Math.max(0, Math.ceil(s.until - now / 1000)) : null;
+-  const text = s.kind === "rate_limit" && left != null ? `Rate limited, retrying in ${left}s` : s.text;
++  const text = statusText(s, now);
+   return (
+     <div role="status" className="my-2 flex items-center gap-1.5 text-[13px] text-warn">
+       <Clock size={13} /> {text}
+diff --git a/skills/replay/SKILL.md b/skills/replay/SKILL.md
+index 6826a5e..117cbe4 100644
+--- a/skills/replay/SKILL.md
++++ b/skills/replay/SKILL.md
+@@ -81,7 +81,8 @@ Pinned: Unity 6000.3.21f1, Input System 1.20.1, Test Framework 1.6.0.
+    then). Recording is live-Editor only and needs change permission (the
+    code is shown first). The call returns once recording has started. Stop it
+    with `unity op=replay_stop run_id=...`; it also stops by itself after
+-   `[unity.replay] max_seconds` (default 600). Output: `<project>/Logs/harness/
++   `max_seconds=N` when given (for "record about 12 s", pass 12), never later
++   than `[unity.replay] max_seconds` (default 600). Output: `<project>/Logs/harness/
+    replay/<run_id>/run.gdwreplay`.
+ 
+ 3. **Replay.** `unity op=replay run_id=...` replays a recorded archive on the

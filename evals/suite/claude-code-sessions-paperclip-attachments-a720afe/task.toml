@@ -1,0 +1,35 @@
+schema = "gdw.eval.task/1"
+id = "claude-code-sessions-paperclip-attachments-a720afe"
+title = "Claude Code sessions: paperclip attachments"
+kind = "code"
+tags = [
+    "gdh",
+    "python",
+]
+
+[source]
+repo = "ArshiaJahan/GDH"
+commit = "a720afe89f39a4e5f4b72329484ea9d772ac66ac"
+parent = "e9d8ae07533ed8ecf2190d115a41226ad92c7ae5"
+title = "Claude Code sessions: paperclip attachments"
+
+[grader]
+command = "PYTHONPATH=backend python -m pytest -q -p no:cacheprovider tests/test_claude_code.py"
+tests = [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+]
+checks = []
+rubric = false
+setup = ""
+timeout_s = 300
+
+[limits]
+agent_timeout_s = 1800
+max_cost_usd = 2.0
+
+[forge]
+removed = []
+rewritten_by = ""
+forged_at = "2026-11-20T08:37:44Z"

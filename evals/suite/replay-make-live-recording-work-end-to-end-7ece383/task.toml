@@ -1,0 +1,38 @@
+schema = "gdw.eval.task/1"
+id = "replay-make-live-recording-work-end-to-end-7ece383"
+title = "Replay: make live recording work end to end"
+kind = "code"
+tags = [
+    "gdh",
+    "python",
+]
+
+[source]
+repo = "ArshiaJahan/GDH"
+commit = "7ece383e866ba0f76d9dff5b3ad1f7faba30b4b4"
+parent = "12c98e268f99b99838403b0670ec99c63d3e8b1e"
+title = "Replay: make live recording work end to end"
+
+[grader]
+command = "PYTHONPATH=backend python -m pytest -q -p no:cacheprovider tests/test_replay_recorded_header.py"
+tests = [
+    "tests/fixtures/replay/recorded_0_1_1/README.md",
+    "tests/fixtures/replay/recorded_0_1_1/frames_head.jsonl",
+    "tests/fixtures/replay/recorded_0_1_1/header.json",
+    "tests/test_replay_recorded_header.py",
+]
+checks = []
+rubric = false
+setup = ""
+timeout_s = 300
+
+[limits]
+agent_timeout_s = 1800
+max_cost_usd = 2.0
+
+[forge]
+removed = [
+    "test: tests/test_replay_recorded_header.py",
+]
+rewritten_by = ""
+forged_at = "2026-11-20T08:37:52Z"

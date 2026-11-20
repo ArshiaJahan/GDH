@@ -1,0 +1,42 @@
+schema = "gdw.eval.task/1"
+id = "unity-streak-bonus-and-coin-field-9606c5a"
+title = "Coin Dash sample: a streak bonus and a bigger coin field"
+kind = "unity"
+tags = [
+    "unity",
+    "csharp",
+]
+
+[source]
+repo = "ArshiaJahan/GDH"
+commit = "9606c5a7575fbd3db01cf59653f3f2b7cf51aeaa"
+parent = "c1e0f9bf12b3f4e147f20dc324744ea071c9fe11"
+title = "Coin Dash sample: a streak bonus and a bigger coin field"
+
+[grader]
+command = "\"${UNITY_CLI:-$HOME/.unity/bin/unity}\" test examples/unity-sample --mode EditMode --filter CoinDash.Tests.ScoreBoardTests --output Logs/eval-editmode.xml --timeout 1800 --format json > /dev/null"
+tests = [
+    "examples/unity-sample/Assets/Tests/Editor/ScoreBoardTests.cs",
+]
+checks = []
+rubric = false
+setup = ""
+timeout_s = 3600
+
+[grader.unity]
+project = "examples/unity-sample"
+
+[[grader.unity.asserts]]
+path = "examples/unity-sample/Assets/Scenes/Main.unity"
+contains = [
+    "  coinCount: 10\n",
+]
+
+[limits]
+agent_timeout_s = 1800
+max_cost_usd = 2.0
+
+[forge]
+removed = []
+rewritten_by = ""
+forged_at = "2026-11-20T08:37:52Z"

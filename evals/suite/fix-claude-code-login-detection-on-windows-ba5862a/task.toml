@@ -1,0 +1,34 @@
+schema = "gdw.eval.task/1"
+id = "fix-claude-code-login-detection-on-windows-ba5862a"
+title = "Fix Claude Code login detection on Windows"
+kind = "code"
+tags = [
+    "gdh",
+    "python",
+]
+
+[source]
+repo = "ArshiaJahan/GDH"
+commit = "ba5862a4c0420d3473fcf499dbcb170a7409f224"
+parent = "18689d16e71f0da4af3bb99800be37324845e341"
+title = "Fix Claude Code login detection on Windows"
+
+[grader]
+command = "PYTHONPATH=backend python -m pytest -q -p no:cacheprovider tests/test_claude_cli_windows.py tests/test_claude_code.py"
+tests = [
+    "tests/test_claude_cli_windows.py",
+    "tests/test_claude_code.py",
+]
+checks = []
+rubric = false
+setup = ""
+timeout_s = 300
+
+[limits]
+agent_timeout_s = 1800
+max_cost_usd = 2.0
+
+[forge]
+removed = []
+rewritten_by = ""
+forged_at = "2026-11-20T08:37:43Z"

@@ -1,0 +1,35 @@
+schema = "gdw.eval.task/1"
+id = "automatic-updates-from-github-releases-04bcf2d"
+title = "Automatic updates from GitHub Releases"
+kind = "code"
+tags = [
+    "gdh",
+    "python",
+]
+
+[source]
+repo = "ArshiaJahan/GDH"
+commit = "04bcf2d07d02440a8dc86c0cb5ff6cbd21841be5"
+parent = "2447f98c9d81b0c7414f322945686606896bd78d"
+title = "Automatic updates from GitHub Releases"
+
+[grader]
+command = "PYTHONPATH=backend python -m pytest -q -p no:cacheprovider tests/test_release_feed.py"
+tests = [
+    "tests/test_release_feed.py",
+]
+checks = []
+rubric = false
+setup = ""
+timeout_s = 300
+
+[limits]
+agent_timeout_s = 1800
+max_cost_usd = 2.0
+
+[forge]
+removed = [
+    "path: .github/workflows/release.yml",
+]
+rewritten_by = ""
+forged_at = "2026-11-20T08:37:47Z"

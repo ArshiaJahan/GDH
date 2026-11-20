@@ -1,0 +1,36 @@
+schema = "gdw.eval.task/1"
+id = "skipper-mode-and-central-doc-for-folder-sessions-2447f98"
+title = "Skipper mode and Central doc for folder sessions"
+kind = "code"
+tags = [
+    "gdh",
+    "python",
+]
+
+[source]
+repo = "ArshiaJahan/GDH"
+commit = "2447f98c9d81b0c7414f322945686606896bd78d"
+parent = "288544e6a5bfaaa1568d7cbc0aa2a6904c1e3b5a"
+title = "Skipper mode and Central doc for folder sessions"
+
+[grader]
+command = "PYTHONPATH=backend python -m pytest -q -p no:cacheprovider tests/test_claude_code.py"
+tests = [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_claude_code.py",
+]
+checks = []
+rubric = false
+setup = ""
+timeout_s = 300
+
+[limits]
+agent_timeout_s = 1800
+max_cost_usd = 2.0
+
+[forge]
+removed = [
+    "path: scripts/setup_signing.sh",
+]
+rewritten_by = ""
+forged_at = "2026-11-20T08:37:44Z"

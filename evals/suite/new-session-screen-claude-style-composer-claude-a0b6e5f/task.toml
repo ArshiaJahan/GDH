@@ -1,0 +1,41 @@
+schema = "gdw.eval.task/1"
+id = "new-session-screen-claude-style-composer-claude-a0b6e5f"
+title = "New-session screen: Claude-style composer, Claude subscription by default"
+kind = "code"
+tags = [
+    "gdh",
+    "python",
+]
+
+[source]
+repo = "ArshiaJahan/GDH"
+commit = "a0b6e5f52325404cd1379cfb5f11d79c5d4cfad9"
+parent = "153be82ed3154538e40470b8965d66f653a38a42"
+title = "New-session screen: Claude-style composer, Claude subscription by default"
+
+[grader]
+command = "PYTHONPATH=backend python -m pytest -q -p no:cacheprovider tests/test_new_session.py tests/test_campaigns.py tests/test_claude_code.py"
+tests = [
+    "frontend/src/components/Chat.test.tsx",
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_new_session.py",
+    "frontend/src/components/ClaudeCode.test.tsx",
+    "frontend/src/components/Composer.test.tsx",
+    "frontend/src/lib/mdlite.test.tsx",
+    "tests/conftest.py",
+    "tests/test_campaigns.py",
+    "tests/test_claude_code.py",
+]
+checks = []
+rubric = false
+setup = ""
+timeout_s = 300
+
+[limits]
+agent_timeout_s = 1800
+max_cost_usd = 2.0
+
+[forge]
+removed = []
+rewritten_by = ""
+forged_at = "2026-11-20T08:37:45Z"

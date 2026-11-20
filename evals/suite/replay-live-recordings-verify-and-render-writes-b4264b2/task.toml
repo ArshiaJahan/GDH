@@ -1,0 +1,34 @@
+schema = "gdw.eval.task/1"
+id = "replay-live-recordings-verify-and-render-writes-b4264b2"
+title = "Replay: live recordings verify, and render writes MP4 and GIF"
+kind = "code"
+tags = [
+    "gdh",
+    "python",
+]
+
+[source]
+repo = "ArshiaJahan/GDH"
+commit = "b4264b2b382ca77d9c5d2dc6bc2db8eef269fc4b"
+parent = "182bcd72b0de362284fc4b0d6a3a88bbe5e6eb37"
+title = "Replay: live recordings verify, and render writes MP4 and GIF"
+
+[grader]
+command = "PYTHONPATH=backend python -m pytest -q -p no:cacheprovider tests/test_replay_render_export.py"
+tests = [
+    "tests/test_replay_render_export.py",
+    "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs",
+]
+checks = []
+rubric = false
+setup = ""
+timeout_s = 300
+
+[limits]
+agent_timeout_s = 1800
+max_cost_usd = 2.0
+
+[forge]
+removed = []
+rewritten_by = ""
+forged_at = "2026-11-20T08:37:43Z"

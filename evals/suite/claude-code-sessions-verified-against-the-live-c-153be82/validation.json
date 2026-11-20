@@ -1,0 +1,339 @@
+{
+ "task": "claude-code-sessions-verified-against-the-live-c-153be82",
+ "validated_at": "2026-11-20T10:03:10Z",
+ "reference_passed": true,
+ "flawed": 15,
+ "killed": 8,
+ "kill_rate": 0.533,
+ "survivors": [
+  {
+   "id": "partial-2",
+   "kind": "partial",
+   "description": "leaves out hunk 2 of backend/gamedevworkstation/features/claude_cli.py",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+    "tests/test_rv3_data.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "partial-3",
+   "kind": "partial",
+   "description": "leaves out hunk 3 of backend/gamedevworkstation/features/claude_cli.py",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+    "tests/test_rv3_data.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "partial-4",
+   "kind": "partial",
+   "description": "leaves out hunk 4 of backend/gamedevworkstation/features/claude_cli.py",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+    "tests/test_rv3_data.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-2",
+   "kind": "mutant",
+   "description": ">= to > in: usage.cost_usd = cost - before if cost >= before else cost",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+    "tests/test_rv3_data.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-3",
+   "kind": "mutant",
+   "description": "True to False in: log.debug(\"index_message failed\", exc_info=True)",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+    "tests/test_rv3_data.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-5",
+   "kind": "mutant",
+   "description": "and to or in: if (not _SECRETISH.search(str(k)) or k in (\"authMethod\",)) and k not in PERSONAL",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+    "tests/test_rv3_data.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-7",
+   "kind": "mutant",
+   "description": "constant +1 in: if cli_id and self._open and self._open[0] == cli_id:",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+    "tests/test_rv3_data.py"
+   ],
+   "failed_steps": []
+  }
+ ],
+ "outcomes": [
+  {
+   "id": "noop",
+   "kind": "noop",
+   "description": "no change: the start state",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+    "tests/test_rv3_data.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-1",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/features/claude_cli.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+    "tests/test_rv3_data.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-2",
+   "kind": "partial",
+   "description": "leaves out hunk 2 of backend/gamedevworkstation/features/claude_cli.py",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+    "tests/test_rv3_data.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "partial-3",
+   "kind": "partial",
+   "description": "leaves out hunk 3 of backend/gamedevworkstation/features/claude_cli.py",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+    "tests/test_rv3_data.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "partial-4",
+   "kind": "partial",
+   "description": "leaves out hunk 4 of backend/gamedevworkstation/features/claude_cli.py",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+    "tests/test_rv3_data.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-1",
+   "kind": "mutant",
+   "description": "== to != in: if isinstance(p, dict) and (p.get(\"path\") == \"builtin\" or str(p.get(\"source\") or",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+    "tests/test_rv3_data.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-2",
+   "kind": "mutant",
+   "description": ">= to > in: usage.cost_usd = cost - before if cost >= before else cost",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+    "tests/test_rv3_data.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-3",
+   "kind": "mutant",
+   "description": "True to False in: log.debug(\"index_message failed\", exc_info=True)",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+    "tests/test_rv3_data.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-4",
+   "kind": "mutant",
+   "description": "False to True in: return False",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+    "tests/test_rv3_data.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-5",
+   "kind": "mutant",
+   "description": "and to or in: if (not _SECRETISH.search(str(k)) or k in (\"authMethod\",)) and k not in PERSONAL",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+    "tests/test_rv3_data.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-6",
+   "kind": "mutant",
+   "description": "or to and in: for p in plugins or []:",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+    "tests/test_rv3_data.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-7",
+   "kind": "mutant",
+   "description": "constant +1 in: if cli_id and self._open and self._open[0] == cli_id:",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+    "tests/test_rv3_data.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-8",
+   "kind": "mutant",
+   "description": "return value dropped in: return {k: _scrub(v) for k, v in d.items()",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+    "tests/test_rv3_data.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "tamper-delete",
+   "kind": "tamper",
+   "description": "no fix; deletes the hidden tests",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+    "tests/test_rv3_data.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "tamper-skip",
+   "kind": "tamper",
+   "description": "no fix; rewrites the hidden tests to pass",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/fixtures/claude_stream/ask_user_question.jsonl",
+    "tests/fixtures/claude_stream/auth_status.jsonl",
+    "tests/fixtures/claude_stream/hello.jsonl",
+    "tests/fixtures/claude_stream/init.jsonl",
+    "tests/fixtures/claude_stream/initialize.jsonl",
+    "tests/fixtures/claude_stream/interrupt.jsonl",
+    "tests/fixtures/claude_stream/mcp_handshake.jsonl",
+    "tests/fixtures/claude_stream/plan_e2e.jsonl",
+    "tests/fixtures/claude_stream/prompt_tool.jsonl",
+    "tests/fixtures/claude_stream/resume_failed.jsonl",
+    "tests/fixtures/claude_stream/sigint.jsonl",
+    "tests/fixtures/claude_stream/tools.jsonl",
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+    "tests/test_rv3_data.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  }
+ ],
+ "reference_steps": [
+  {
+   "name": "tests",
+   "kind": "command",
+   "passed": true,
+   "exit": 0,
+   "duration_s": 66.36216366710141,
+   "output": "........................................................................ [ 66%]\n....................................                                     [100%]\n108 passed in 62.66s (0:01:02)\n",
+   "environment": false,
+   "detail": {}
+  }
+ ],
+ "ok": true
+}

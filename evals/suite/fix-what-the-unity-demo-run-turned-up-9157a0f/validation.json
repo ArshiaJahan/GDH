@@ -1,0 +1,276 @@
+{
+ "task": "fix-what-the-unity-demo-run-turned-up-9157a0f",
+ "validated_at": "2026-11-20T10:01:06Z",
+ "reference_passed": true,
+ "flawed": 15,
+ "killed": 11,
+ "kill_rate": 0.733,
+ "survivors": [
+  {
+   "id": "partial-2",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/features/claude_code.py",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/Chat.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-3",
+   "kind": "mutant",
+   "description": "< to <= in: if seconds < 1 or (cap > 0 and seconds > cap):",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/Chat.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-4",
+   "kind": "mutant",
+   "description": "> to >= in: (f\" ({window})\" if window else \"\") + (time.strftime(\", resets %a %H:%M\" if reset",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/Chat.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-8",
+   "kind": "mutant",
+   "description": "or to and in: return \"ReplayVerificationTests\" in name or \"LogMatchesCheckpoints\" in name",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/Chat.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  }
+ ],
+ "outcomes": [
+  {
+   "id": "noop",
+   "kind": "noop",
+   "description": "no change: the start state",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/Chat.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-1",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/approvals.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/Chat.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-2",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/features/claude_code.py",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/Chat.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "partial-3",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/features/gdw_mcp.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/Chat.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-4",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/features/ladder.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/Chat.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-1",
+   "kind": "mutant",
+   "description": "== to != in: if len(got) == len(test_names):",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/Chat.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-2",
+   "kind": "mutant",
+   "description": "!= to == in: if 0 <= start < end and (start, end) != (0, len(body) - 1):",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/Chat.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-3",
+   "kind": "mutant",
+   "description": "< to <= in: if seconds < 1 or (cap > 0 and seconds > cap):",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/Chat.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-4",
+   "kind": "mutant",
+   "description": "> to >= in: (f\" ({window})\" if window else \"\") + (time.strftime(\", resets %a %H:%M\" if reset",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/Chat.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-5",
+   "kind": "mutant",
+   "description": "True to False in: cands.append((r[\"ts\"], True, [r], detail))",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/Chat.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-6",
+   "kind": "mutant",
+   "description": "False to True in: return json.loads(body, strict=False)",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/Chat.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-7",
+   "kind": "mutant",
+   "description": "and to or in: if tests_cand is not None and not replay_names:",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/Chat.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-8",
+   "kind": "mutant",
+   "description": "or to and in: return \"ReplayVerificationTests\" in name or \"LogMatchesCheckpoints\" in name",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/Chat.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "tamper-delete",
+   "kind": "tamper",
+   "description": "no fix; deletes the hidden tests",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/Chat.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "tamper-skip",
+   "kind": "tamper",
+   "description": "no fix; rewrites the hidden tests to pass",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_followups_2026_11.py",
+    "frontend/src/components/Chat.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  }
+ ],
+ "reference_steps": [
+  {
+   "name": "tests",
+   "kind": "command",
+   "passed": true,
+   "exit": 0,
+   "duration_s": 90.17593233287334,
+   "output": "........................................................................ [ 45%]\n........................................................................ [ 90%]\n...............                                                          [100%]\n159 passed in 86.74s (0:01:26)\n",
+   "environment": false,
+   "detail": {}
+  }
+ ],
+ "ok": true
+}

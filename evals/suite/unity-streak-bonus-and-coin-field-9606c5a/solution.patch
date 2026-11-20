@@ -1,0 +1,35 @@
+diff --git a/examples/unity-sample/Assets/Scenes/Main.unity b/examples/unity-sample/Assets/Scenes/Main.unity
+index df4a2c5..346c66e 100644
+--- a/examples/unity-sample/Assets/Scenes/Main.unity
++++ b/examples/unity-sample/Assets/Scenes/Main.unity
+@@ -413,7 +413,7 @@ MonoBehaviour:
+   m_Script: {fileID: 11500000, guid: d52a594746e2940a696b32ce39f1218a, type: 3}
+   m_Name: 
+   m_EditorClassIdentifier: CoinDash::CoinDash.GameState
+-  coinCount: 8
++  coinCount: 10
+ --- !u!4 &963870474
+ Transform:
+   m_ObjectHideFlags: 0
+diff --git a/examples/unity-sample/Assets/Scripts/ScoreBoard.cs b/examples/unity-sample/Assets/Scripts/ScoreBoard.cs
+index d711e01..b7873ed 100644
+--- a/examples/unity-sample/Assets/Scripts/ScoreBoard.cs
++++ b/examples/unity-sample/Assets/Scripts/ScoreBoard.cs
+@@ -4,6 +4,8 @@ namespace CoinDash
+     public sealed class ScoreBoard
+     {
+         public const int PointsPerCoin = 10;
++        /// <summary>Every BonusEvery-th coin is worth double.</summary>
++        public const int BonusEvery = 5;
+ 
+         public int Score { get; private set; }
+         public int CoinsCollected { get; private set; }
+@@ -16,7 +18,7 @@ namespace CoinDash
+         {
+             if (Won) return;
+             CoinsCollected++;
+-            Score += PointsPerCoin;
++            Score += CoinsCollected % BonusEvery == 0 ? 2 * PointsPerCoin : PointsPerCoin;
+         }
+     }
+ }

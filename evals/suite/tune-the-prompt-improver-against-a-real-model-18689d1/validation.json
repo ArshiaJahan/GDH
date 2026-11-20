@@ -1,0 +1,264 @@
+{
+ "task": "tune-the-prompt-improver-against-a-real-model-18689d1",
+ "validated_at": "2026-11-20T10:04:12Z",
+ "reference_passed": true,
+ "flawed": 13,
+ "killed": 9,
+ "kill_rate": 0.692,
+ "survivors": [
+  {
+   "id": "partial-1",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/features/claude_code.py",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_pi_contracts.py",
+    "tests/test_prompt_improver.py",
+    "tests/test_settings.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "partial-2",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/features/pi_contracts.py",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_pi_contracts.py",
+    "tests/test_prompt_improver.py",
+    "tests/test_settings.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-3",
+   "kind": "mutant",
+   "description": "False to True in: max_tokens=int(cfg.get(\"max_output_tokens\") or 2048), show_thinking=False,",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_pi_contracts.py",
+    "tests/test_prompt_improver.py",
+    "tests/test_settings.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-4",
+   "kind": "mutant",
+   "description": "and to or in: return \": \".join(str(v).strip() for v in f.values() if isinstance(v, (str, int, ",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_pi_contracts.py",
+    "tests/test_prompt_improver.py",
+    "tests/test_settings.py"
+   ],
+   "failed_steps": []
+  }
+ ],
+ "outcomes": [
+  {
+   "id": "noop",
+   "kind": "noop",
+   "description": "no change: the start state",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_pi_contracts.py",
+    "tests/test_prompt_improver.py",
+    "tests/test_settings.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-1",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/features/claude_code.py",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_pi_contracts.py",
+    "tests/test_prompt_improver.py",
+    "tests/test_settings.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "partial-2",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/features/pi_contracts.py",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_pi_contracts.py",
+    "tests/test_prompt_improver.py",
+    "tests/test_settings.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "partial-3",
+   "kind": "partial",
+   "description": "leaves out hunk 2 of backend/gamedevworkstation/features/pi_contracts.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_pi_contracts.py",
+    "tests/test_prompt_improver.py",
+    "tests/test_settings.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-4",
+   "kind": "partial",
+   "description": "leaves out hunk 3 of backend/gamedevworkstation/features/pi_contracts.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_pi_contracts.py",
+    "tests/test_prompt_improver.py",
+    "tests/test_settings.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-1",
+   "kind": "mutant",
+   "description": "== to != in: if self.decision == \"PROCEED\" and self.task_card is None:",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_pi_contracts.py",
+    "tests/test_prompt_improver.py",
+    "tests/test_settings.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-2",
+   "kind": "mutant",
+   "description": "True to False in: \"claude_code_enabled\": True, \"max_calls\": 2, \"max_input_tokens\": 4096, \"max_outp",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_pi_contracts.py",
+    "tests/test_prompt_improver.py",
+    "tests/test_settings.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-3",
+   "kind": "mutant",
+   "description": "False to True in: max_tokens=int(cfg.get(\"max_output_tokens\") or 2048), show_thinking=False,",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_pi_contracts.py",
+    "tests/test_prompt_improver.py",
+    "tests/test_settings.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-4",
+   "kind": "mutant",
+   "description": "and to or in: return \": \".join(str(v).strip() for v in f.values() if isinstance(v, (str, int, ",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_pi_contracts.py",
+    "tests/test_prompt_improver.py",
+    "tests/test_settings.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-5",
+   "kind": "mutant",
+   "description": "or to and in: kept = [x for x in qs if not isinstance(x, dict) or x.get(\"topic\") in TOPICS]",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_pi_contracts.py",
+    "tests/test_prompt_improver.py",
+    "tests/test_settings.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-6",
+   "kind": "mutant",
+   "description": "return value dropped in: return f.strip()",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_pi_contracts.py",
+    "tests/test_prompt_improver.py",
+    "tests/test_settings.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "tamper-delete",
+   "kind": "tamper",
+   "description": "no fix; deletes the hidden tests",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_pi_contracts.py",
+    "tests/test_prompt_improver.py",
+    "tests/test_settings.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "tamper-skip",
+   "kind": "tamper",
+   "description": "no fix; rewrites the hidden tests to pass",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_pi_contracts.py",
+    "tests/test_prompt_improver.py",
+    "tests/test_settings.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  }
+ ],
+ "reference_steps": [
+  {
+   "name": "tests",
+   "kind": "command",
+   "passed": true,
+   "exit": 0,
+   "duration_s": 10.034177625086159,
+   "output": "........................................................................ [ 66%]\n.....................................                                    [100%]\n109 passed in 8.94s\n",
+   "environment": false,
+   "detail": {}
+  }
+ ],
+ "ok": true
+}

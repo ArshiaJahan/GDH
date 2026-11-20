@@ -1,0 +1,35 @@
+schema = "gdw.eval.task/1"
+id = "tune-the-prompt-improver-against-a-real-model-18689d1"
+title = "Tune the prompt improver against a real model"
+kind = "code"
+tags = [
+    "gdh",
+    "python",
+]
+
+[source]
+repo = "ArshiaJahan/GDH"
+commit = "18689d16e71f0da4af3bb99800be37324845e341"
+parent = "5e071e14fd35c6f82b6c8cdfc92c6d53fdbf8375"
+title = "Tune the prompt improver against a real model"
+
+[grader]
+command = "PYTHONPATH=backend python -m pytest -q -p no:cacheprovider tests/test_pi_contracts.py tests/test_prompt_improver.py tests/test_settings.py"
+tests = [
+    "tests/test_pi_contracts.py",
+    "tests/test_prompt_improver.py",
+    "tests/test_settings.py",
+]
+checks = []
+rubric = false
+setup = ""
+timeout_s = 300
+
+[limits]
+agent_timeout_s = 1800
+max_cost_usd = 2.0
+
+[forge]
+removed = []
+rewritten_by = ""
+forged_at = "2026-11-20T08:37:44Z"

@@ -1,0 +1,1413 @@
+diff --git a/README.md b/README.md
+index 7e26bcd..3305045 100644
+--- a/README.md
++++ b/README.md
+@@ -49,6 +49,7 @@ Everything runs locally; the backend listens on `127.0.0.1` only.
+ | **Fleet** | Parallel waves of subagents in their own worktrees, each with a claimed scope, scope-checked merges, a conflict circuit breaker and discoveries relayed to the next wave. |
+ | **Progressive skill disclosure** | A compact skill index in the system prompt; full skill text is loaded only when used and survives compaction. |
+ | **Task board** | A Kanban board (Tasks tab) you and the agent share: tasks with codes like `Task00001`, subtasks and checklists, comments, history and linked sessions, live updates. In chat: `/task new`, `/task <code>`, `/task move`, `/task done`, `/task list`, `/task link`; the agent uses `task_*` tools. Scheduled prompts live on the Schedule page. |
++| **New session screen** | "What should we work on?": type a task, pick **Chat only** or a **Folder** (or a recent one), the Claude model, effort and mode, and send. New sessions from this screen use your Claude subscription; scheduled tasks, campaigns, fleet and subagents keep the built-in loop. Existing sessions keep their harness. |
+ | **Claude Code sessions** | Run your own `claude` CLI and login (checked against claude 2.1.308 on a claude.ai subscription), with GDW tools, approvals, Plan mode and `--resume`. Subscription estimates stay outside spend limits; API key logins record `billing='api'` and check spend limits before each turn. See [Claude Code sessions](docs/GUIDE.md#claude-code-sessions). |
+ | **Cost control** | Daily and per-session spend limits, job budgets, approval for high effort, and a My usage page per model. |
+ | **Trailer maker** | Brief → beat sheet → scripted Play Mode capture (Unity Recorder) → ffmpeg edit from a JSON edit list → ElevenLabs music cut to the beat sheet → three reviewers → Steam, YouTube and vertical exports. |
+diff --git a/backend/gamedevworkstation/default_config.toml b/backend/gamedevworkstation/default_config.toml
+index 2a85b42..ccd9edb 100644
+--- a/backend/gamedevworkstation/default_config.toml
++++ b/backend/gamedevworkstation/default_config.toml
+@@ -71,6 +71,11 @@ theme = "system"                    # system | light | dark
+ auto_title = true                   # name sessions after the first reply (claude.fast, low effort, a fraction of a cent)
+ trash_days = 30                     # sessions in Trash are deleted for good after this many days
+ event_retention_days = 7            # the event log (replay for briefly disconnected windows) keeps this many days
++# Harness of every new session (the new-session screen, the sidebar's New session, POST /api/sessions
++# without one): claude_code = your Claude subscription through your own `claude` CLI login. Other
++# values: builtin | agent_sdk | codex_cli. Existing sessions keep theirs; scheduled tasks, campaigns,
++# fleet and subagents keep the harness they always used.
++default_harness = "claude_code"
+ 
+ [updates]
+ # `make release` builds new versions into this folder; the app checks it and offers
+diff --git a/backend/gamedevworkstation/features/campaigns.py b/backend/gamedevworkstation/features/campaigns.py
+index 0366167..2ed07be 100644
+--- a/backend/gamedevworkstation/features/campaigns.py
++++ b/backend/gamedevworkstation/features/campaigns.py
+@@ -427,13 +427,13 @@ class Campaigns:
+             session = app.store.get(str(body.get("session_id") or ""))
+             if not session or session["deleted"]:
+                 raise CampaignError(404, "A chain runs in an existing session: session_id not found")
++            if (session.get("harness") or "builtin") != "builtin":
++                raise CampaignError(400, "Workflows run on the built-in loop with an API key, so they aren't "
++                                         "available in Claude subscription sessions.")
+             if not session.get("folder"):
+                 raise CampaignError(400, "This session has no folder; pick one first.")
+             if (cur := self.of_session(session)) and cur["status"] not in FINAL:
+                 raise CampaignError(409, f"This session already runs {cur['title']} ({cur['status']}).")
+-            if (session.get("harness") or "builtin") != "builtin":
+-                raise CampaignError(400, "Workflows run on the built-in loop: switch this session's harness to "
+-                                         "Built-in loop (side panel, Environment) first.")
+             folder = str(Path(session["folder"]).expanduser().resolve())
+             model, effort, mode = session["model"], session["effort"], session["mode"]
+         else:
+diff --git a/backend/gamedevworkstation/features/claude_code.py b/backend/gamedevworkstation/features/claude_code.py
+index 6e0fce6..2b701a4 100644
+--- a/backend/gamedevworkstation/features/claude_code.py
++++ b/backend/gamedevworkstation/features/claude_code.py
+@@ -53,6 +53,7 @@ import json
+ import logging
+ import os
+ import re
++import shlex
+ import shutil
+ import signal
+ import time
+@@ -64,14 +65,14 @@ from typing import TYPE_CHECKING, Any
+ from fastapi import APIRouter, Body, FastAPI, HTTPException
+ 
+ from ..children import CHILDREN
+-from ..config import data_dir
++from ..config import data_dir, sessions_dir
+ from ..core.types import Message, TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock, Usage, new_id
+ from ..providers.base import compute_cost
+ from ..skills import turn_skill_segments
+ from ..store import remove_claude_code_folder, valid_claude_code_session
+ from .claude_cli import LOGIN_HINT, CliProbe, redact
+ from .gdw_mcp import PROMPT_TOOL, SERVER, GdwMcp, mount
+-from .harnesses import DEFERRED_SDK_TOOLS, HOOK_TIMEOUT_S, _cwd, _project_instructions, _prompt_text, make_gate
++from .harnesses import DEFERRED_SDK_TOOLS, HOOK_TIMEOUT_S, _project_instructions, _prompt_text, make_gate
+ 
+ if TYPE_CHECKING:
+     from ..app import AppState
+@@ -140,6 +141,36 @@ def is_plan_file(name: str, inp: dict) -> bool:
+     return full.parent == root and full.suffix == ".md"
+ 
+ 
++def work_dir(sid: str) -> Path:
++    """A chat-only session's private scratch folder, data_dir/claude_code/<sid>/work (0700): the CLI's
++    cwd and the gate's folder scope when the session has no folder. It sits inside the session's
++    claude_code folder (next to, not above, the MCP config), so remove_claude_code_folder cleans it up."""
++    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", sid):
++        raise ValueError(f"Bad session id {sid!r}")
++    d = data_dir() / "claude_code" / sid / "work"
++    d.mkdir(parents=True, exist_ok=True)
++    os.chmod(d.parent, 0o700)
++    os.chmod(d, 0o700)
++    return d
++
++
++def session_cwd(s: dict) -> Path:
++    """Keep old chat transcripts in their original cwd; new chats use a private work_dir."""
++    if s.get("folder"):
++        return Path(s["folder"])
++    sid = s["id"]
++    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", sid):
++        raise ValueError(f"Bad session id {sid!r}")
++    legacy = sessions_dir() / sid
++    # The work folder identifies chats created after the cwd change. They must keep it on
++    # later turns too, after claude_code_session has been saved by their first turn.
++    work = data_dir() / "claude_code" / sid / "work"
++    if legacy.exists() or ((s.get("settings") or {}).get("claude_code_session") and not work.is_dir()):
++        legacy.mkdir(parents=True, exist_ok=True)
++        return legacy
++    return work_dir(sid)
++
++
+ def _cap_prompt(text: str) -> str:
+     raw = text.encode("utf-8")
+     if len(raw) <= SYSTEM_PROMPT_MAX_BYTES:
+@@ -713,7 +744,8 @@ class ClaudeCode:
+     def _system_prompt(self, s: dict, cwd: Path) -> str:
+         app = self.app
+         mode = {"ask": "Ask before edits", "accept_edits": "Accept edits", "plan": "Plan only (no edits or commands)"}
+-        seg = [CONTEXT_HEAD, f"Session folder: {s.get('folder') or cwd}\nMode: {mode.get(s['mode'], s['mode'])}"]
++        where = s.get("folder") or f"none (chat only). Working folder: {cwd}, a private scratch folder for this session"
++        seg = [CONTEXT_HEAD, f"Session folder: {where}\nMode: {mode.get(s['mode'], s['mode'])}"]
+         context = turn_skill_segments(s["settings"], app.hooks.turn(s["id"]))
+         for fn in getattr(app, "prompt_notes", None) or []:
+             try:
+@@ -785,7 +817,7 @@ class ClaudeCode:
+                 proc.billing = billing
+                 touched: list[Path] = []
+                 turn = Turn(sid=sid, model=model, effort=effort, jid=jid, touched=touched,
+-                            gate=make_gate(app, lambda: app.store.get(sid) or s, _cwd(s), touched))
++                            gate=make_gate(app, lambda: app.store.get(sid) or s, session_cwd(s), touched))
+                 proc.turn = turn
+                 proc.last_used = time.monotonic()
+                 if proc.reader.done():  # it already exited (bad flags, crash at start)
+@@ -834,7 +866,7 @@ class ClaudeCode:
+             cli = self.probe.cached() and self.probe.cached().get("path")  # type: ignore[union-attr]
+             if not cli:
+                 raise RuntimeError("The claude CLI isn't installed.")
+-            cwd = _cwd(s)
++            cwd = session_cwd(s)
+             sig = self._signature(s, cli, model, effort, cwd)
+             cur = self.procs.get(sid)
+             if cur and cur.alive and cur.signature == sig and cur.turn is None and not cur.starting \
+@@ -954,7 +986,7 @@ class ClaudeCode:
+         s = self.app.store.get(sid)
+         if not s:
+             return None
+-        return make_gate(self.app, lambda: self.app.store.get(sid) or s, _cwd(s), [])
++        return make_gate(self.app, lambda: self.app.store.get(sid) or s, session_cwd(s), [])
+ 
+     def _note_plan(self, sid: str, name: str, inp: dict) -> None:
+         """Keep the plan text the CLI writes (GDW never reads ~/.claude), for the plan card."""
+@@ -1126,7 +1158,7 @@ class ClaudeCode:
+         cs = (s.get("settings") or {}).get("claude_code_session")
+         cs = cs if valid_claude_code_session(cs) else None
+         p = self.procs.get(sid)
+-        return {"session_id": cs, "resume_command": f"claude --resume {cs}" if cs else None,
++        return {"session_id": cs, "resume_command": f"cd {shlex.quote(str(session_cwd(s)))} && claude --resume {cs}" if cs else None,
+                 "running": bool(p and p.alive), "busy": bool(p and p.turn)}
+ 
+ 
+diff --git a/backend/gamedevworkstation/features/session_routes.py b/backend/gamedevworkstation/features/session_routes.py
+index 46bfb2b..601ff7f 100644
+--- a/backend/gamedevworkstation/features/session_routes.py
++++ b/backend/gamedevworkstation/features/session_routes.py
+@@ -1,8 +1,14 @@
+-"""Side-panel APIs: environment options, context breakdown and Compact."""
++"""Side-panel APIs: environment options, context breakdown and Compact; the new-session greeting."""
+ from __future__ import annotations
+ 
++import asyncio
+ import json
++import os
++import re
+ import shutil
++import subprocess
++import sys
++from functools import cache
+ from typing import TYPE_CHECKING
+ 
+ from fastapi import APIRouter, FastAPI, HTTPException
+@@ -10,6 +16,7 @@ from fastapi import APIRouter, FastAPI, HTTPException
+ from ..agent import context as cx
+ from ..core.types import ToolResultBlock
+ from ..skills import skills_prompt, turn_skill_segments
++from ..store import SESSION_MODES
+ 
+ if TYPE_CHECKING:
+     from ..app import AppState
+@@ -104,7 +111,48 @@ async def compact(app: "AppState", sid: str) -> dict:
+         raise HTTPException(502, f"Compact failed: {e}") from e
+ 
+ 
++@cache
++def account_full_name() -> str:
++    """The Mac account's full name (`id -F`), else the passwd entry's gecos name; "" when unknown.
++    Only the local account: never the Claude login or any email address."""
++    if sys.platform == "darwin":
++        try:
++            r = subprocess.run(["/usr/bin/id", "-F"], capture_output=True, text=True, timeout=3)
++            if r.returncode == 0 and r.stdout.strip():
++                return r.stdout.strip()
++        except (OSError, subprocess.SubprocessError):
++            pass
++    try:
++        import pwd
++
++        return pwd.getpwuid(os.getuid()).pw_gecos.split(",")[0].strip()
++    except (ImportError, KeyError, OSError):
++        return ""
++
++
++def greeting_name(full: str) -> str | None:
++    """"Arshia Jahan" → "Arshia J." (first name and last initial), "Arshia" → "Arshia"; None when
++    there's no usable name, or it looks like an email address or a handle rather than a name."""
++    full = " ".join((full or "").split())
++    if not full or "@" in full or "/" in full:
++        return None
++    words = [w for w in full.split(" ") if re.search(r"[^\W\d_]", w)]
++    if not words:
++        return None
++    first = words[0][:40]
++    if len(words) == 1:
++        return first
++    initial = next((c for c in words[-1] if c.isalpha()), "")
++    return f"{first} {initial.upper()}." if initial else first
++
++
+ def register(app: FastAPI, api: APIRouter, S: "AppState") -> None:
++    @api.get("/greeting")
++    async def greeting() -> dict:
++        """The new-session screen's "What should we work on, <name>?": the Mac account's first name
++        and last initial (null: "What should we work on?")."""
++        return {"name": greeting_name(await asyncio.to_thread(account_full_name))}
++
+     @api.get("/sessions/{sid}/context")
+     async def ctx(sid: str) -> dict:
+         return context_breakdown(S, sid)
+@@ -133,4 +181,5 @@ def register(app: FastAPI, api: APIRouter, S: "AppState") -> None:
+                        for k, v in S.config.models.items()],
+             "tiers": S.config.tiers,
+             "tier_models": S.config.tier_models(),
++            "modes": list(SESSION_MODES),  # Plan / Ask / Accept edits; no bypass mode
+         }
+diff --git a/backend/gamedevworkstation/server.py b/backend/gamedevworkstation/server.py
+index 9649cc8..4fc878f 100644
+--- a/backend/gamedevworkstation/server.py
++++ b/backend/gamedevworkstation/server.py
+@@ -25,9 +25,17 @@ from .core.media import prepare_image
+ from .core.types import AudioBlock, FileBlock, ImageBlock, Message, TextBlock, new_id
+ from .events import REPLAY_MAX
+ from .skills import get_skill, pinned_skill_names, skill_invocation, skill_load_text, skill_lru
+-from .store import valid_claude_code_session
++from .store import SESSION_MODES, valid_claude_code_session
+ 
+ HARNESSES = ("builtin", "agent_sdk", "codex_cli", "claude_code")
++NEW_SESSION_HARNESS = "claude_code"  # the new-session default when [sessions].default_harness is missing or unknown
++
++
++def new_session_harness(config: Any) -> str:
++    """The harness POST /api/sessions gives a session that doesn't name one: [sessions].default_harness,
++    claude_code (your Claude subscription through the claude CLI) out of the box."""
++    h = (config.sessions or {}).get("default_harness")
++    return h if h in HARNESSES else NEW_SESSION_HARNESS
+ WS_OVERFLOW = 4000  # close code: this client fell too far behind; reconnect with ?since=<last seq>
+ 
+ # /api/file serves these inline as they are; a browser shows them but runs nothing in them.
+@@ -194,18 +202,25 @@ def create_app(token: str, state: AppState | None = None) -> FastAPI:
+                 raise HTTPException(400, f"Folder not found: {f}")
+             folder = str(f.resolve())
+         group_id = sessions_mgmt.valid_group(S, body.get("group_id"))
++        _check_mode(body.get("mode"))
+         harness = body.get("harness")
+         if harness is not None:
+             await _check_harness(harness)
++        else:
++            # Not checked for the CLI: without it the session still opens, and its first turn says
++            # how to install or log in (claude_code.run_turn).
++            harness = new_session_harness(S.config)
+         s = S.store.create(title=body.get("title") or "New session", folder=folder,
+                            model=_model_arg(body["model"]) if body.get("model") else None,
+-                           effort=body.get("effort"), mode=body.get("mode"))  # skill disclosure: store.create
++                           effort=body.get("effort"), mode=body.get("mode"), harness=harness)  # skill disclosure: store.create
+         if group_id:  # ⌘N in a grouped session: the new one joins that group
+             s = S.store.update(s["id"], group_id=group_id) or s
+-        if harness not in (None, s["harness"]):  # the new-session flow's harness choice
+-            s = S.store.update(s["id"], harness=harness) or s
+         return s
+ 
++    def _check_mode(mode: Any) -> None:
++        if mode is not None and mode not in SESSION_MODES:
++            raise HTTPException(400, f"Mode must be one of: {', '.join(SESSION_MODES)}")
++
+     async def _check_harness(h: Any) -> None:
+         if h not in HARNESSES:
+             raise HTTPException(400, f"Unknown harness {h!r}")
+@@ -235,6 +250,8 @@ def create_app(token: str, state: AppState | None = None) -> FastAPI:
+             body["folder"] = str(f.resolve())
+         if body.get("model"):
+             body["model"] = _model_arg(body["model"], cur.get("model"))
++        if body.get("mode") not in (None, cur["mode"]):
++            _check_mode(body["mode"])
+         if body.get("harness") not in (None, cur["harness"]):
+             await _check_harness(body["harness"])
+         if body.get("harness") not in (None, cur["harness"]) and (camp := S.extensions.get("campaigns")) is not None \
+diff --git a/backend/gamedevworkstation/store.py b/backend/gamedevworkstation/store.py
+index 51a7708..a817899 100644
+--- a/backend/gamedevworkstation/store.py
++++ b/backend/gamedevworkstation/store.py
+@@ -23,6 +23,9 @@ SESSION_FIELDS = ("title", "pinned", "folder", "model", "effort", "account", "mo
+ # and where its title came from. Duplicates and forks don't copy them.
+ NOT_COPIED = ("agent_sdk_session", "codex_thread", "claude_code_session", "claude_code_totals", "claude_code_since",
+               "claude_code_sent", "scheduled_task", "title_source")
++# Permission modes a session can have (Plan / Ask / Accept edits). There is no bypass mode: Claude
++# Code sessions never get bypassPermissions (claude_code.FORBIDDEN_MODES).
++SESSION_MODES = ("plan", "ask", "accept_edits")
+ MAX_CLEARS = 100  # /clear times kept in settings.cleared_at (for forks from before a clear)
+ GROUP_COLORS = ("gray", "blue", "teal", "green", "yellow", "orange", "red", "violet")
+ VIEWS = {  # GET /api/sessions?view=
+@@ -89,7 +92,9 @@ class SessionStore:
+     # ------------------------------------------------------------------ sessions
+ 
+     def create(self, title: str = "New session", folder: str | None = None, model: str | None = None,
+-               effort: str | None = None, mode: str | None = None, **settings: Any) -> dict:
++               effort: str | None = None, mode: str | None = None, harness: str = "builtin", **settings: Any) -> dict:
++        """A new session. `harness` defaults to the built-in loop for internal creators (scheduled
++        tasks, campaigns, fleet); POST /api/sessions passes [sessions].default_harness."""
+         settings = _claude_settings(settings)
+         o = self.config.orchestrator
+         global_skills = self.db.kv_get("skills_global", ["delegation"])
+@@ -101,7 +106,7 @@ class SessionStore:
+             "effort": effort or o.get("effort", "medium"),
+             "account": self.config.profiles("anthropic")[0],
+             "mode": mode or self.config.modes.get("default", "ask"),
+-            "harness": "builtin", "location": "local",
++            "harness": harness, "location": "local",
+             "settings": json.dumps({"skills": global_skills, "connectors": {},
+                                    "shared_tools": False, "accounts": self.config.session_accounts(None),
+                                    **settings}),
+diff --git a/config.example.toml b/config.example.toml
+index 6a56835..b4eb0f3 100644
+--- a/config.example.toml
++++ b/config.example.toml
+@@ -71,6 +71,11 @@ theme = "system"                    # system | light | dark
+ auto_title = true                   # name sessions after the first reply (claude.fast, low effort, a fraction of a cent)
+ trash_days = 30                     # sessions in Trash are deleted for good after this many days
+ event_retention_days = 7            # the event log (replay for briefly disconnected windows) keeps this many days
++# Harness of every new session (the new-session screen, the sidebar's New session, POST /api/sessions
++# without one): claude_code = your Claude subscription through your own `claude` CLI login. Other
++# values: builtin | agent_sdk | codex_cli. Existing sessions keep theirs; scheduled tasks, campaigns,
++# fleet and subagents keep the harness they always used.
++default_harness = "claude_code"
+ 
+ [updates]
+ # `make release` builds new versions into this folder; the app checks it and offers
+diff --git a/docs/GUIDE.md b/docs/GUIDE.md
+index 9800535..3db3487 100644
+--- a/docs/GUIDE.md
++++ b/docs/GUIDE.md
+@@ -142,8 +142,11 @@ keep an explicit **Save**.
+ - `[fleet]` parallel waves: `enabled`, `max_units` (writing units per wave), `unit_timeout_min`
+   (`build`, `research`) and `relay_tokens` (discoveries passed to the next wave).
+ - `[sessions]` `auto_title` (name new sessions after the first reply, default on), `trash_days`
+-  (sessions in Trash are deleted for good after this many days, default 30) and
+-  `event_retention_days` (how long the event log keeps events, default 7; see Settings → Storage).
++  (sessions in Trash are deleted for good after this many days, default 30),
++  `event_retention_days` (how long the event log keeps events, default 7; see Settings → Storage)
++  and `default_harness` (the harness of every new session, also `POST /api/sessions` without one:
++  `claude_code`, your Claude subscription through your own `claude` CLI; or `builtin`, `agent_sdk`,
++  `codex_cli`). Scheduled tasks, campaigns, fleet and subagents keep the harness they always used.
+ - `[mcp.presets.<key>]` built-in MCP servers (name, transport, command, args, description) added
+   once to Skills & MCP; `[skills.mcp_on_invoke]` maps a skill to the MCP servers that invoking it
+   turns on for the session (every Unity skill → `unity`).
+@@ -180,7 +183,7 @@ there's more to scroll.
+ **Chat.** Streaming replies with collapsible thinking and tool calls, subagent cards (tier,
+ effort meter, status, tokens, cost, stop), inline players for ElevenLabs audio, and drag and
+ drop attachments. Slash commands are `/model`, `/effort`, `/mode`, `/compact`, `/clear`,
+-`/skill`, `/task` (see [Task board](#task-board)) and `/workflow` (see
++`/skill`, `/task` (see [Task board](#task-board)) and, in built-in loop sessions with an API key, `/workflow` (see
+ [Campaigns and workflows](#campaigns-and-workflows)). A task code such as `Task00012` in a message
+ (yours or the agent's) shows as a chip that opens the task; the chat header shows the tasks
+ linked to the session.
+@@ -215,8 +218,8 @@ missed too much.
+ windows at least 1200 px wide and closed in narrower ones:
+ 
+ 1. **Environment** — where it runs (Local), folder, model and effort, account profile per provider,
+-   mode, harness. The harness picker is locked while the session runs a campaign or workflow
+-   (they need the built-in loop).
++   mode, and the session's harness (read-only: new sessions run Claude Code; older sessions keep
++   the harness they were made with).
+ 2. **Context** — tokens by system, tools, skills, messages and attachments, as a share of the
+    window, plus this session's cost per model. **Compact** summarizes older turns with
+    `claude.fast` at low effort (the last 3 turns, or inside one long turn the last 4 tool
+@@ -477,6 +480,9 @@ The tables (migration 4) are `task_boards`, `task_columns`, `board_tasks`, `task
+ 
+ ## Campaigns and workflows
+ 
++Campaigns and workflows run on the built-in loop with an API key. Workflows aren't available
++in Claude subscription sessions, including sessions from the new-session screen.
++
+ Two ways to run work in phases whose checks the app evaluates itself (an agent saying "done"
+ never counts):
+ 
+@@ -510,7 +516,7 @@ script's `RESULT:` line, e.g. `asset_audit`), `metric_threshold` (`[VERIFY]`/`[P
+ (a fresh screenshot), `git_clean` and `manual` (you answer Pass or Fail on a card); every phase
+ needs at least one the app can check.
+ 
+-**Starting a workflow.** In the composer type `/workflow <id> <what to do>`, or `/workflow <id>`
++**Starting a workflow.** In a built-in loop session with an API key, type `/workflow <id> <what to do>` in the composer, or `/workflow <id>`
+ to attach it as a chip and type the request next; the skills button lists the folder's
+ **Workflows** first. Sending starts the chain in this session. The agent finishes each step with a
+ `---HANDOFF---` block (What / Decisions / Unresolved / Reversibility) and `chain_step_done`; the
+@@ -562,9 +568,10 @@ stays advisory.
+ **Tasks.** Task codes in a campaign's or workflow's request (`Task00012`) link every session of the
+ run to those tasks on the task board.
+ 
+-**Harness.** Campaigns and workflows use the built-in loop (their tools, autopilot and gates live
+-there): a workflow can't start in a session on another harness, and the harness picker is locked
+-while one runs.
++**Harness.** Campaigns and workflows use the built-in loop with an API key (their tools, autopilot
++and gates live there). Workflows aren't available in Claude subscription sessions: the Tools menu
++hides them and `/workflow` explains why. New sessions from the new-session screen use the Claude
++subscription. A session's harness can't change while a campaign or workflow runs.
+ 
+ **The agent's tools** (only in campaign or workflow sessions; the `campaign` skill is pinned
+ there): `campaign_status`, `campaign_log` (decision, discovery or note), `campaign_pause` (with an
+@@ -601,8 +608,30 @@ The app remembers these choices in this browser profile (`localStorage`).
+ Hover a row, or move the keyboard focus to it, for its **…** button, which opens the same menu
+ as a right-click (Tab reaches it from the focused row).
+ 
+-**New session (+ or ⌘N)** reuses an untitled session without messages in the same group instead
+-of adding another empty "New session".
++**New session (+ or ⌘N)** opens the new-session screen; the session is made when you send its
++first message, so no empty "New session" rows pile up. It joins the current session's group (or the
++group whose **+** you pressed).
++
++**The new-session screen** asks *What should we work on, <your first name and last initial>?* (the
++Mac account's full name; never your Claude login or email). Below it, a card holds the editor and
++the new session's settings:
++
++- **Location**: **Chat only** (no folder: Claude Code works in a private scratch folder,
++  `<data>/claude_code/<session>/work`, deleted with the session) or **Folder** (Claude Code reads,
++  edits and runs commands in that project folder). The folder chip opens the folder picker; your
++  recent session folders are the pills under the card, and a click picks one.
++- **Model** (Claude models, with their tiers), **effort**, and **mode**: Plan only, Ask before
++  edits or Accept edits. There is no bypass-permissions mode.
++- **Tools** picks a skill for the first message; `/` commands work as in the chat (`/model`,
++  `/effort` and `/mode` change the card; `/task new` makes a board card).
++- **Send** (Enter) creates the session and sends the message.
++
++Every new session from this screen runs **Claude Code on your Claude subscription** (harness `claude_code`, the
++`[sessions].default_harness`); there's no harness choice. Sessions made before keep their harness,
++shown read-only in the Environment card. If the `claude` CLI is missing or logged out, the screen
++shows a slim notice (*Claude Code isn't logged in: run `claude auth login`*) with Copy and Retry.
++The screen has no attachments (Claude Code reads only its folder); attach files once the session
++has started.
+ 
+ **The session menu** has:
+ 
+@@ -697,8 +726,12 @@ change these details: see Troubleshooting.
+ (Claude Code, installed by you and never modified or bundled) inside GameDevWorkstation. You chat
+ in the normal chat; Claude Code's own loop and tools do the work in the session folder (a worktree
+ folder works too: the CLI runs there), and its replies, tool cards, approvals and usage show up like
+-any other session. Pick it in a new session's **Run this session with** menu (shown until the first
+-message) or in the side panel's Environment card → **Harness**.
++any other session. Every new session from the new-session screen uses it (see
++[the new-session screen](#sessions)); older sessions keep their harness. A chat-only session (no
++folder) runs in a private scratch folder, `<data>/claude_code/<session>/work`: the CLI's working
++directory and the folder scope of its approvals, removed when the session is deleted for good.
++Older chat-only sessions keep `<data>/sessions/<session>` so Claude can find their transcripts
++when resuming.
+ 
+ **Your login.** These sessions use the Claude account you logged in to with `claude auth login`.
+ GameDevWorkstation passes no API key and never uses `--bare`. Every CLI process (including status
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index 4e78bd0..d73b616 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -113,6 +113,7 @@ export default function App() {
+   const connected = useStore((s) => s.connected);
+   const page = useStore((s) => s.page);
+   const sidePanelOpen = useStore((s) => s.sidePanelOpen);
++  const hasSession = useStore((s) => !!s.currentId); // the new-session screen has no side panel
+   const terminalOpen = useStore((s) => s.terminalOpen);
+   const toast = useStore((s) => s.toast);
+   const searchOpen = useStore((s) => s.searchOpen);
+@@ -170,7 +171,7 @@ export default function App() {
+               </Panel>
+             </Group>
+           </Panel>
+-          {page === "chat" && sidePanelOpen && (
++          {page === "chat" && sidePanelOpen && hasSession && (
+             <>
+               <Separator className="rh" />
+               <Panel id="side" defaultSize="300px" minSize="260px" maxSize="560px"><SidePanel /></Panel>
+diff --git a/frontend/src/components/Chat.tsx b/frontend/src/components/Chat.tsx
+index 389ab30..4321432 100644
+--- a/frontend/src/components/Chat.tsx
++++ b/frontend/src/components/Chat.tsx
+@@ -1,6 +1,6 @@
+ import { Archive, Brain, ChevronRight, Clock, GitBranch, PanelRight, Sparkles, Square, Trash2, TriangleAlert, Wrench } from "lucide-react";
+ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+-import { fileUrl, get, inTauri, patch, post } from "../lib/api";
++import { fileUrl, inTauri, post } from "../lib/api";
+ import { MdLite } from "../lib/mdlite";
+ import { openLocalFile } from "../lib/native";
+ import { sessionActions } from "../lib/sessions";
+@@ -9,7 +9,8 @@ import { ApprovalCard } from "./ApprovalCard";
+ import { Composer } from "./Composer";
+ import { SafeMarkdown } from "./SafeMarkdown";
+ import { NoKeyNotice, SetupChecklist } from "./SetupChecklist";
+-import { ClaudeCodeChip, ClaudeLoginNotice, HarnessSelect } from "./ClaudeCode";
++import { ClaudeCodeChip, ClaudeLoginNotice } from "./ClaudeCode";
++import { NewSession } from "./NewSession";
+ import { metaRow } from "./rows";
+ import { SessionLimitBanner } from "./LimitsBanner";
+ import { SessionTasks } from "./SessionTasks";
+@@ -19,20 +20,6 @@ import { EffortMeter, ProviderDot, fmtUsd, modelLabel, tiersOf, useModelCatalog
+ const EMPTY: Msg[] = [];
+ const STOPPABLE_JOBS = new Set(["subagent", "codex_cli", "command"]);
+ 
+-/** The new-session flow's harness choice: shown on a session that has no messages yet. */
+-function NewSessionHarness({ sid, harness }: { sid: string; harness: string }) {
+-  const [env, setEnv] = useState<any>(null);
+-  useEffect(() => { get("/environment").then(setEnv).catch(() => setEnv(null)); }, []);
+-  return (
+-    <div className="mb-4 flex items-center gap-2 text-[13px]" data-testid="new-session-harness">
+-      <span className="text-muted">Run this session with</span>
+-      <HarnessSelect value={harness} available={env?.harnesses} onChange={async (v) => {
+-        try { await patch(`/sessions/${sid}`, { harness: v }); } catch (e: any) { actions.toast(e.message, "error"); }
+-      }} />
+-    </div>
+-  );
+-}
+-
+ /** "Rate limited, retrying in Ns" with a live countdown. */
+ function StatusLine({ s }: { s: AgentStatus }) {
+   const [now, setNow] = useState(Date.now());
+@@ -113,15 +100,7 @@ export function Chat() {
+     if (el && stick.current && !anchor.current) el.scrollTop = el.scrollHeight;
+   }, [messages, streaming, pending.length]);
+ 
+-  if (!session) {
+-    return (
+-      <div className="h-full flex flex-col items-center justify-center gap-3 text-muted">
+-        <div className="w-full max-w-[560px] px-5"><SetupChecklist /></div>
+-        <p>Start a session to chat with your agents.</p>
+-        <button className="btn btn-primary" onClick={() => sessionActions.create()}>New session</button>
+-      </div>
+-    );
+-  }
++  if (!session) return <NewSession />; // no session open: the new-session screen
+   const running = session.status === "running";
+   const visible = messages.filter((m) => !m.meta?.tool_results);
+   const firstLive = visible.findIndex((m) => !m.meta?.compacted);
+@@ -129,7 +108,7 @@ export function Chat() {
+   return (
+     <div className="h-full flex flex-col min-w-0">
+       <header className="flex items-center gap-2 px-4 h-11 border-b border-line surface shrink-0" data-tauri-drag-region>
+-        <h1 className="font-medium truncate">{session.title}</h1>
++        <h1 className="font-medium truncate min-w-[6rem]">{session.title}</h1>
+         <span className="chip whitespace-nowrap shrink-0"><ProviderDot model={session.model} />{modelLabel(session.model)} <EffortMeter effort={session.effort} /> {session.effort}</span>
+         <SessionTasks sessionId={session.id} />
+         {session.harness === "claude_code" && <ClaudeCodeChip s={session} />}
+@@ -158,7 +137,6 @@ export function Chat() {
+           {visible.length === 0 && !streaming && (
+             <div className="text-muted text-[13px] py-10">
+               <SetupChecklist />
+-              {!running && <NewSessionHarness sid={session.id} harness={session.harness} />}
+               Ask anything, attach files, or hand over a job to plan and delegate. Type <code className="font-mono">/</code> for commands.
+             </div>
+           )}
+diff --git a/frontend/src/components/ClaudeCode.tsx b/frontend/src/components/ClaudeCode.tsx
+index 42b7074..6160baf 100644
+--- a/frontend/src/components/ClaudeCode.tsx
++++ b/frontend/src/components/ClaudeCode.tsx
+@@ -1,7 +1,8 @@
+-// Claude Code sessions (harness claude_code): the harness picker shared by the new-session flow and
+-// the Environment card, the session header chip (login status, `claude --resume <id>` to copy), the
+-// "log in" card, and Settings → Claude Code. The session runs the user's own `claude` CLI on their own
+-// Claude login; GameDevWorkstation never sees their tokens.
++// Claude Code sessions (harness claude_code): harness names (the Environment card shows a session's
++// harness read-only; every new session runs Claude Code), the new-session screen's login notice, the
++// session header chip (login status, `claude --resume <id>` to copy), the "log in" card, and
++// Settings → Claude Code. The session runs the user's own `claude` CLI on their own Claude login;
++// GameDevWorkstation never sees their tokens.
+ import { Check, Copy, KeyRound, RefreshCw, TerminalSquare } from "lucide-react";
+ import { useEffect, useState } from "react";
+ import { get, post } from "../lib/api";
+@@ -36,23 +37,12 @@ export function loginLabel(st: ClaudeStatus | null): string {
+   return st.bills_api ? "Logged in with an API key" : `Logged in${st.auth_method ? ` (${st.auth_method})` : ""}`;
+ }
+ 
+-/** The harness <select>. `available` is /environment's harnesses map (missing → not offered as installed). */
+-export function HarnessSelect({ value, onChange, available, disabled, title, label = (v, l) => l }: {
+-  value: string; onChange: (v: string) => void; available?: Record<string, boolean> | null; disabled?: boolean; title?: string;
+-  label?: (v: string, l: string, full: boolean) => string;
+-}) {
+-  return (
+-    <select className="input py-0.5" value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} aria-label="Harness" title={title}>
+-      {HARNESSES.map(([v, l]) => (
+-        <option key={v} value={v} disabled={!!available && !available[v]} title={HARNESS_HINT[v] ?? label(v, l, true)}>
+-          {label(v, l, false)}{available && !available[v] ? " (not installed)" : ""}
+-        </option>
+-      ))}
+-    </select>
+-  );
++/** A harness's display name ("claude_code" → "Claude Code (subscription)"); unknown ids as they are. */
++export function harnessName(v: string): string {
++  return HARNESSES.find(([k]) => k === v)?.[1] ?? v;
+ }
+ 
+-function CopyButton({ text, label }: { text: string; label: string }) {
++export function CopyButton({ text, label }: { text: string; label: string }) {
+   const [done, setDone] = useState(false);
+   return (
+     <button className="btn btn-ghost px-1 py-0.5" aria-label={label} title={label}
+@@ -63,6 +53,27 @@ function CopyButton({ text, label }: { text: string; label: string }) {
+   );
+ }
+ 
++/** The new-session screen's slim notice when the claude CLI is missing or logged out: what to run,
++ *  Copy, and Retry (re-checks /claude-code/status). Nothing while it's fine or still checking. */
++export function ClaudeStatusNotice({ st, retry }: { st: ClaudeStatus | null; retry: () => void }) {
++  if (!st || (st.installed && st.logged_in)) return null;
++  const cmd = "claude auth login";
++  return (
++    <div role="status" data-testid="claude-status-notice"
++      className="flex items-center gap-2 rounded-full border border-line surface-raised pl-3 pr-1 py-0.5 text-[12.5px] max-w-full">
++      <KeyRound size={13} className="text-warn shrink-0" aria-hidden />
++      <span className="min-w-0 truncate">
++        {st.installed ? "Claude Code isn't logged in" : "The claude CLI isn't installed"}: {st.installed ? "run " : "install Claude Code, then run "}
++        <code className="font-mono">{cmd}</code>
++      </span>
++      <CopyButton text={cmd} label="Copy claude auth login" />
++      <button className="btn btn-ghost py-0 px-1.5 text-[12.5px] shrink-0" onClick={retry} title="Check again">
++        <RefreshCw size={12} aria-hidden />Retry
++      </button>
++    </div>
++  );
++}
++
+ /** The session header chip of a Claude Code session: login status and `claude --resume <id>`. */
+ export function ClaudeCodeChip({ s }: { s: Session }) {
+   const [st] = useClaudeStatus(true);
+@@ -70,12 +81,12 @@ export function ClaudeCodeChip({ s }: { s: Session }) {
+   const cmd = typeof id === "string" && /^[0-9a-f-]{36}$/i.test(id) ? `claude --resume ${id}` : null;
+   const ok = !!st?.installed && st.logged_in;
+   return (
+-    <span className="chip whitespace-nowrap shrink-0 gap-1" data-testid="claude-code-chip"
++    <span className="chip whitespace-nowrap shrink min-w-0 overflow-hidden gap-1" data-testid="claude-code-chip"
+       title={cmd ? `Continue this conversation in a terminal: ${cmd}` : "Claude Code (your CLI login)"}>
+       <TerminalSquare size={12} aria-hidden />
+       <span>Claude Code</span>
+       <span className={ok ? "text-ok" : "text-warn"}>· {loginLabel(st)}</span>
+-      {cmd && <><code className="font-mono text-[11.5px] text-muted hidden md:inline">{cmd}</code><CopyButton text={cmd} label="Copy the claude --resume command" /></>}
++      {cmd && <><code className="font-mono text-[11.5px] text-muted hidden min-[1500px]:inline">{cmd}</code><span className="shrink-0"><CopyButton text={cmd} label="Copy the claude --resume command" /></span></>}
+     </span>
+   );
+ }
+diff --git a/frontend/src/components/Composer.tsx b/frontend/src/components/Composer.tsx
+index 922dcf7..2cff04d 100644
+--- a/frontend/src/components/Composer.tsx
++++ b/frontend/src/components/Composer.tsx
+@@ -1,5 +1,5 @@
+-import { ArrowUp, Flag, Paperclip, Sparkles, X } from "lucide-react";
+-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
++import { ArrowUp, Flag, Paperclip, Plug, Sparkles, X } from "lucide-react";
++import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+ import { get, patch, post, upload } from "../lib/api";
+ import { campaignsApi, parseWorkflowCommand, type ChainTemplate } from "../lib/campaigns";
+ import { actions, useStore, type Session } from "../lib/store";
+@@ -8,10 +8,24 @@ import { Popover } from "./Popover";
+ import { UnityChip } from "./UnityChip";
+ import { modelLabel } from "./ui";
+ 
+-type Att = { path: string; name: string; mime: string; size?: number; item_id?: string; text?: string };
++export type Att = { path: string; name: string; mime: string; size?: number; item_id?: string; text?: string };
+ 
+-const EFFORTS = ["none", "low", "medium", "high", "xhigh", "max"];
+-const MODES: Record<string, string> = { ask: "Ask before edits", accept_edits: "Accept edits", plan: "Plan only" };
++export const EFFORTS = ["none", "low", "medium", "high", "xhigh", "max"];
++export const MODES: Record<string, string> = { ask: "Ask before edits", accept_edits: "Accept edits", plan: "Plan only" };
++
++/** The new-session screen's composer: no session exists yet. The settings live on the screen
++ *  (/model, /effort, /mode change them there), and sending creates the session with the first message. */
++export type ComposerDraft = {
++  set: (body: { model?: string; effort?: string; mode?: string }) => void;
++  /** Create the session and send the first message; false when it didn't start (the text stays). */
++  start: (text: string, skill: string | null) => Promise<boolean>;
++  /** The card's two control rows (location, folder, model; effort, mode). Tools and Send are added. */
++  rows: [ReactNode, ReactNode];
++  placeholder: string;
++};
++/** Commands that need a session that already exists. */
++const SESSION_ONLY = ["/compact", "/clear", "/workflow"];
++const WORKFLOW_UNAVAILABLE = "Workflows run on the built-in loop with an API key, so they aren't available in Claude subscription sessions.";
+ 
+ type SkillInfo = { name: string; description: string; featured?: boolean };
+ /** Short menu blurbs for the built-in skills pinned at the top of the skills menu. */
+@@ -90,15 +104,22 @@ function SkillPicker({ open, skills, onPick, onClose, workflows = [], onPickWork
+   );
+ }
+ 
+-export function Composer({ session, running }: { session: Session; running: boolean }) {
++export function Composer({ session, running, draft }: { session: Session; running: boolean; draft?: ComposerDraft }) {
+   const appState = useStore((s) => s.appState);
+   const [text, setText] = useState("");
+   const [atts, setAtts] = useState<Att[]>([]);
+   const drafts = useStore((s) => s.drafts[session.id]);
+   useEffect(() => {
+     if (drafts?.length) {
+-      setAtts((a) => [...a, ...(drafts as Att[])]);
+-      useStore.setState((x) => ({ drafts: { ...x.drafts, [session.id]: [] } }));
++      const files: Att[] = [];
++      const texts: string[] = [];
++      for (const d of drafts) {
++        if ("kind" in d && d.kind === "text") texts.push(d.text);
++        else if ("path" in d) files.push(d);
++      }
++      if (texts.length) setText(texts.join("\n\n"));
++      if (files.length) setAtts((a) => [...a, ...files]);
++      actions.setDrafts(session.id, []);
+     }
+   }, [drafts, session.id]);
+   const skill = useStore((s) => s.skillChips[session.id] ?? null);
+@@ -108,11 +129,12 @@ export function Composer({ session, running }: { session: Session; running: bool
+   // Workflows (chain templates for this folder) and the one picked for the next message.
+   const [workflows, setWorkflows] = useState<ChainTemplate[]>([]);
+   const [workflow, setWorkflow] = useState<ChainTemplate | null>(null);
++  const subscription = !!draft || session.harness === "claude_code";
+   const loadWorkflows = () => {
+-    if (!session.folder) return setWorkflows([]);
++    if (!session.folder || subscription) return setWorkflows([]);
+     campaignsApi.chains(session.folder, "chain").then((r) => setWorkflows(r.templates.filter((t) => t.kinds.includes("chain")))).catch(() => setWorkflows([]));
+   };
+-  useEffect(() => { setWorkflow(null); loadWorkflows(); }, [session.id, session.folder]);
++  useEffect(() => { setWorkflow(null); loadWorkflows(); }, [session.id, session.folder, subscription]);
+   const closeSkillMenu = useCallback(() => setSkillMenu(false), []);
+   const loadSkills = () => get("/skills").then((r) => {
+     const all: SkillInfo[] = r.skills;
+@@ -137,7 +159,12 @@ export function Composer({ session, running }: { session: Session; running: bool
+     { cmd: "/skill", hint: "Use a skill in this message", args: skills.map((s) => s.name) },
+     { cmd: "/task", hint: "Task board: new, <code>, move, done, list, link", args: TASK_SUBCOMMANDS.map(([s]) => s) },
+     { cmd: "/workflow", hint: "Run a workflow (phases with checks) in this session", args: workflows.map((w) => w.id) },
+-  ], [modelChoices, skills, workflows]);
++  ].filter((c) => (!draft || !SESSION_ONLY.includes(c.cmd)) && !(subscription && c.cmd === "/workflow")), [modelChoices, skills, workflows, !!draft, subscription]);
++  /** PATCH the session, or on the new-session screen change its settings there. */
++  const update = async (body: { model?: string; effort?: string; mode?: string }) => {
++    if (draft) draft.set(body);
++    else await patch(`/sessions/${session.id}`, body);
++  };
+ 
+   // /task autocomplete: task codes from the board (matched by the backend) and its column names.
+   const [taskHits, setTaskHits] = useState<TaskHit[]>([]);
+@@ -171,6 +198,7 @@ export function Composer({ session, running }: { session: Session; running: bool
+   }, [text, commands, taskHits, taskCols, skills, workflows]);
+ 
+   const addFiles = async (files: FileList | File[]) => {
++    if (draft) return; // the new-session screen has no attachments (Claude Code reads only its folder)
+     setBusy(true);
+     try {
+       const ups = await Promise.all(Array.from(files).map((f) => upload(f, session.id)));
+@@ -187,21 +215,23 @@ export function Composer({ session, running }: { session: Session; running: bool
+   const runSlash = async (line: string): Promise<boolean> => {
+     const [cmd, ...rest] = line.trim().split(/\s+/);
+     const arg = rest.join(" ");
++    if (cmd === "/workflow" && subscription) return actions.toast(WORKFLOW_UNAVAILABLE, "error"), true;
++    if (draft && SESSION_ONLY.includes(cmd)) return actions.toast(`${cmd} works in a session that has started. Send a message first.`, "error"), true;
+     try {
+       switch (cmd) {
+         case "/model":
+           if (!arg) return actions.toast(`Model: ${modelLabel(session.model)}`), true;
+-          await patch(`/sessions/${session.id}`, { model: arg });
++          await update({ model: arg });
+           actions.toast(`Model set to ${modelLabel(arg)}`);
+           return true;
+         case "/effort":
+           if (!EFFORTS.includes(arg)) return actions.toast(`Effort must be one of: ${EFFORTS.join(", ")}`, "error"), true;
+-          await patch(`/sessions/${session.id}`, { effort: arg });
++          await update({ effort: arg });
+           actions.toast(["xhigh", "max"].includes(arg) ? `Effort set to ${arg}. You'll be asked to approve it on the next turn.` : `Effort set to ${arg}`);
+           return true;
+         case "/mode":
+           if (!MODES[arg]) return actions.toast("Mode must be ask, accept_edits or plan", "error"), true;
+-          await patch(`/sessions/${session.id}`, { mode: arg });
++          await update({ mode: arg });
+           actions.toast(`Mode: ${MODES[arg]}`);
+           return true;
+         case "/compact": {
+@@ -244,6 +274,10 @@ export function Composer({ session, running }: { session: Session; running: bool
+   const runTask = async (line: string): Promise<boolean> => {
+     const c = parseTaskCommand(line);
+     const open = (code: string) => ({ label: "Open", run: () => actions.go("board", { task: code }) });
++    if (draft && (c.kind === "open" || c.kind === "link")) {
++      actions.toast("Start the session first (send a message), then bring the task into it.", "error");
++      return true;
++    }
+     switch (c.kind) {
+       case "board":
+         actions.go("board");
+@@ -286,7 +320,9 @@ export function Composer({ session, running }: { session: Session; running: bool
+   const sendMessage = async (t: string, sk: string | null) => {
+     setBusy(true);
+     try {
+-      await post(`/sessions/${session.id}/messages`, { text: t, attachments: atts, ...(sk ? { skill: sk } : {}) });
++      if (draft) {
++        if (!(await draft.start(t, sk))) return;
++      } else await post(`/sessions/${session.id}/messages`, { text: t, attachments: atts, ...(sk ? { skill: sk } : {}) });
+       setText("");
+       setAtts([]);
+       setSkill(null);
+@@ -345,6 +381,103 @@ export function Composer({ session, running }: { session: Session; running: bool
+     setSel(0);
+   };
+ 
++  const suggestionList = suggestions.length > 0 && (
++    <ul className={`absolute ${draft ? "top-full mt-1" : "bottom-full mb-1"} left-0 w-[min(600px,100%)] rounded-md border border-line bg-raised shadow-lg py-1 text-[13px] z-10`} role="listbox">
++      {suggestions.map((s, i) => (
++        <li key={s.value} role="option" aria-selected={i === sel}>
++          <button className={`w-full text-left px-3 py-1 flex items-baseline gap-3 ${i === sel ? "bg-sunken" : ""}`} title={s.hint || undefined}
++            onMouseDown={(e) => { e.preventDefault(); choose(s.value); ta.current?.focus(); }}>
++            <span className="font-mono shrink-0 max-w-[45%] truncate">{s.label}</span><span className="text-muted min-w-0 flex-1 truncate">{s.hint}</span>
++          </button>
++        </li>
++      ))}
++    </ul>
++  );
++  const chips = (atts.length > 0 || skill || workflow) && (
++    <div className={`flex flex-wrap gap-1.5 ${draft ? "mb-1.5" : "mb-2"}`}>
++      {workflow && (
++        <span className="chip text-text" title={`Sending starts the ${workflow.title} workflow in this session: ${workflow.phases.map((p) => p.name).join(" → ")}`}>
++          <Flag size={12} className="text-action" />Workflow: {workflow.title}
++          <button aria-label={`Remove workflow ${workflow.title}`} onClick={() => setWorkflow(null)}><X size={12} /></button>
++        </span>
++      )}
++      {skill && (
++        <span className="chip text-text" title="This message invokes the skill; it stays on for the session">
++          <Sparkles size={12} className="text-action" />{skill}
++          <button aria-label={`Remove skill ${skill}`} onClick={() => setSkill(null)}><X size={12} /></button>
++        </span>
++      )}
++      {atts.map((a, i) => (
++        <span key={i} className="chip">{a.name}<button aria-label={`Remove ${a.name}`} onClick={() => setAtts(atts.filter((_, j) => j !== i))}><X size={12} /></button></span>
++      ))}
++    </div>
++  );
++  const openSkills = () => {
++    if (skillMenu) return setSkillMenu(false);
++    loadSkills();
++    loadWorkflows();
++    setSkillMenu(true);
++  };
++  const skillPicker = (
++    <SkillPicker open={skillMenu} skills={skills} onClose={closeSkillMenu} workflows={subscription ? [] : workflows}
++      onPickWorkflow={(w) => { setWorkflow(w); setSkillMenu(false); ta.current?.focus(); }}
++      onPick={(n) => { setSkill(n); setSkillMenu(false); ta.current?.focus(); }} />
++  );
++  const canSend = !(busy || running || (!text.trim() && !atts.length && !skill && !workflow));
++  const textarea = (
++    <textarea
++      id="composer"
++      ref={ta}
++      rows={draft ? 2 : 1}
++      value={text}
++      aria-label={draft ? "Describe a task" : undefined}
++      placeholder={running ? "Agent is working… (Stop to interrupt)" : workflow ? `What should the ${workflow.title} workflow do?` : skill ? `What should ${skill} work on? (or send as is)` : draft ? draft.placeholder : "Message the agent, or / for commands"}
++      className={draft ? "w-full resize-none bg-transparent outline-none focus-visible:outline-none px-1 py-0.5 min-h-[52px] max-h-72 text-[15px] leading-[1.6] placeholder:text-faint"
++        : "flex-1 resize-none bg-transparent outline-none focus-visible:outline-none py-1 max-h-60 leading-6"}
++      onChange={(e) => { setText(e.target.value); setSel(0); e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, draft ? 288 : 240)}px`; }}
++      onPaste={(e) => { if (!draft && e.clipboardData.files.length) { e.preventDefault(); addFiles(e.clipboardData.files); } }}
++      onKeyDown={(e) => {
++        if (suggestions.length && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
++          e.preventDefault();
++          setSel((sel + (e.key === "ArrowDown" ? 1 : suggestions.length - 1)) % suggestions.length);
++        } else if (suggestions.length && e.key === "Tab") {
++          e.preventDefault();
++          choose(suggestions[sel].value);
++        } else if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
++          e.preventDefault();
++          // `/model sol`: a partial name or label picks the highlighted model instead of setting "sol".
++          const modelArg = text.trim().match(/^\/model\s+(.+)$/)?.[1];
++          const pickModel = modelArg !== undefined && !modelChoices.includes(modelArg);
++          const pickTask = /^\/task\s/.test(text) && taskPick(text, taskCols); // a half-typed task code or column
++          if (suggestions.length && suggestions[sel].value.trim() !== text.trim() && (pickModel || pickTask || !text.includes(" ") || /^\/(skill|workflow) \S*$/.test(text))) choose(suggestions[sel].value);
++          else send();
++        }
++      }}
++    />
++  );
++
++  if (draft) {
++    // The new-session card: the editor, then the screen's settings and Tools, then Send.
++    return (
++      <div className="relative rounded-[20px] border border-line surface-raised px-4 pt-3.5 pb-2.5 shadow-[0_1px_2px_rgb(0_0_0/0.04),0_6px_24px_-8px_rgb(0_0_0/0.10)] focus-within:border-[color-mix(in_srgb,var(--action)_35%,var(--line))]">
++        {chips}
++        {textarea}
++        {suggestionList}
++        <div className="mt-2 flex items-center gap-1 min-w-0">{draft.rows[0]}</div>
++        <div className="mt-1 flex items-center gap-1 min-w-0">
++          {draft.rows[1]}
++          <div className="relative">
++            <button className={`btn btn-ghost gap-1.5 px-2 text-[14px] ${skill || workflow ? "text-action" : ""}`} title="Skills for this message" aria-label="Tools"
++              aria-haspopup="dialog" aria-expanded={skillMenu} onClick={openSkills}><Plug size={15} aria-hidden />Tools</button>
++            {skillPicker}
++          </div>
++          <button className="ml-auto shrink-0 size-9 rounded-full inline-flex items-center justify-center bg-action text-action-text transition hover:brightness-110 disabled:opacity-35 disabled:hover:brightness-100"
++            disabled={!canSend} onClick={send} aria-label="Send" title="Start the session (Enter)"><ArrowUp size={18} strokeWidth={2.25} /></button>
++        </div>
++      </div>
++    );
++  }
++
+   return (
+     <div
+       className={`shrink-0 border-t border-line surface px-4 py-3 ${drag ? "outline-2 outline-dashed outline-action -outline-offset-4" : ""}`}
+@@ -353,80 +486,18 @@ export function Composer({ session, running }: { session: Session; running: bool
+       onDrop={(e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); }}
+     >
+       <div className="max-w-[780px] mx-auto relative">
+-        {suggestions.length > 0 && (
+-          <ul className="absolute bottom-full mb-1 left-0 w-[min(600px,100%)] rounded-md border border-line bg-raised shadow-lg py-1 text-[13px] z-10" role="listbox">
+-            {suggestions.map((s, i) => (
+-              <li key={s.value} role="option" aria-selected={i === sel}>
+-                <button className={`w-full text-left px-3 py-1 flex items-baseline gap-3 ${i === sel ? "bg-sunken" : ""}`} title={s.hint || undefined}
+-                  onMouseDown={(e) => { e.preventDefault(); choose(s.value); ta.current?.focus(); }}>
+-                  <span className="font-mono shrink-0 max-w-[45%] truncate">{s.label}</span><span className="text-muted min-w-0 flex-1 truncate">{s.hint}</span>
+-                </button>
+-              </li>
+-            ))}
+-          </ul>
+-        )}
+-        {(atts.length > 0 || skill || workflow) && (
+-          <div className="flex flex-wrap gap-1.5 mb-2">
+-            {workflow && (
+-              <span className="chip text-text" title={`Sending starts the ${workflow.title} workflow in this session: ${workflow.phases.map((p) => p.name).join(" → ")}`}>
+-                <Flag size={12} className="text-action" />Workflow: {workflow.title}
+-                <button aria-label={`Remove workflow ${workflow.title}`} onClick={() => setWorkflow(null)}><X size={12} /></button>
+-              </span>
+-            )}
+-            {skill && (
+-              <span className="chip text-text" title="This message invokes the skill; it stays on for the session">
+-                <Sparkles size={12} className="text-action" />{skill}
+-                <button aria-label={`Remove skill ${skill}`} onClick={() => setSkill(null)}><X size={12} /></button>
+-              </span>
+-            )}
+-            {atts.map((a, i) => (
+-              <span key={i} className="chip">{a.name}<button aria-label={`Remove ${a.name}`} onClick={() => setAtts(atts.filter((_, j) => j !== i))}><X size={12} /></button></span>
+-            ))}
+-          </div>
+-        )}
++        {suggestionList}
++        {chips}
+         <div className="flex items-end gap-2 rounded-lg border border-line surface-raised px-2 py-1.5 focus-within:border-action">
+           <button className="btn btn-ghost px-1.5 mb-0.5" title="Attach files" aria-label="Attach files" onClick={() => fileIn.current?.click()}><Paperclip size={16} /></button>
+           <div className="relative mb-0.5">
+             <button className={`btn btn-ghost px-1.5 ${skill ? "text-action" : ""}`} title="Use a skill" aria-label="Use a skill" aria-haspopup="dialog" aria-expanded={skillMenu}
+-              onClick={() => {
+-                if (skillMenu) return setSkillMenu(false);
+-                loadSkills();
+-                loadWorkflows();
+-                setSkillMenu(true);
+-              }}><Sparkles size={16} /></button>
+-            <SkillPicker open={skillMenu} skills={skills} onClose={closeSkillMenu} workflows={workflows}
+-              onPickWorkflow={(w) => { setWorkflow(w); setSkillMenu(false); ta.current?.focus(); }}
+-              onPick={(n) => { setSkill(n); setSkillMenu(false); ta.current?.focus(); }} />
++              onClick={openSkills}><Sparkles size={16} /></button>
++            {skillPicker}
+           </div>
+           <input ref={fileIn} type="file" multiple hidden onChange={(e) => e.target.files && addFiles(e.target.files)} />
+-          <textarea
+-            id="composer"
+-            ref={ta}
+-            rows={1}
+-            value={text}
+-            placeholder={running ? "Agent is working… (Stop to interrupt)" : workflow ? `What should the ${workflow.title} workflow do?` : skill ? `What should ${skill} work on? (or send as is)` : "Message the agent, or / for commands"}
+-            className="flex-1 resize-none bg-transparent outline-none focus-visible:outline-none py-1 max-h-60 leading-6"
+-            onChange={(e) => { setText(e.target.value); setSel(0); e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, 240)}px`; }}
+-            onPaste={(e) => { if (e.clipboardData.files.length) { e.preventDefault(); addFiles(e.clipboardData.files); } }}
+-            onKeyDown={(e) => {
+-              if (suggestions.length && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+-                e.preventDefault();
+-                setSel((sel + (e.key === "ArrowDown" ? 1 : suggestions.length - 1)) % suggestions.length);
+-              } else if (suggestions.length && e.key === "Tab") {
+-                e.preventDefault();
+-                choose(suggestions[sel].value);
+-              } else if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+-                e.preventDefault();
+-                // `/model sol`: a partial name or label picks the highlighted model instead of setting "sol".
+-                const modelArg = text.trim().match(/^\/model\s+(.+)$/)?.[1];
+-                const pickModel = modelArg !== undefined && !modelChoices.includes(modelArg);
+-                const pickTask = /^\/task\s/.test(text) && taskPick(text, taskCols); // a half-typed task code or column
+-                if (suggestions.length && suggestions[sel].value.trim() !== text.trim() && (pickModel || pickTask || !text.includes(" ") || /^\/(skill|workflow) \S*$/.test(text))) choose(suggestions[sel].value);
+-                else send();
+-              }
+-            }}
+-          />
+-          <button className="btn btn-primary px-2 mb-0.5" disabled={busy || running || (!text.trim() && !atts.length && !skill && !workflow)} onClick={send} aria-label="Send"><ArrowUp size={16} /></button>
++          {textarea}
++          <button className="btn btn-primary px-2 mb-0.5" disabled={!canSend} onClick={send} aria-label="Send"><ArrowUp size={16} /></button>
+         </div>
+         <div className="mt-1 flex items-center gap-2 text-[11.5px] text-faint">
+           <span className="flex-1 min-w-0">{MODES[session.mode] ?? session.mode} · Enter to send, Shift+Enter for a new line · drop files to attach</span>
+diff --git a/frontend/src/components/NewSession.tsx b/frontend/src/components/NewSession.tsx
+new file mode 100644
+index 0000000..5d2904d
+--- /dev/null
++++ b/frontend/src/components/NewSession.tsx
+@@ -0,0 +1,188 @@
++// The new-session screen (the chat page with no session open): "What should we work on, <name>?",
++// a composer card with the session's settings, and recent folders. Every new session runs Claude
++// Code on the user's own Claude subscription (harness claude_code). Chat only = no folder: Claude
++// Code works in a private scratch folder; Folder = it works in that project folder. The session is
++// created when the first message is sent.
++import { ChevronDown, Folder } from "lucide-react";
++import { useEffect, useMemo, useState, type ReactNode } from "react";
++import { get } from "../lib/api";
++import { pickFolder } from "../lib/native";
++import { sessionActions } from "../lib/sessions";
++import { useStore, type Session } from "../lib/store";
++import { ClaudeStatusNotice, useClaudeStatus } from "./ClaudeCode";
++import { Composer, EFFORTS, type ComposerDraft } from "./Composer";
++import { modelLabel, providerModels, useModelCatalog } from "./ui";
++
++export type Location = "chat" | "folder";
++/** The permission modes a session can have, in menu order (no bypass mode: see store.SESSION_MODES). */
++export const NEW_SESSION_MODES: [string, string][] = [["plan", "Plan only"], ["ask", "Ask before edits"], ["accept_edits", "Accept edits"]];
++export const PLACEHOLDER = "Describe a task, or type / for commands and skills, /task for a Kanban card…";
++const PREFS_KEY = "newSession.prefs";
++const RECENT_MAX = 6;
++
++type Prefs = { location: Location; folder: string | null; model: string | null; effort: string | null; mode: string | null };
++const NO_PREFS: Prefs = { location: "chat", folder: null, model: null, effort: null, mode: null };
++
++/** The last choices on this screen (this window's browser storage; a convenience only). */
++function loadPrefs(): Prefs {
++  try {
++    return { ...NO_PREFS, ...JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") };
++  } catch {
++    return NO_PREFS;
++  }
++}
++function savePrefs(p: Prefs) {
++  try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch { /* private window: not remembered */ }
++}
++
++/** "/Users/me/Games/Forklift" → "Forklift". */
++export const folderName = (f: string) => f.replace(/\/+$/, "").split("/").pop() || f;
++const tilde = (f: string) => f.replace(/^\/Users\/[^/]+/, "~");
++
++/** Folders of recent sessions, most recently active first (Trash left out). */
++export function recentFolders(sessions: Session[], max = RECENT_MAX): string[] {
++  const seen = new Set<string>();
++  const out: string[] = [];
++  for (const s of sessions.filter((x) => x.folder && !x.deleted).sort((a, b) => (b.activity_at ?? b.created_at) - (a.activity_at ?? a.created_at))) {
++    if (!seen.has(s.folder!)) { seen.add(s.folder!); out.push(s.folder!); }
++    if (out.length >= max) break;
++  }
++  return out;
++}
++
++/** A borderless dropdown that reads as text with a chevron (a native <select> underneath). */
++function TextSelect({ label, value, onChange, children, className = "", title }: {
++  label: string; value: string; onChange: (v: string) => void; children: ReactNode; className?: string; title?: string;
++}) {
++  return (
++    <span className={`relative inline-flex items-center rounded-md hover:bg-sunken focus-within:bg-sunken ${className}`} title={title}>
++      <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}
++        className="appearance-none bg-transparent text-text text-[14px] leading-6 pl-2 pr-7 py-1 rounded-md cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-action max-w-full truncate">
++        {children}
++      </select>
++      <ChevronDown size={15} className="absolute right-2 text-muted pointer-events-none" aria-hidden />
++    </span>
++  );
++}
++
++export function NewSession() {
++  useModelCatalog();
++  const appState = useStore((s) => s.appState);
++  const sessions = useStore((s) => s.sessions);
++  const [prefs, setPrefsState] = useState<Prefs>(loadPrefs);
++  const setPrefs = (p: Partial<Prefs>) => setPrefsState((cur) => { const next = { ...cur, ...p }; savePrefs(next); return next; });
++  const [name, setName] = useState<string | null>(null);
++  useEffect(() => { get<{ name: string | null }>("/greeting").then((r) => setName(r?.name ?? null)).catch(() => setName(null)); }, []);
++  const [cli, recheck] = useClaudeStatus(true);
++
++  // Claude models only (Claude Code runs Claude); the default is the orchestrator's model when it's a Claude one.
++  const models = providerModels("anthropic");
++  const fallbackModel = (() => {
++    const o: string | undefined = appState?.orchestrator?.model;
++    const deep: string | undefined = appState?.tiers?.["claude.deep"];
++    return [o, deep, models[0]?.id].find((m) => m && models.some((x) => x.id === m)) ?? o ?? "claude-opus-5-5";
++  })();
++  const model = prefs.model && models.some((m) => m.id === prefs.model) ? prefs.model : fallbackModel;
++  const effort = prefs.effort && EFFORTS.includes(prefs.effort) ? prefs.effort : appState?.orchestrator?.effort ?? "medium";
++  const defaultMode: string = appState?.modes?.default ?? "ask";
++  const mode = prefs.mode && NEW_SESSION_MODES.some(([m]) => m === prefs.mode) ? prefs.mode
++    : NEW_SESSION_MODES.some(([m]) => m === defaultMode) ? defaultMode : "ask";
++  const location: Location = prefs.location === "folder" ? "folder" : "chat";
++  const folder = location === "folder" ? prefs.folder : null;
++  const recents = useMemo(() => recentFolders(sessions), [sessions]);
++
++  const choose = async () => {
++    const f = await pickFolder(prefs.folder ?? undefined);
++    if (f === null) return; // cancelled: nothing changes
++    if (f) setPrefs({ location: "folder", folder: f });
++    else setPrefs({ location: "chat" }); // the browser prompt left empty: chat only
++  };
++  const setLocation = (v: string) => {
++    if (v !== "folder") return setPrefs({ location: "chat" });
++    const known = prefs.folder ?? recents[0] ?? null;
++    if (known) setPrefs({ location: "folder", folder: known });
++    else void choose();
++  };
++
++  const subtitle = folder
++    ? <>The project stays in <span className="text-text" title={tilde(folder)}>{folderName(folder)}</span>. Claude Code reads, edits and runs commands there.</>
++    : "Chat only: no folder; Claude Code works in a private scratch folder.";
++
++  const draftSession = { id: "new", title: "New session", folder, model, effort, mode, harness: "claude_code", settings: {} } as unknown as Session;
++  const draft: ComposerDraft = {
++    placeholder: PLACEHOLDER,
++    set: (b) => {
++      const m = b.model ? appState?.tiers?.[b.model] ?? b.model : undefined; // a tier key names its model
++      if (m && !models.some((x) => x.id === m)) throw new Error("New sessions run Claude Code: pick a Claude model.");
++      if (b.mode && !NEW_SESSION_MODES.some(([v]) => v === b.mode)) throw new Error("Mode must be plan, ask or accept_edits.");
++      setPrefs({ ...(m ? { model: m } : {}), ...(b.effort ? { effort: b.effort } : {}), ...(b.mode ? { mode: b.mode } : {}) });
++    },
++    start: async (text, skill) => {
++      const started = await sessionActions.start({ text, skill, folder, model, effort, mode });
++      if (!started) setPrefsState(loadPrefs()); // a missing folder resets saved preferences to Chat only
++      return started;
++    },
++    rows: [
++      <>
++        <TextSelect label="Location" value={location} onChange={setLocation}
++          title={location === "folder" ? "Claude Code works in a project folder" : "No folder: Claude Code works in a private scratch folder"}>
++          <option value="chat">Chat only</option>
++          <option value="folder">Folder</option>
++        </TextSelect>
++        {location === "folder" && (
++          <button className="btn btn-ghost gap-1.5 px-2 text-[14px] min-w-0" onClick={choose} title={folder ? `${folder} (choose another folder)` : "Choose a folder"}
++            aria-label={folder ? `Folder ${folderName(folder)}` : "Choose a folder"} data-testid="folder-chip">
++            <Folder size={15} className="shrink-0" aria-hidden /><span className="truncate max-w-[220px]">{folder ? folderName(folder) : "Choose a folder…"}</span>
++          </button>
++        )}
++        <TextSelect label="Model" value={model} onChange={(v) => setPrefs({ model: v })} className="ml-auto min-w-0">
++          {!models.some((m) => m.id === model) && <option value={model}>{modelLabel(model)}</option>}
++          {models.map((m) => <option key={m.id} value={m.id}>{modelLabel(m.id)}</option>)}
++        </TextSelect>
++      </>,
++      <>
++        <TextSelect label="Effort" value={effort} onChange={(v) => setPrefs({ effort: v })}
++          title={["xhigh", "max"].includes(effort) ? "Effort above high asks for approval on each turn" : "How hard Claude thinks"}>
++          {EFFORTS.map((e) => <option key={e} value={e}>{e} effort</option>)}
++        </TextSelect>
++        <TextSelect label="Permission mode" value={mode} onChange={(v) => setPrefs({ mode: v })}>
++          {NEW_SESSION_MODES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
++        </TextSelect>
++      </>,
++    ],
++  };
++
++  return (
++    <div className="h-full overflow-y-auto scroll-thin">
++      <div className="min-h-full flex flex-col items-center px-4 sm:px-6 pt-[14vh] pb-10">
++        <div className="w-full max-w-[760px]">
++          <h1 className="text-center text-[28px] sm:text-[32px] font-medium tracking-[-0.015em] leading-tight text-balance">
++            {name ? `What should we work on, ${name}?` : "What should we work on?"}
++          </h1>
++          <p className="mt-3 mx-auto max-w-[640px] text-center text-[15px] leading-relaxed text-muted text-balance" data-testid="new-session-subtitle">{subtitle}</p>
++          {cli && !(cli.installed && cli.logged_in) && (
++            <div className="mt-4 flex justify-center"><ClaudeStatusNotice st={cli} retry={recheck} /></div>
++          )}
++          <div className="mt-6">
++            <Composer session={draftSession} running={false} draft={draft} />
++          </div>
++          {recents.length > 0 && (
++            <div className="mt-4 flex flex-wrap justify-center gap-2" aria-label="Recent folders" role="group">
++              {recents.map((f) => {
++                const on = folder === f;
++                return (
++                  <button key={f} title={f} aria-pressed={on} onClick={() => setPrefs({ location: "folder", folder: f })}
++                    className={`rounded-full px-3 py-0.5 text-[13px] leading-6 border transition-colors max-w-[240px] truncate ${on
++                      ? "border-transparent text-action bg-[color-mix(in_srgb,var(--action)_13%,transparent)]"
++                      : "border-line text-text surface-raised hover:border-faint"}`}>
++                    {folderName(f)}
++                  </button>
++                );
++              })}
++            </div>
++          )}
++        </div>
++      </div>
++    </div>
++  );
++}
+diff --git a/frontend/src/components/SidePanel.tsx b/frontend/src/components/SidePanel.tsx
+index bb8617d..0a7d39f 100644
+--- a/frontend/src/components/SidePanel.tsx
++++ b/frontend/src/components/SidePanel.tsx
+@@ -1,7 +1,6 @@
+ import { ChevronRight, X } from "lucide-react";
+ import { useEffect, useState, type ReactNode } from "react";
+ import { get, patch, post } from "../lib/api";
+-import { CAMPAIGN_EVENTS, FINAL_STATUSES, campaignsApi } from "../lib/campaigns";
+ import { actions, sessionProfile, useStore, type Job, type Session } from "../lib/store";
+ import { CampaignCard } from "./cards/CampaignCard";
+ import { ChangesCard } from "./cards/ChangesCard";
+@@ -9,7 +8,7 @@ import { GalleryCard } from "./cards/GalleryCard";
+ import { ConnectorsCard, SharedToolsCard } from "./cards/ConnectorsCard";
+ import { OutputsCard } from "./cards/OutputsCard";
+ import { QualityCard } from "./cards/QualityCard";
+-import { HarnessSelect, loginLabel } from "./ClaudeCode";
++import { HARNESS_HINT, harnessName, loginLabel } from "./ClaudeCode";
+ import { pickFolder } from "../lib/native";
+ import { EffortMeter, fmtDuration, fmtTokens, fmtUsd, isTier, modelLabel, modelName, providerLabel, providerOf, tiersOf, useModelCatalog } from "./ui";
+ 
+@@ -100,31 +99,10 @@ function AccountsRow({ s, upd }: { s: Session; upd: (body: Record<string, unknow
+   );
+ }
+ 
+-/** The title of the campaign or chain this session runs while it isn't done or abandoned (null
+- *  otherwise): those need the built-in loop, so the harness picker is locked. */
+-function useActiveCampaign(cid: string | undefined): string | null {
+-  const [title, setTitle] = useState<string | null>(null);
+-  useEffect(() => {
+-    setTitle(null);
+-    if (!cid) return;
+-    let live = true;
+-    campaignsApi.detail(cid).then((d) => live && setTitle(FINAL_STATUSES.includes(d.status) ? null : d.title)).catch(() => {});
+-    const off = actions.onEvent((e) => {
+-      if (!CAMPAIGN_EVENTS.includes(e.type) || e.data?.id !== cid) return;
+-      const status = e.type === "campaign.done" ? "done" : e.data.status;
+-      if (status) setTitle(FINAL_STATUSES.includes(status) ? null : e.data.title ?? "a campaign");
+-    });
+-    return () => { live = false; off(); };
+-  }, [cid]);
+-  return title;
+-}
+-
+ function EnvironmentCard({ s }: { s: Session }) {
+   useModelCatalog();
+   const [env, setEnv] = useState<any>(null);
+   useEffect(() => { get("/environment").then(setEnv); }, []);
+-  const running = s.status === "running";
+-  const campaign = useActiveCampaign(s.settings?.campaign_id ?? undefined);
+   const upd = async (body: Record<string, unknown>) => {
+     try { await patch(`/sessions/${s.id}`, body); } catch (e: any) { actions.toast(e.message, "error"); }
+   };
+@@ -157,10 +135,11 @@ function EnvironmentCard({ s }: { s: Session }) {
+           {MODES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+         </select>
+       </Row>
++      {/* Read-only: new sessions run Claude Code on your Claude subscription; older sessions keep theirs. */}
+       <Row label="Harness">
+-        <HarnessSelect value={s.harness} disabled={running || !!campaign} onChange={(v) => upd({ harness: v })} available={env?.harnesses}
+-          title={campaign ? `This session runs ${campaign}: campaigns and workflows use the built-in loop` : undefined}
+-          label={(v, l, full) => harnessLabel(v, l, s, env, full)} />
++        <span data-testid="session-harness" title={HARNESS_HINT[s.harness] ?? harnessLabel(s.harness, harnessName(s.harness), s, env, true)}>
++          {harnessLabel(s.harness, harnessName(s.harness), s, env)}
++        </span>
+         {s.harness === "claude_code" && env?.claude_code && (
+           <div className={`mt-1 text-[12px] ${env.claude_code.logged_in ? "text-faint" : "text-warn"}`} data-testid="claude-login-status">
+             {loginLabel(env.claude_code)}{env.claude_code.installed && !env.claude_code.logged_in ? ": run claude auth login in a terminal" : " · your Claude plan"}
+diff --git a/frontend/src/lib/sessions.ts b/frontend/src/lib/sessions.ts
+index 784cdc6..498edc7 100644
+--- a/frontend/src/lib/sessions.ts
++++ b/frontend/src/lib/sessions.ts
+@@ -176,40 +176,60 @@ function planLeave(ids: string[]): () => void {
+   };
+ }
+ 
+-let creating: Promise<void> | null = null;
++let starting: Promise<boolean> | null = null;
+ 
+-/** Untitled, never used, idle and not yet set up (no folder, no skills beyond the defaults every new
+- *  session starts with, no connectors or shared tools turned on): what "+" reuses rather than making
+- *  another empty session. A session already pointed at a folder isn't blank, so "+" for another
+- *  folder never hands it back. `defaults` is /api/state's default_skills. */
+-export function isBlank(s: Session, messages: Record<string, unknown[]> = st().messages as Record<string, unknown[]>,
+-  defaults: string[] = st().appState?.default_skills ?? ["delegation"]): boolean {
+-  const cfg = s.settings ?? {};
+-  const skills: string[] = cfg.skills ?? [];
+-  const sameSkills = skills.length === 0 || (skills.length === defaults.length && skills.every((k) => defaults.includes(k)));
+-  return s.title === "New session" && !s.deleted && !s.archived && !s.pinned && !s.forked_from && s.status !== "running"
+-    && !s.activity_at && !(messages[s.id]?.length) && !s.folder
+-    && sameSkills && !Object.values(cfg.connectors ?? {}).some(Boolean) && !cfg.shared_tools;
+-}
++/** What the new-session screen sends: every new session runs Claude Code on the user's Claude
++ *  subscription (harness claude_code). No folder = chat only (a private scratch folder). */
++export type NewSessionRequest = { text: string; skill?: string | null; folder: string | null; model: string; effort: string; mode: string };
+ 
+ export const sessionActions = {
+-  /** ⌘N: a new session; it joins the current session's group. */
+-  async create(opts: { group_id?: string | null } = {}) {
+-    if (creating) return creating; // a double click makes one session, not two
+-    creating = (async () => {
+-      const cur = find(st().currentId ?? "");
+-      const group_id = opts.group_id !== undefined ? opts.group_id : cur && !cur.deleted && !cur.archived ? cur.group_id : null;
+-      // An untitled session with no messages in the same group is reused instead of adding another
+-      // empty "New session": the current one first, else the newest such session.
+-      const reuse = cur && isBlank(cur) && (cur.group_id ?? null) === (group_id ?? null) ? cur
+-        : st().sessions.filter((x) => isBlank(x) && (x.group_id ?? null) === (group_id ?? null)).sort((a, b) => b.created_at - a.created_at)[0];
+-      const s = reuse ?? await attempt(() => post<Session>("/sessions", group_id ? { group_id } : {}));
+-      if (!s) return;
+-      if (st().sidebarView !== "active") set({ sidebarView: "active" });
+-      if (st().currentId !== s.id || st().page !== "chat") await actions.openSession(s.id);
++  /** ⌘N / New session: the new-session screen. The session is made when its first message is sent
++   *  (start); it joins the current session's group, or `group_id`. */
++  create(opts: { group_id?: string | null } = {}) {
++    const cur = find(st().currentId ?? "");
++    const draftGroup = opts.group_id !== undefined ? opts.group_id : cur && !cur.deleted && !cur.archived ? cur.group_id : null;
++    set({ currentId: null, page: "chat", draftGroup, sidebarView: "active", selection: [] });
++    requestAnimationFrame(() => document.getElementById("composer")?.focus());
++  },
++  /** The new-session screen's Send: create the session (harness claude_code) and send the first
++   *  message. False on failure; an unsent first message becomes the new session's draft. */
++  async start(r: NewSessionRequest): Promise<boolean> {
++    if (starting) return starting; // a double click makes one session, not two
++    starting = (async () => {
++      const group_id = st().draftGroup;
++      let s: Session;
++      try {
++        s = await post<Session>("/sessions", {
++          harness: "claude_code", folder: r.folder || null, model: r.model, effort: r.effort, mode: r.mode, ...(group_id ? { group_id } : {}),
++        });
++      } catch (e: any) {
++        if (e?.status === 400 && e.message.startsWith("Folder not found")) {
++          try {
++            const prefs = JSON.parse(localStorage.getItem("newSession.prefs") ?? "{}");
++            localStorage.setItem("newSession.prefs", JSON.stringify({ ...prefs, folder: null, location: "chat" }));
++          } catch { /* private window: preferences may not be available */ }
++        }
++        if (e?.status === 400 && e.message.startsWith("No such group")) set({ draftGroup: null });
++        actions.toast(e?.message ?? String(e), "error");
++        return false;
++      }
++      set((x) => ({ draftGroup: null, sessions: x.sessions.some((v) => v.id === s.id) ? x.sessions : [...x.sessions, s] }));
++      try {
++        await post(`/sessions/${s.id}/messages`, { text: r.text, attachments: [], ...(r.skill ? { skill: r.skill } : {}) });
++      } catch (e: any) {
++        actions.setDrafts(s.id, [...(st().drafts[s.id] ?? []), { kind: "text", text: r.text }]);
++        if (r.skill) actions.setSkillChip(s.id, r.skill);
++        actions.toast(e?.message ?? String(e), "error");
++        // openSession selects the session before loading its history. A second network
++        // failure must still leave the recovered draft selected and return false.
++        await actions.openSession(s.id).catch(() => {});
++        return false;
++      }
++      await actions.openSession(s.id);
+       requestAnimationFrame(() => document.getElementById("composer")?.focus());
++      return true;
+     })();
+-    try { await creating; } finally { creating = null; }
++    try { return await starting; } finally { starting = null; }
+   },
+   async rename(id: string, title: string) {
+     set({ renamingId: null });
+diff --git a/frontend/src/lib/store.ts b/frontend/src/lib/store.ts
+index 0fbf292..e82d3a5 100644
+--- a/frontend/src/lib/store.ts
++++ b/frontend/src/lib/store.ts
+@@ -60,7 +60,10 @@ type State = {
+   /** Every session, including archived ones and those in Trash (the sidebar filters by view). */
+   sessions: Session[];
+   groups: Group[];
++  /** null: the new-session screen (when the chat page shows). */
+   currentId: string | null;
++  /** The group a session started from the new-session screen joins (⌘N in a grouped session). */
++  draftGroup: string | null;
+   sidebarView: SidebarView;
+   /** Multi-selection in the sidebar (⌘-click / ⇧-click). */
+   selection: string[];
+@@ -78,7 +81,7 @@ type State = {
+   assistantRuns: Record<string, AssistRun>;
+   focusMessage: string | null;
+   artifactsTab: string;
+-  drafts: Record<string, { path: string; name: string; mime: string; item_id?: string; text?: string }[]>;
++  drafts: Record<string, ({ path: string; name: string; mime: string; item_id?: string; text?: string } | { kind: "text"; text: string })[]>;
+   /** Skill chip on each session's composer draft (sent as the message's invoked skill). */
+   skillChips: Record<string, string | null>;
+   page: Page;
+@@ -113,6 +116,7 @@ export const useStore = create<State>(() => ({
+   sessions: [],
+   groups: [],
+   currentId: localStorage.getItem("currentSession"),
++  draftGroup: null,
+   sidebarView: "active",
+   selection: [],
+   renamingId: null,
+@@ -291,6 +295,10 @@ export const actions = {
+     const id = st().currentId;
+     if (page === "chat" && id && viewing(id) && st().sessions.find((s) => s.id === id)?.unread) actions.markRead(id);
+   },
++  /** Replace the queued text and attachments for a session's composer. */
++  setDrafts(sessionId: string, drafts: State["drafts"][string]) {
++    set((x) => ({ drafts: { ...x.drafts, [sessionId]: drafts } }));
++  },
+   /** Put a file on a session's composer (from the Artifacts or ElevenLabs page). */
+   attachToChat(sessionId: string, att: { path: string; name: string; mime: string; item_id?: string; text?: string }, warning?: string | null) {
+     set((x) => ({ drafts: { ...x.drafts, [sessionId]: [...(x.drafts[sessionId] ?? []), att] } }));
+diff --git a/pyproject.toml b/pyproject.toml
+index cd6d168..a3f38af 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -44,4 +44,5 @@ testpaths = ["tests"]
+ asyncio_mode = "auto"
+ asyncio_default_fixture_loop_scope = "function"
+ markers = ["live: hits real provider APIs (skipped without keys)",
+-           "auto_title: keep session auto-titling on (other tests turn it off)"]
++           "auto_title: keep session auto-titling on (other tests turn it off)",
++           "shipped_harness_default: new sessions get the shipped [sessions].default_harness (others pin builtin)"]

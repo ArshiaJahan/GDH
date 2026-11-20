@@ -1,0 +1,128 @@
+{
+ "task": "unity-streak-bonus-and-coin-field-9606c5a",
+ "validated_at": "2026-11-20T09:49:44Z",
+ "reference_passed": true,
+ "flawed": 7,
+ "killed": 7,
+ "kill_rate": 1.0,
+ "survivors": [],
+ "outcomes": [
+  {
+   "id": "noop",
+   "kind": "noop",
+   "description": "no change: the start state",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "examples/unity-sample/Assets/Tests/Editor/ScoreBoardTests.cs"
+   ],
+   "failed_steps": [
+    "tests",
+    "asset examples/unity-sample/Assets/Scenes/Main.unity"
+   ]
+  },
+  {
+   "id": "partial-1",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of examples/unity-sample/Assets/Scripts/ScoreBoard.cs",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "examples/unity-sample/Assets/Tests/Editor/ScoreBoardTests.cs"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-2",
+   "kind": "partial",
+   "description": "leaves out hunk 2 of examples/unity-sample/Assets/Scripts/ScoreBoard.cs",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "examples/unity-sample/Assets/Tests/Editor/ScoreBoardTests.cs"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-1",
+   "kind": "mutant",
+   "description": "== to != in: Score += CoinsCollected % BonusEvery == 0 ? 2 * PointsPerCoin : PointsPerCoin;",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "examples/unity-sample/Assets/Tests/Editor/ScoreBoardTests.cs"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-2",
+   "kind": "mutant",
+   "description": "constant +1 in: public const int BonusEvery = 5;",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "examples/unity-sample/Assets/Tests/Editor/ScoreBoardTests.cs"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "tamper-delete",
+   "kind": "tamper",
+   "description": "no fix; deletes the hidden tests",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "examples/unity-sample/Assets/Tests/Editor/ScoreBoardTests.cs"
+   ],
+   "failed_steps": [
+    "tests",
+    "asset examples/unity-sample/Assets/Scenes/Main.unity"
+   ]
+  },
+  {
+   "id": "tamper-skip",
+   "kind": "tamper",
+   "description": "no fix; rewrites the hidden tests to pass",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "examples/unity-sample/Assets/Tests/Editor/ScoreBoardTests.cs"
+   ],
+   "failed_steps": [
+    "tests",
+    "asset examples/unity-sample/Assets/Scenes/Main.unity"
+   ]
+  }
+ ],
+ "reference_steps": [
+  {
+   "name": "tests",
+   "kind": "command",
+   "passed": true,
+   "exit": 0,
+   "duration_s": 9.94633233267814,
+   "output": "",
+   "environment": false,
+   "detail": {}
+  },
+  {
+   "name": "asset examples/unity-sample/Assets/Scenes/Main.unity",
+   "kind": "unity",
+   "passed": true,
+   "exit": null,
+   "duration_s": 0.0,
+   "output": "",
+   "environment": false,
+   "detail": {}
+  }
+ ],
+ "ok": true
+}

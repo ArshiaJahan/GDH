@@ -1,0 +1,247 @@
+{
+ "task": "replay-make-live-recording-work-end-to-end-7ece383",
+ "validated_at": "2026-11-20T10:03:27Z",
+ "reference_passed": true,
+ "flawed": 14,
+ "killed": 5,
+ "kill_rate": 0.357,
+ "survivors": [
+  {
+   "id": "partial-1",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/features/replay_install.py",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "partial-2",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of skills/replay/templates/com.gdw.replay/Editor/ReplayCommands.cs",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-1",
+   "kind": "mutant",
+   "description": "== to != in: if (change == PlayModeStateChange.EnteredEditMode)",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-2",
+   "kind": "mutant",
+   "description": "!= to == in: FixedDeltaTime = request.FixedDt != null ? request.FixedDt.Value : 1f / 60f,",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-3",
+   "kind": "mutant",
+   "description": "> to >= in: var header = BuildHeader(_initialHash, result.Frames.Count > 0 ? result.Frames[0",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-4",
+   "kind": "mutant",
+   "description": "true to false in: return JsonSerialize(new { ok = true, job_id = JobId, run_id = RunId, status = \"",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-5",
+   "kind": "mutant",
+   "description": "|| to && in: if (id == null || !_providers.TryGetValue(id, out var provider))",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-6",
+   "kind": "mutant",
+   "description": "constant +1 in: static readonly string EmptySha256 = Digest.Sha256Hex(new byte[0]);",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-7",
+   "kind": "mutant",
+   "description": "return value dropped in: return Digest.Sha256Hex(Digest.Concat(Digest.Utf8(id + \"\\n\"), writer.SchemaBytes",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  }
+ ],
+ "outcomes": [
+  {
+   "id": "noop",
+   "kind": "noop",
+   "description": "no change: the start state",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-1",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/features/replay_install.py",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "partial-2",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of skills/replay/templates/com.gdw.replay/Editor/ReplayCommands.cs",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "partial-3",
+   "kind": "partial",
+   "description": "leaves out hunk 2 of skills/replay/templates/com.gdw.replay/Editor/ReplayCommands.cs",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-4",
+   "kind": "partial",
+   "description": "leaves out hunk 3 of skills/replay/templates/com.gdw.replay/Editor/ReplayCommands.cs",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-1",
+   "kind": "mutant",
+   "description": "== to != in: if (change == PlayModeStateChange.EnteredEditMode)",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-2",
+   "kind": "mutant",
+   "description": "!= to == in: FixedDeltaTime = request.FixedDt != null ? request.FixedDt.Value : 1f / 60f,",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-3",
+   "kind": "mutant",
+   "description": "> to >= in: var header = BuildHeader(_initialHash, result.Frames.Count > 0 ? result.Frames[0",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-4",
+   "kind": "mutant",
+   "description": "true to false in: return JsonSerialize(new { ok = true, job_id = JobId, run_id = RunId, status = \"",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-5",
+   "kind": "mutant",
+   "description": "|| to && in: if (id == null || !_providers.TryGetValue(id, out var provider))",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-6",
+   "kind": "mutant",
+   "description": "constant +1 in: static readonly string EmptySha256 = Digest.Sha256Hex(new byte[0]);",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-7",
+   "kind": "mutant",
+   "description": "return value dropped in: return Digest.Sha256Hex(Digest.Concat(Digest.Utf8(id + \"\\n\"), writer.SchemaBytes",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "tamper-delete",
+   "kind": "tamper",
+   "description": "no fix; deletes the hidden tests",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "tamper-skip",
+   "kind": "tamper",
+   "description": "no fix; rewrites the hidden tests to pass",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/fixtures/replay/recorded_0_1_1/README.md",
+    "tests/fixtures/replay/recorded_0_1_1/frames_head.jsonl",
+    "tests/fixtures/replay/recorded_0_1_1/header.json",
+    "tests/test_replay_recorded_header.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  }
+ ],
+ "reference_steps": [
+  {
+   "name": "tests",
+   "kind": "command",
+   "passed": true,
+   "exit": 0,
+   "duration_s": 1.095437708310783,
+   "output": "........                                                                 [100%]\n8 passed in 0.47s\n",
+   "environment": false,
+   "detail": {}
+  }
+ ],
+ "ok": true
+}

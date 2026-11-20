@@ -1,0 +1,248 @@
+{
+ "task": "automatic-updates-from-github-releases-04bcf2d",
+ "validated_at": "2026-11-20T09:47:40Z",
+ "reference_passed": true,
+ "flawed": 15,
+ "killed": 7,
+ "kill_rate": 0.467,
+ "survivors": [
+  {
+   "id": "partial-1",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/buildinfo.py",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "partial-3",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/features/updates.py",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-3",
+   "kind": "mutant",
+   "description": ">= to > in: return (now or time.time()) - self.last_check >= self.interval_s",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-4",
+   "kind": "mutant",
+   "description": "< to <= in: if time.time() - self.started_at < 60 or self.busy():",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-5",
+   "kind": "mutant",
+   "description": "True to False in: dest.parent.mkdir(parents=True, exist_ok=True)",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-6",
+   "kind": "mutant",
+   "description": "False to True in: return False, FROM_SOURCE",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-7",
+   "kind": "mutant",
+   "description": "false to true in: {u.install_supported && u.auto_install && <p className=\"text-[12.5px] text-muted",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-8",
+   "kind": "mutant",
+   "description": "and to or in: for a in data.get(\"assets\") or [] if isinstance(a, dict) and a.get(\"name\")}",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  }
+ ],
+ "outcomes": [
+  {
+   "id": "noop",
+   "kind": "noop",
+   "description": "no change: the start state",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-1",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/buildinfo.py",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "partial-2",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/features/release_feed.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-3",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/features/updates.py",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "partial-4",
+   "kind": "partial",
+   "description": "leaves out hunk 2 of backend/gamedevworkstation/features/updates.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-1",
+   "kind": "mutant",
+   "description": "== to != in: if plat == \"darwin\":",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-2",
+   "kind": "mutant",
+   "description": "!= to == in: if size is not None and len(data) != size:",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-3",
+   "kind": "mutant",
+   "description": ">= to > in: return (now or time.time()) - self.last_check >= self.interval_s",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-4",
+   "kind": "mutant",
+   "description": "< to <= in: if time.time() - self.started_at < 60 or self.busy():",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-5",
+   "kind": "mutant",
+   "description": "True to False in: dest.parent.mkdir(parents=True, exist_ok=True)",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-6",
+   "kind": "mutant",
+   "description": "False to True in: return False, FROM_SOURCE",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-7",
+   "kind": "mutant",
+   "description": "false to true in: {u.install_supported && u.auto_install && <p className=\"text-[12.5px] text-muted",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-8",
+   "kind": "mutant",
+   "description": "and to or in: for a in data.get(\"assets\") or [] if isinstance(a, dict) and a.get(\"name\")}",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": []
+  },
+  {
+   "id": "tamper-delete",
+   "kind": "tamper",
+   "description": "no fix; deletes the hidden tests",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "tamper-skip",
+   "kind": "tamper",
+   "description": "no fix; rewrites the hidden tests to pass",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_release_feed.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  }
+ ],
+ "reference_steps": [
+  {
+   "name": "tests",
+   "kind": "command",
+   "passed": true,
+   "exit": 0,
+   "duration_s": 3.8397269998677075,
+   "output": ".........                                                                [100%]\n9 passed in 2.69s\n",
+   "environment": false,
+   "detail": {}
+  }
+ ],
+ "ok": true
+}

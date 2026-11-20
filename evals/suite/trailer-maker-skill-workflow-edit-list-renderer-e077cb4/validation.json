@@ -1,0 +1,270 @@
+{
+ "task": "trailer-maker-skill-workflow-edit-list-renderer-e077cb4",
+ "validated_at": "2026-11-20T10:04:41Z",
+ "reference_passed": true,
+ "flawed": 15,
+ "killed": 10,
+ "kill_rate": 0.667,
+ "survivors": [
+  {
+   "id": "mutant-3",
+   "kind": "mutant",
+   "description": "<= to < in: if isinstance(dur, bool) or not isinstance(dur, (int, float)) or not 3000 <= dur",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_skills.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-4",
+   "kind": "mutant",
+   "description": ">= to > in: if len(pts) >= 4:",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_skills.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-5",
+   "kind": "mutant",
+   "description": "< to <= in: if v < 0:",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_skills.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-7",
+   "kind": "mutant",
+   "description": "True to False in: log.info(\"media_out: couldn't check %s\", paths[:3], exc_info=True)",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_skills.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-8",
+   "kind": "mutant",
+   "description": "False to True in: instrumental: bool = False, message_id: str | None = None, profile: str | None =",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_skills.py"
+   ],
+   "failed_steps": []
+  }
+ ],
+ "outcomes": [
+  {
+   "id": "noop",
+   "kind": "noop",
+   "description": "no change: the start state",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_skills.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-1",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/features/elevenlabs_feature.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_skills.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-2",
+   "kind": "partial",
+   "description": "leaves out hunk 2 of backend/gamedevworkstation/features/elevenlabs_feature.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_skills.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-3",
+   "kind": "partial",
+   "description": "leaves out hunk 3 of backend/gamedevworkstation/features/elevenlabs_feature.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_skills.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-4",
+   "kind": "partial",
+   "description": "leaves out hunk 4 of backend/gamedevworkstation/features/elevenlabs_feature.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_skills.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-1",
+   "kind": "mutant",
+   "description": "== to != in: if not any(s.strip().lower() == \"vocals\" for s in neg):",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_skills.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-2",
+   "kind": "mutant",
+   "description": "!= to == in: if r.returncode != 0:",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_skills.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-3",
+   "kind": "mutant",
+   "description": "<= to < in: if isinstance(dur, bool) or not isinstance(dur, (int, float)) or not 3000 <= dur",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_skills.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-4",
+   "kind": "mutant",
+   "description": ">= to > in: if len(pts) >= 4:",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_skills.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-5",
+   "kind": "mutant",
+   "description": "< to <= in: if v < 0:",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_skills.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-6",
+   "kind": "mutant",
+   "description": "> to >= in: if len(lines) > PLAN_MAX_LINES:",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_skills.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-7",
+   "kind": "mutant",
+   "description": "True to False in: log.info(\"media_out: couldn't check %s\", paths[:3], exc_info=True)",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_skills.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-8",
+   "kind": "mutant",
+   "description": "False to True in: instrumental: bool = False, message_id: str | None = None, profile: str | None =",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_skills.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "tamper-delete",
+   "kind": "tamper",
+   "description": "no fix; deletes the hidden tests",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_skills.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "tamper-skip",
+   "kind": "tamper",
+   "description": "no fix; rewrites the hidden tests to pass",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/fixtures/trailer/plan_golden.json",
+    "tests/fixtures/trailer/transcript.json",
+    "tests/fixtures/trailer/vo-script.md",
+    "tests/test_trailer_backend.py",
+    "tests/test_trailer_maker.py",
+    "tests/test_skills.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  }
+ ],
+ "reference_steps": [
+  {
+   "name": "tests",
+   "kind": "command",
+   "passed": true,
+   "exit": 0,
+   "duration_s": 20.67875116597861,
+   "output": "........................................................................ [ 70%]\n..............................                                           [100%]\n102 passed in 19.64s\n",
+   "environment": false,
+   "detail": {}
+  }
+ ],
+ "ok": true
+}

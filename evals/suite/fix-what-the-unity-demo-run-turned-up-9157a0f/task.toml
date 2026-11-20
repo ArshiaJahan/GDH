@@ -1,0 +1,35 @@
+schema = "gdw.eval.task/1"
+id = "fix-what-the-unity-demo-run-turned-up-9157a0f"
+title = "Fix what the Unity demo run turned up"
+kind = "code"
+tags = [
+    "gdh",
+    "python",
+]
+
+[source]
+repo = "ArshiaJahan/GDH"
+commit = "9157a0faf1df9653465ea026a6c2a953f7e68560"
+parent = "2316b110f852d9cb348a243816daa3bd918e0aea"
+title = "Fix what the Unity demo run turned up"
+
+[grader]
+command = "PYTHONPATH=backend python -m pytest -q -p no:cacheprovider tests/test_followups_2026_11.py tests/test_claude_code.py"
+tests = [
+    "tests/test_followups_2026_11.py",
+    "frontend/src/components/Chat.test.tsx",
+    "tests/test_claude_code.py",
+]
+checks = []
+rubric = false
+setup = ""
+timeout_s = 300
+
+[limits]
+agent_timeout_s = 1800
+max_cost_usd = 2.0
+
+[forge]
+removed = []
+rewritten_by = ""
+forged_at = "2026-11-20T08:37:51Z"

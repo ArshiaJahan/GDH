@@ -135,7 +135,7 @@ Code reply is a real run.</sub>
 
 ## Highlights
 
-The eight that matter most; [all 19 features](docs/GUIDE.md#all-features) are in the guide.
+The eight that matter most; [all 20 features](docs/GUIDE.md#all-features) are in the guide.
 
 | | |
 |---|---|
@@ -143,9 +143,9 @@ The eight that matter most; [all 19 features](docs/GUIDE.md#all-features) are in
 | **Unity skill pack** | 18 Unity 6 skills behind a router: compile/fix loops, Play Mode verification, record and replay, headless builds, safe scene/prefab edits, perf and game-feel passes, trailers, shipping. |
 | **Quality ladder L1-L4** | Stories reach `done` only with fresh, app-observed evidence: compile, tests, play evidence and screenshots, design critique. |
 | **Record and replay** | Record instrumented Unity sessions in the open Editor, replay them with frame-by-frame checkpoint verification (SHA-256 state hashes), and export silent gameplay GIF/MP4. Input System only; the guarantee is same-environment repeatability for the state you register, and a mismatch is reported, not refused. |
-| **Fleet** | Parallel waves of subagents in their own worktrees, each with a claimed scope, scope-checked merges, a conflict circuit breaker and discoveries relayed to the next wave. |
 | **CI failure triage** | `gdw triage <run-id\|log>` sorts a failed CI run's failures into compile, test, flaky, infra, dependency and timeout, and names the file and line. It reads GitHub Actions, pytest, vitest, tsc, cargo, npm and uv logs, plus Unity Editor.log and NUnit XML. Rules come first, and a model handles only what the rules can't place. A GitHub Action posts the report on failed PRs. On 26 labelled failed logs the rules got 24/26 categories right before tuning and 26/26 after. See [CI failure triage](docs/GUIDE.md#ci-failure-triage). |
 | **Claude Code sessions** | Run your own `claude` CLI and login (checked against claude 2.1.308 on a claude.ai subscription), with GDW tools, approvals, Plan mode and `--resume`. Subscription estimates stay outside spend limits; API key logins record `billing='api'` and check spend limits before each turn. See [Claude Code sessions](docs/GUIDE.md#claude-code-sessions). |
+| **Eval Forge** | `gdw eval forge <commit>` turns a merged commit or PR into an agent task: the start state, a leak-filtered prompt and the commit's tests as hidden graders, plus differential, Unity (EditMode tests, scene asserts, replay hashes) and rubric graders. `gdw eval validate` checks each grader: the reference must pass and generated flawed solutions (mutants, partial fixes, test tampering) must fail. `gdw eval run` runs Claude Code, Codex and the built-in agent for pass@k, cost, time and tool calls, and blames each failure on the agent, the environment or the grader. Tasks export to the Harbor / Terminal-Bench 2.0 format. On the 14-task seed suite every reference passes and 121 of 183 flawed solutions are caught. See [Eval Forge](docs/GUIDE.md#eval-forge). |
 | **Cost control** | Daily and per-session spend limits, job budgets, approval for high effort, and a My usage page per model. |
 
 ### Claude Code sessions

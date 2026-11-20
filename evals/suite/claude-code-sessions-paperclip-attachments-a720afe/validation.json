@@ -1,0 +1,253 @@
+{
+ "task": "claude-code-sessions-paperclip-attachments-a720afe",
+ "validated_at": "2026-11-20T10:02:19Z",
+ "reference_passed": true,
+ "flawed": 13,
+ "killed": 10,
+ "kill_rate": 0.769,
+ "survivors": [
+  {
+   "id": "partial-4",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of frontend/src/components/Composer.tsx",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-1",
+   "kind": "mutant",
+   "description": "true to false in: onDragOver={(e) => { e.preventDefault(); setDrag(true); }}",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-2",
+   "kind": "mutant",
+   "description": "false to true in: onDragLeave={() => setDrag(false)}",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  }
+ ],
+ "outcomes": [
+  {
+   "id": "noop",
+   "kind": "noop",
+   "description": "no change: the start state",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-1",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/features/claude_code.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-2",
+   "kind": "partial",
+   "description": "leaves out hunk 2 of backend/gamedevworkstation/features/claude_code.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-3",
+   "kind": "partial",
+   "description": "leaves out hunk 3 of backend/gamedevworkstation/features/claude_code.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-4",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of frontend/src/components/Composer.tsx",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-1",
+   "kind": "mutant",
+   "description": "true to false in: onDragOver={(e) => { e.preventDefault(); setDrag(true); }}",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-2",
+   "kind": "mutant",
+   "description": "false to true in: onDragLeave={() => setDrag(false)}",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-3",
+   "kind": "mutant",
+   "description": "and to or in: if isinstance(b, AudioBlock) and not b.transcript:  # the built-in note names a ",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-4",
+   "kind": "mutant",
+   "description": "or to and in: return (recap_text or \"\") + text, new[-1].id",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-5",
+   "kind": "mutant",
+   "description": "constant +1 in: return _user_content(new, recap_text), new[-1].id",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-6",
+   "kind": "mutant",
+   "description": "return value dropped in: return wire[0][\"content\"]",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "tamper-delete",
+   "kind": "tamper",
+   "description": "no fix; deletes the hidden tests",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "tamper-skip",
+   "kind": "tamper",
+   "description": "no fix; rewrites the hidden tests to pass",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  }
+ ],
+ "reference_steps": [
+  {
+   "name": "tests",
+   "kind": "command",
+   "passed": true,
+   "exit": 0,
+   "duration_s": 69.46085779182613,
+   "output": "........................................................................ [ 61%]\n..............................................                           [100%]\n118 passed in 65.82s (0:01:05)\n",
+   "environment": false,
+   "detail": {}
+  }
+ ],
+ "ok": true
+}

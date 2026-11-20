@@ -1,0 +1,209 @@
+{
+ "task": "fix-claude-code-login-detection-on-windows-ba5862a",
+ "validated_at": "2026-11-20T10:02:29Z",
+ "reference_passed": true,
+ "flawed": 12,
+ "killed": 9,
+ "kill_rate": 0.75,
+ "survivors": [
+  {
+   "id": "partial-1",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/features/claude_cli.py",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-1",
+   "kind": "mutant",
+   "description": "== to != in: return os.name == \"nt\"",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-2",
+   "kind": "mutant",
+   "description": "and to or in: if p.is_file() and os.access(p, os.X_OK):",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  }
+ ],
+ "outcomes": [
+  {
+   "id": "noop",
+   "kind": "noop",
+   "description": "no change: the start state",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-1",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/features/claude_cli.py",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "partial-2",
+   "kind": "partial",
+   "description": "leaves out hunk 2 of backend/gamedevworkstation/features/claude_cli.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-3",
+   "kind": "partial",
+   "description": "leaves out hunk 3 of backend/gamedevworkstation/features/claude_cli.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-4",
+   "kind": "partial",
+   "description": "leaves out hunk 4 of backend/gamedevworkstation/features/claude_cli.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-1",
+   "kind": "mutant",
+   "description": "== to != in: return os.name == \"nt\"",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-2",
+   "kind": "mutant",
+   "description": "and to or in: if p.is_file() and os.access(p, os.X_OK):",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-3",
+   "kind": "mutant",
+   "description": "or to and in: if k in ENV_NAMES or k.upper() in WIN_ENV_NAMES or k.upper() == \"PATH\" or k.star",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-4",
+   "kind": "mutant",
+   "description": "constant +1 in: raw = _WINVAR.sub(lambda m: os.environ.get(m.group(1), m.group(0)), d)",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-5",
+   "kind": "mutant",
+   "description": "return value dropped in: return str(p)",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "tamper-delete",
+   "kind": "tamper",
+   "description": "no fix; deletes the hidden tests",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "tamper-skip",
+   "kind": "tamper",
+   "description": "no fix; rewrites the hidden tests to pass",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_claude_cli_windows.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  }
+ ],
+ "reference_steps": [
+  {
+   "name": "tests",
+   "kind": "command",
+   "passed": true,
+   "exit": 0,
+   "duration_s": 88.40840262500569,
+   "output": "ss...................................................................... [ 49%]\n........................................................................ [ 98%]\n..                                                                       [100%]\n144 passed, 2 skipped in 84.96s (0:01:24)\n",
+   "environment": false,
+   "detail": {}
+  }
+ ],
+ "ok": true
+}

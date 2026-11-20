@@ -1,0 +1,38 @@
+schema = "gdw.eval.task/1"
+id = "unity-dash-with-cooldown-c1e0f9b"
+title = "Coin Dash sample: a dash with a cooldown"
+kind = "unity"
+tags = [
+    "unity",
+    "csharp",
+]
+
+[source]
+repo = "ArshiaJahan/GDH"
+commit = "c1e0f9bf12b3f4e147f20dc324744ea071c9fe11"
+parent = "f9fe2888c7e681bd6cbc0ecaa4cd4dca079c9c40"
+title = "Coin Dash sample: a dash with a cooldown"
+
+[grader]
+command = "\"${UNITY_CLI:-$HOME/.unity/bin/unity}\" test examples/unity-sample --mode EditMode --filter CoinDash.Tests.DashTests --output Logs/eval-editmode.xml --timeout 1800 --format json > /dev/null"
+tests = [
+    "examples/unity-sample/Assets/Tests/Editor/DashTests.cs",
+    "examples/unity-sample/Assets/Tests/Editor/DashTests.cs.meta",
+]
+checks = []
+rubric = false
+setup = ""
+timeout_s = 3600
+
+[grader.unity]
+project = "examples/unity-sample"
+asserts = []
+
+[limits]
+agent_timeout_s = 1800
+max_cost_usd = 2.0
+
+[forge]
+removed = []
+rewritten_by = ""
+forged_at = "2026-11-20T08:37:52Z"

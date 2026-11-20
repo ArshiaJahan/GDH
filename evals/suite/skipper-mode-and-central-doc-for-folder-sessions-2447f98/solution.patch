@@ -1,0 +1,589 @@
+diff --git a/backend/gamedevworkstation/features/claude_code.py b/backend/gamedevworkstation/features/claude_code.py
+index 8caf850..80c44b9 100644
+--- a/backend/gamedevworkstation/features/claude_code.py
++++ b/backend/gamedevworkstation/features/claude_code.py
+@@ -96,6 +96,34 @@ PROMPT_TRUNCATED = "\n\n[GDW CLAUDE.md/skills context truncated to fit the 64 KB
+ LOGIN_ERRORS = ("authentication_failed", "oauth_org_not_allowed", "account_on_hold")
+ RETRY_ERRORS = ("rate_limit", "overloaded", "server_error")
+ LOGIN_TEXT = re.compile(r"not logged in|claude auth login|invalid api key|oauth", re.I)
++# Skipper mode and central-doc mode (both chosen on the new-session screen, kept in session settings).
++# The step texts avoid the fake CLI's scenario keywords (tests/fixtures/fake_claude.py).
++STEP_TIMEOUT_S = 600.0
++DOC_MAX_CHARS = 40_000
++HANDOFF_STEP = (
++    "GameDevWorkstation Skipper handoff. This Claude Code conversation ends after this reply, and a fresh one "
++    "picks up the work from your handoff alone. Reply with only the handoff, as Markdown text (no file edits or "
++    "commands): ## Goal, ## What was done (files changed, commands run, results), ## Current state, "
++    "## Decisions and why, ## Open problems, ## Next step. Be specific: paths, names, numbers.")
++CENTRAL_STEP = (
++    "GameDevWorkstation central doc update. Reply with only the full, updated Markdown text of this session's "
++    "central doc (no file edits or commands). Keep these sections: ## Goal, ## What's happened (one line per "
++    "step, newest last), ## Current state, ## Decisions, ## Open questions, ## Next steps. Keep what is still "
++    "true, add what this turn did, and keep it under about 1,500 words. The current doc:\n\n<<<DOC\n{doc}\nDOC>>>")
++QUIET_DENY = "This is a GameDevWorkstation handoff step: reply with text only, no tools."
++
++
++def docs_dir(s: dict) -> Path:
++    """Where a session's central doc and Skipper handoffs live: <working folder>/.gdw/sessions/<id>/."""
++    return session_cwd(s) / ".gdw" / "sessions" / s["id"]
++
++
++def _read_doc(path: Any, limit: int = DOC_MAX_CHARS) -> str:
++    try:
++        return Path(str(path)).read_text(encoding="utf-8", errors="replace")[-limit:] if path else ""
++    except OSError:
++        return ""
++
+ RESUME_FAILED = re.compile(r"no conversation found|could not resume|failed to resume|session .* not found", re.I)
+ CONTEXT_HEAD = """You are running inside GameDevWorkstation (a personal agent workstation on the user's Mac) as a
+ Claude Code session. GameDevWorkstation's own tools are the mcp__gdw__* tools (task board, Unity, saved
+@@ -282,6 +310,8 @@ class Turn:
+     pending_results: list[ToolResultBlock] = field(default_factory=list)
+     login_error: bool = False
+     saw_output: bool = False
++    quiet: bool = False  # a Skipper / central-doc step: text only, nothing shown in the chat
++    texts: list[str] = field(default_factory=list)
+ 
+ 
+ class Proc:
+@@ -497,6 +527,8 @@ class Proc:
+             self.app.jobs.log(turn.jid, f"rate limit: {status} {window}\n")
+ 
+     def _on_stream(self, e: dict, turn: Turn | None) -> None:
++        if turn and turn.quiet:
++            return
+         bus, sid, et = self.app.bus, self.sid, e.get("type")
+         if et == "message_start":
+             cli_id = str((e.get("message") or {}).get("id") or "")
+@@ -520,6 +552,9 @@ class Proc:
+                                                  "name": cb.get("name")}, sid)
+ 
+     def _flush_results(self, turn: Turn | None) -> None:
++        if turn and turn.quiet:
++            turn.pending_results = []
++            return
+         if turn and turn.pending_results:
+             self.app.store.add_message(self.sid, Message(role="user", content=turn.pending_results,
+                                                          meta={"tool_results": True}))
+@@ -542,6 +577,10 @@ class Proc:
+                 blocks.append(ToolUseBlock(id=b.get("id") or new_id("toolu_"), name=b.get("name", ""), input=inp))
+         if not blocks:
+             return
++        if turn and turn.quiet:  # a handoff / central-doc step: kept for the harness, not shown
++            turn.saw_output = True
++            turn.texts.extend(b.text for b in blocks if isinstance(b, TextBlock))
++            return
+         cli_id = str(m.get("id") or "")
+         model = m.get("model") or (turn.model if turn else None)
+         if cli_id and self._open and self._open[0] == cli_id:
+@@ -581,6 +620,8 @@ class Proc:
+             text = redact(_block_text(b.get("content")), self.token)[:20000]
+             err = bool(b.get("is_error"))
+             res = ToolResultBlock.text(str(b.get("tool_use_id") or ""), text or "(no output)", is_error=err)
++            if turn and turn.quiet:
++                continue
+             if turn:
+                 turn.pending_results.append(res)
+             else:
+@@ -778,6 +819,7 @@ class ClaudeCode:
+         mode = {"ask": "Ask before edits", "accept_edits": "Accept edits", "plan": "Plan only (no edits or commands)"}
+         where = s.get("folder") or f"none (chat only). Working folder: {cwd}, a private scratch folder for this session"
+         seg = [CONTEXT_HEAD, f"Session folder: {where}\nMode: {mode.get(s['mode'], s['mode'])}"]
++        seg.extend(self._mode_notes(s))
+         context = turn_skill_segments(s["settings"], app.hooks.turn(s["id"]))
+         for fn in getattr(app, "prompt_notes", None) or []:
+             try:
+@@ -791,6 +833,23 @@ class ClaudeCode:
+             context.append(pi)
+         return _cap_prompt("\n\n".join(x for x in [*seg, *context] if x))
+ 
++    def _mode_notes(self, s: dict) -> list[str]:
++        """System prompt notes for Skipper mode and central-doc mode."""
++        st, out = s.get("settings") or {}, []
++        if st.get("central_doc"):
++            out.append(f"Central doc mode: GameDevWorkstation keeps this session's central doc (goal, what's happened, "
++                       f"current state, decisions, next steps) at {docs_dir(s) / 'central.md'}. After each of your turns "
++                       "it asks you for the updated doc. Read it when you need the session's history.")
++        if st.get("skipper"):
++            if handoff := _read_doc(st.get("skipper_handoff"), 30_000).strip():
++                out.append("Skipper mode: you are a fresh Claude Code conversation continuing earlier work in this session. "
++                           f"The previous conversation's handoff ({st['skipper_handoff']}) follows. Treat it as your memory "
++                           f"of the work so far and be ready to continue from it.\n\n{handoff}")
++            else:
++                out.append("Skipper mode: after each turn GameDevWorkstation asks you for a handoff and continues the work "
++                           "in a fresh Claude Code conversation that starts from it.")
++        return out
++
+     def _signature(self, s: dict, cli: str, model: str, effort: str | None, cwd: Path) -> tuple:
+         c = self.cfg
+         return (cli, model, effort if effort not in ("none", None) else None, s["mode"], str(cwd),
+@@ -854,7 +913,8 @@ class ClaudeCode:
+                 proc.last_used = time.monotonic()
+                 if proc.reader.done():  # it already exited (bad flags, crash at start)
+                     proc._finish_turn(exited=True)
+-                prompt, last_id = self._prompt(sid, recap=not proc.resumed and not resume)
++                skipped = bool(settings.get("skipper") and settings.get("skipper_handoff"))  # the handoff replaces the recap
++                prompt, last_id = self._prompt(sid, recap=not proc.resumed and not resume and not skipped)
+                 try:
+                     await proc.send({"type": "user", "message": {"role": "user", "content": prompt},
+                                      "parent_tool_use_id": None, "session_id": "default"})
+@@ -884,6 +944,7 @@ class ClaudeCode:
+                         self._error(sid, f"Claude Code exited ({res.get('code')}): {err[-800:] or 'no output'}")
+                     return
+                 status = "done"
++                await self._after_turn(sid, proc, model, effort, jid)
+                 return
+         except asyncio.CancelledError:
+             status = "cancelled"
+@@ -891,6 +952,84 @@ class ClaudeCode:
+         finally:
+             app.jobs.finish(jid, status)
+ 
++    async def _quiet_step(self, proc: Proc, model: str, effort: str | None, jid: str | None, text: str) -> str | None:
++        """Send `text` as a hidden turn and return the reply's text (None if it failed or ran out of time)."""
++        sid = proc.sid
++        if not proc.alive or proc.turn is not None or proc.fatal_error:
++            return None
++        turn = Turn(sid=sid, model=model, effort=effort, jid=jid, gate=None, quiet=True)
++        proc.turn = turn
++        proc.last_used = time.monotonic()
++        try:
++            await proc.send({"type": "user", "message": {"role": "user", "content": text},
++                             "parent_tool_use_id": None, "session_id": "default"})
++        except (BrokenPipeError, ConnectionResetError, RuntimeError):
++            pass  # the process is gone; the reader ends the turn
++        try:
++            res = await asyncio.wait_for(asyncio.shield(turn.done), STEP_TIMEOUT_S)
++        except asyncio.TimeoutError:
++            await proc.interrupt(float(self.cfg.get("interrupt_wait_s", 5)))
++            return None
++        except asyncio.CancelledError:
++            self._stopping[sid] = asyncio.create_task(proc.interrupt(float(self.cfg.get("interrupt_wait_s", 5))))
++            raise
++        if res.get("exited"):
++            return None
++        out = "\n\n".join(t for t in turn.texts if t.strip()).strip()
++        return out or None
++
++    async def _after_turn(self, sid: str, proc: Proc, model: str, effort: str | None, jid: str | None) -> None:
++        """Central-doc mode: ask for the updated central doc and save it. Skipper mode: ask for a handoff (the
++        central doc, when both are on), save it, end this Claude Code conversation and start a fresh one that
++        begins from the handoff, ready for the next message."""
++        s = self.app.store.get(sid)
++        if not s or s.get("deleted"):
++            return
++        st = s["settings"]
++        central, skipper = bool(st.get("central_doc")), bool(st.get("skipper"))
++        if not (central or skipper):
++            return
++        d = docs_dir(s)
++        try:
++            d.mkdir(parents=True, exist_ok=True)
++        except OSError as e:
++            self.notice(sid, "session_docs", f"Couldn't create {d}: {e}")
++            return
++        doc = None
++        if central:
++            path = d / "central.md"
++            cur = _read_doc(path).strip() or "(empty: this is the first update)"
++            if jid:
++                self.app.jobs.log(jid, "central doc update\n")
++            doc = await self._quiet_step(proc, model, effort, jid, CENTRAL_STEP.format(doc=cur))
++            if doc:
++                path.write_text(doc.rstrip() + "\n", encoding="utf-8")
++                self.app.store.update(sid, settings={"central_doc_path": str(path)})
++                self.notice(sid, "central_doc", f"Central doc updated: {path}")
++            else:
++                self.notice(sid, "central_doc", "Central doc: Claude Code didn't send an update this time.")
++        if not skipper:
++            return
++        if jid:
++            self.app.jobs.log(jid, "skipper handoff\n")
++        handoff = doc or await self._quiet_step(proc, model, effort, jid, HANDOFF_STEP)
++        if not handoff:
++            self.notice(sid, "skipper", "Skipper: no handoff came back, so the next message stays in this conversation.")
++            return
++        n = int(st.get("skipper_n") or 0) + 1
++        hp = d / f"handoff-{n:03d}.md"
++        hp.write_text(handoff.rstrip() + "\n", encoding="utf-8")
++        await self.close_session(sid)
++        self.app.store.update(sid, settings={"skipper_handoff": str(hp), "skipper_n": n,
++                                             "claude_code_session": None, "claude_code_totals": None})
++        self.notice(sid, "skipper", f"Skipper: handoff #{n} saved to {hp}. A fresh Claude Code conversation "
++                                    "has started from it, ready for your next message.")
++        if s2 := self.app.store.get(sid):
++            try:
++                await self._ensure(s2, model, effort, None)  # ready now, so the next message starts at once
++            except Exception as e:  # noqa: BLE001 — the next turn starts it instead
++                log.info("claude_code: skipper pre-start for %s failed: %s", sid, e)
++
+     async def _ensure(self, s: dict, model: str, effort: str | None, resume: str | None) -> Proc:
+         sid = s["id"]
+         lock = self._spawn_lock.setdefault(sid, asyncio.Lock())
+@@ -1029,6 +1168,10 @@ class ClaudeCode:
+             if old and old in self._plans[sid]:
+                 self._plans[sid] = self._plans[sid].replace(old, inp["new_string"], 1)[:20000]
+ 
++    def _quiet(self, sid: str) -> bool:
++        p = self.procs.get(sid)
++        return bool(p and p.turn and p.turn.quiet)
++
+     def _plan_mode(self, sid: str) -> bool:
+         return ((self.app.store.get(sid) or {}).get("mode")) == "plan"
+ 
+@@ -1036,6 +1179,9 @@ class ClaudeCode:
+         """The PreToolUse hook callback: GDW's gate for every tool call, like agent_sdk's pre_tool_use."""
+         name = str(data.get("tool_name") or data.get("toolName") or "")
+         inp = data.get("tool_input") if isinstance(data.get("tool_input"), dict) else (data.get("input") or {})
++        if self._quiet(sid):
++            return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
++                                           "permissionDecisionReason": QUIET_DENY}}
+         if name in DEFERRED_SDK_TOOLS:
+             return {}  # no say: the CLI's mode rules, then the permission prompt tool (GDW's card)
+         if self._plan_mode(sid) and is_plan_file(name, inp):
+@@ -1066,6 +1212,8 @@ class ClaudeCode:
+     async def decide(self, sid: str, name: str, inp: dict) -> dict:
+         app = self.app
+         allow = {"behavior": "allow", "updatedInput": inp}
++        if self._quiet(sid):
++            return {"behavior": "deny", "message": QUIET_DENY}
+         if name == "AskUserQuestion":
+             return await self._ask_question(sid, inp)
+         if name == "ExitPlanMode":
+diff --git a/backend/gamedevworkstation/server.py b/backend/gamedevworkstation/server.py
+index 4fc878f..e1f7581 100644
+--- a/backend/gamedevworkstation/server.py
++++ b/backend/gamedevworkstation/server.py
+@@ -210,9 +210,11 @@ def create_app(token: str, state: AppState | None = None) -> FastAPI:
+             # Not checked for the CLI: without it the session still opens, and its first turn says
+             # how to install or log in (claude_code.run_turn).
+             harness = new_session_harness(S.config)
++        # Skipper mode and central-doc mode: Claude Code sessions only (claude_code.ClaudeCode._after_turn).
++        modes = {k: True for k in ("skipper", "central_doc") if body.get(k) is True and harness == "claude_code"}
+         s = S.store.create(title=body.get("title") or "New session", folder=folder,
+                            model=_model_arg(body["model"]) if body.get("model") else None,
+-                           effort=body.get("effort"), mode=body.get("mode"), harness=harness)  # skill disclosure: store.create
++                           effort=body.get("effort"), mode=body.get("mode"), harness=harness, **modes)  # skill disclosure: store.create
+         if group_id:  # ⌘N in a grouped session: the new one joins that group
+             s = S.store.update(s["id"], group_id=group_id) or s
+         return s
+diff --git a/docs/GUIDE.md b/docs/GUIDE.md
+index 25bcb36..fc409ab 100644
+--- a/docs/GUIDE.md
++++ b/docs/GUIDE.md
+@@ -737,6 +737,24 @@ paperclip, *Chat only* or the folder (fixed once the session has started; click
+ Finder), the model (Claude models by name), effort, permission mode (Plan only, Ask before edits,
+ Accept edits), Tools and Send. Changing a dropdown updates the session; the next message uses it.
+ 
++**Session modes (folder sessions).** On the new-session screen, once a folder is chosen, **Modes**
++offers two switches. They're set when the session starts.
++
++- **Skipper mode.** After each turn, GameDevWorkstation asks Claude Code for a handoff (goal, what
++  was done, current state, decisions, open problems, next step) and saves it as
++  `<folder>/.gdw/sessions/<session id>/handoff-001.md`, `handoff-002.md` and so on. It then ends that
++  Claude Code conversation and starts a fresh one with the handoff in its instructions, ready for your
++  next message. Every prompt starts with a clean context; the chat stays one thread, and a note marks
++  each handoff.
++- **Central doc.** After each turn, Claude Code is asked for the updated version of one summary doc:
++  goal, what's happened, current state, decisions, open questions, next steps. It's saved as
++  `<folder>/.gdw/sessions/<session id>/central.md`. With Skipper mode on too, the central doc is the
++  handoff, so each turn takes one extra step, not two.
++
++Both extra steps are text-only (tools are refused during them), don't appear as chat messages, and
++count toward your usage like any other turn. Add `.gdw/` to the project's `.gitignore` if you don't
++want the docs committed.
++
+ **Attachments.** The paperclip works as in other sessions. Attached files go to Claude Code inside the
+ message itself, the way the API takes them: images (already converted and shrunk at upload) and PDFs
+ as base64, text files as text, audio as its transcript (when there is one), and other binary files
+diff --git a/frontend/src/components/NewSession.tsx b/frontend/src/components/NewSession.tsx
+index 6aa6b95..2e38ea9 100644
+--- a/frontend/src/components/NewSession.tsx
++++ b/frontend/src/components/NewSession.tsx
+@@ -3,16 +3,16 @@
+ // Code on the user's own Claude subscription (harness claude_code). Chat only = no folder: Claude
+ // Code works in a private scratch folder; Folder = it works in that project folder. The session is
+ // created when the first message is sent.
+-import { Folder } from "lucide-react";
+-import { useEffect, useMemo, useState } from "react";
++import { ChevronDown, FastForward, FileText, Folder, FolderOpen, Layers, MessageSquare } from "lucide-react";
++import { useEffect, useMemo, useRef, useState } from "react";
+ import { get } from "../lib/api";
+ import { pickFolder } from "../lib/native";
+ import { sessionActions } from "../lib/sessions";
+ import { useStore, type Session } from "../lib/store";
+ import { ClaudeStatusNotice, useClaudeStatus } from "./ClaudeCode";
+-import { EffortSelect, EFFORTS, folderName, ModelSelect, ModeSelect, NEW_SESSION_MODES, TextSelect, tilde } from "./ClaudeCard";
++import { EffortSelect, EFFORTS, folderName, ModelSelect, ModeSelect, NEW_SESSION_MODES, tilde } from "./ClaudeCard";
+ import { Composer, type ComposerDraft } from "./Composer";
+-import { providerModels, useModelCatalog } from "./ui";
++import { Menu, providerModels, useModelCatalog, type MenuItem } from "./ui";
+ 
+ export { folderName, NEW_SESSION_MODES };
+ 
+@@ -21,8 +21,11 @@ export const PLACEHOLDER = "Describe a task, or type / for commands and skills,
+ const PREFS_KEY = "newSession.prefs";
+ const RECENT_MAX = 6;
+ 
+-type Prefs = { location: Location; folder: string | null; model: string | null; effort: string | null; mode: string | null };
+-const NO_PREFS: Prefs = { location: "chat", folder: null, model: null, effort: null, mode: null };
++type Prefs = {
++  location: Location; folder: string | null; model: string | null; effort: string | null; mode: string | null;
++  skipper: boolean; centralDoc: boolean;
++};
++const NO_PREFS: Prefs = { location: "chat", folder: null, model: null, effort: null, mode: null, skipper: false, centralDoc: false };
+ 
+ /** The last choices on this screen (this window's browser storage; a convenience only). */
+ function loadPrefs(): Prefs {
+@@ -48,6 +51,65 @@ export function recentFolders(sessions: Session[], max = RECENT_MAX): string[] {
+   return out;
+ }
+ 
++/** Where the session works: Chat only, a recent folder, or "Choose a folder…" (the macOS folder picker).
++ *  One menu (not a native dropdown), so every choice is a click away. */
++function LocationButton({ folder, recents, onChat, onFolder, onChoose }: {
++  folder: string | null; recents: string[]; onChat: () => void; onFolder: (f: string) => void; onChoose: () => void;
++}) {
++  const btn = useRef<HTMLButtonElement>(null);
++  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
++  const folders = folder && !recents.includes(folder) ? [folder, ...recents] : recents;
++  const items: MenuItem[] = [
++    { label: "Chat only", icon: <MessageSquare size={14} />, checked: !folder, hint: "private scratch folder", onClick: onChat },
++    ...(folders.length ? ["sep" as const, { heading: "Folders" }] : []),
++    ...folders.map((f): MenuItem => ({ label: folderName(f), icon: <Folder size={14} />, checked: f === folder, onClick: () => onFolder(f) })),
++    "sep",
++    { label: "Choose a folder…", icon: <FolderOpen size={14} />, onClick: onChoose },
++  ];
++  return (
++    <>
++      <button ref={btn} className="btn btn-ghost gap-1.5 px-2 text-[14px] min-w-0" aria-label="Location" aria-haspopup="menu" aria-expanded={!!at}
++        data-testid="location" title={folder ? tilde(folder) : "No folder: Claude Code works in a private scratch folder"}
++        onClick={() => { const r = btn.current!.getBoundingClientRect(); setAt(at ? null : { x: r.left, y: r.bottom + 4 }); }}>
++        {folder ? <Folder size={15} className="shrink-0" aria-hidden /> : <MessageSquare size={15} className="shrink-0 text-muted" aria-hidden />}
++        <span className="truncate max-w-[220px]">{folder ? folderName(folder) : "Chat only"}</span>
++        <ChevronDown size={15} className="shrink-0 text-muted" aria-hidden />
++      </button>
++      {at && <Menu x={at.x} y={at.y} width={280} items={items} onClose={() => setAt(null)} />}
++    </>
++  );
++}
++
++/** Folder sessions only: Skipper mode (a handoff and a fresh Claude Code conversation after every turn) and
++ *  central-doc mode (one summary doc of the session, updated after every turn). */
++function SessionModesButton({ skipper, centralDoc, onSkipper, onCentralDoc }: {
++  skipper: boolean; centralDoc: boolean; onSkipper: (v: boolean) => void; onCentralDoc: (v: boolean) => void;
++}) {
++  const btn = useRef<HTMLButtonElement>(null);
++  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
++  const on = [skipper && "Skipper", centralDoc && "Central doc"].filter(Boolean) as string[];
++  const items: MenuItem[] = [
++    { heading: "Session modes" },
++    { label: "Skipper mode", icon: <FastForward size={14} />, checked: skipper,
++      hint: "handoff, then a fresh conversation after each prompt", onClick: () => onSkipper(!skipper) },
++    { label: "Central doc", icon: <FileText size={14} />, checked: centralDoc,
++      hint: "one summary doc, updated after each step", onClick: () => onCentralDoc(!centralDoc) },
++  ];
++  return (
++    <>
++      <button ref={btn} className={`btn btn-ghost gap-1.5 px-2 text-[14px] min-w-0 ${on.length ? "text-action" : ""}`}
++        aria-label="Session modes" aria-haspopup="menu" aria-expanded={!!at} data-testid="session-modes"
++        title="Skipper mode and central-doc mode"
++        onClick={() => { const r = btn.current!.getBoundingClientRect(); setAt(at ? null : { x: r.left, y: r.bottom + 4 }); }}>
++        <Layers size={15} className={`shrink-0 ${on.length ? "" : "text-muted"}`} aria-hidden />
++        <span className="truncate max-w-[200px]">{on.length ? on.join(" + ") : "Modes"}</span>
++        <ChevronDown size={15} className="shrink-0 text-muted" aria-hidden />
++      </button>
++      {at && <Menu x={at.x} y={at.y} width={330} items={items} onClose={() => setAt(null)} />}
++    </>
++  );
++}
++
+ export function NewSession() {
+   useModelCatalog();
+   const appState = useStore((s) => s.appState);
+@@ -80,12 +142,6 @@ export function NewSession() {
+     if (f) setPrefs({ location: "folder", folder: f });
+     else setPrefs({ location: "chat" }); // the browser prompt left empty: chat only
+   };
+-  const setLocation = (v: string) => {
+-    if (v !== "folder") return setPrefs({ location: "chat" });
+-    const known = prefs.folder ?? recents[0] ?? null;
+-    if (known) setPrefs({ location: "folder", folder: known });
+-    else void choose();
+-  };
+ 
+   const subtitle = folder
+     ? <>The project stays in <span className="text-text" title={tilde(folder)}>{folderName(folder)}</span>. Claude Code reads, edits and runs commands there.</>
+@@ -101,28 +157,24 @@ export function NewSession() {
+       setPrefs({ ...(m ? { model: m } : {}), ...(b.effort ? { effort: b.effort } : {}), ...(b.mode ? { mode: b.mode } : {}) });
+     },
+     start: async (text, skill, attachments) => {
+-      const started = await sessionActions.start({ text, skill, attachments, folder, model, effort, mode });
++      const started = await sessionActions.start({
++        text, skill, attachments, folder, model, effort, mode,
++        ...(folder ? { skipper: !!prefs.skipper, central_doc: !!prefs.centralDoc } : {}),
++      });
+       if (!started) setPrefsState(loadPrefs()); // a missing folder resets saved preferences to Chat only
+       return started;
+     },
+     rows: [
+       <>
+-        <TextSelect label="Location" value={location} onChange={setLocation}
+-          title={location === "folder" ? "Claude Code works in a project folder" : "No folder: Claude Code works in a private scratch folder"}>
+-          <option value="chat">Chat only</option>
+-          <option value="folder">Folder</option>
+-        </TextSelect>
+-        {location === "folder" && (
+-          <button className="btn btn-ghost gap-1.5 px-2 text-[14px] min-w-0" onClick={choose} title={folder ? `${folder} (choose another folder)` : "Choose a folder"}
+-            aria-label={folder ? `Folder ${folderName(folder)}` : "Choose a folder"} data-testid="folder-chip">
+-            <Folder size={15} className="shrink-0" aria-hidden /><span className="truncate max-w-[220px]">{folder ? folderName(folder) : "Choose a folder…"}</span>
+-          </button>
+-        )}
++        <LocationButton folder={folder} recents={recents} onChat={() => setPrefs({ location: "chat" })}
++          onFolder={(f) => setPrefs({ location: "folder", folder: f })} onChoose={choose} />
+         <ModelSelect value={model} onChange={(v) => setPrefs({ model: v })} />
+       </>,
+       <>
+         <EffortSelect value={effort} onChange={(v) => setPrefs({ effort: v })} />
+         <ModeSelect value={mode} onChange={(v) => setPrefs({ mode: v })} />
++        {folder && <SessionModesButton skipper={!!prefs.skipper} centralDoc={!!prefs.centralDoc}
++          onSkipper={(v) => setPrefs({ skipper: v })} onCentralDoc={(v) => setPrefs({ centralDoc: v })} />}
+       </>,
+     ],
+   };
+diff --git a/frontend/src/components/Sidebar.tsx b/frontend/src/components/Sidebar.tsx
+index 87ba059..b7dc37c 100644
+--- a/frontend/src/components/Sidebar.tsx
++++ b/frontend/src/components/Sidebar.tsx
+@@ -507,7 +507,12 @@ export function Sidebar() {
+       <div className="px-3 pt-3 pb-2 flex items-center gap-1" data-tauri-drag-region>
+         <span className="font-semibold tracking-tight mr-auto">GameDevWorkstation</span>
+         <button className="btn btn-ghost px-1.5" onClick={(e) => openMenu(e.currentTarget, headerItems())} title="New group, group by, sort, archived and trash" aria-label="Session list options" aria-haspopup="menu"><ListFilter size={15} /></button>
+-        <button className="btn btn-ghost px-1.5" onClick={newSession} title="New session (⌘N)" aria-label="New session"><Plus size={16} /></button>
++      </div>
++      <div className="px-3 pb-2">
++        <button className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-[13.5px] text-text hover:bg-sunken focus-visible:outline-2 focus-visible:outline-action"
++          onClick={newSession} title="New session (⌘N)" aria-label="New session">
++          <Plus size={16} className="shrink-0" aria-hidden /><span className="flex-1 text-left">New session</span><kbd className="text-[11px] text-faint font-sans">⌘N</kbd>
++        </button>
+       </div>
+       <div className="px-3 pb-2">
+         <label className="relative block">
+diff --git a/frontend/src/lib/sessions.ts b/frontend/src/lib/sessions.ts
+index 10addc6..9d7c423 100644
+--- a/frontend/src/lib/sessions.ts
++++ b/frontend/src/lib/sessions.ts
+@@ -182,6 +182,10 @@ let starting: Promise<boolean> | null = null;
+  *  subscription (harness claude_code). No folder = chat only (a private scratch folder). */
+ export type NewSessionRequest = {
+   text: string; skill?: string | null; attachments?: NewSessionAttachment[]; folder: string | null; model: string; effort: string; mode: string;
++  /** Skipper mode: after each turn a handoff is recorded and a fresh Claude Code conversation continues from it. */
++  skipper?: boolean;
++  /** Central-doc mode: a summary doc of the session (<folder>/.gdw/sessions/<id>/central.md) updated after each turn. */
++  central_doc?: boolean;
+ };
+ /** A file uploaded on the new-session screen (POST /uploads before the session exists). */
+ type NewSessionAttachment = { path: string; name: string; mime: string; item_id?: string; text?: string };
+@@ -205,6 +209,7 @@ export const sessionActions = {
+       try {
+         s = await post<Session>("/sessions", {
+           harness: "claude_code", folder: r.folder || null, model: r.model, effort: r.effort, mode: r.mode, ...(group_id ? { group_id } : {}),
++          ...(r.skipper ? { skipper: true } : {}), ...(r.central_doc ? { central_doc: true } : {}),
+         });
+       } catch (e: any) {
+         if (e?.status === 400 && e.message.startsWith("Folder not found")) {
+diff --git a/scripts/build_mac.sh b/scripts/build_mac.sh
+index b6a3f69..fdcfbe7 100755
+--- a/scripts/build_mac.sh
++++ b/scripts/build_mac.sh
+@@ -1,5 +1,9 @@
+ #!/usr/bin/env bash
+-# Builds dist/GameDevWorkstation.app and dist/GameDevWorkstation.dmg for Apple Silicon, ad-hoc signed.
++# Builds dist/GameDevWorkstation.app and dist/GameDevWorkstation.dmg for Apple Silicon.
++# Signing: the same certificate every build, so macOS remembers "Always Allow" for the Keychain
++# (an ad-hoc signature is a new code identity each build, and the Keychain asks again). The identity
++# is $GDW_SIGN_IDENTITY, else an "Apple Development" certificate, else "GameDevWorkstation Local
++# Signing" (scripts/setup_signing.sh makes it), else ad-hoc with a note.
+ set -euo pipefail
+ cd "$(dirname "$0")/.."
+ ROOT="$(pwd)"
+@@ -65,9 +69,34 @@ rm_tree "$DIST/GameDevWorkstation.app" "$DIST/GameDevWorkstation.dmg"
+ mkdir -p "$DIST"
+ cp -R "$BUNDLE/macos/GameDevWorkstation.app" "$DIST/GameDevWorkstation.app"
+ 
+-echo "==> Signing (ad-hoc)"
++# The SHA-1 of the first valid code-signing identity whose name contains $1 (empty if none).
++identity() { security find-identity -v -p codesigning 2>/dev/null | awk -v n="$1" 'index($0, "\"" n) { print $2; exit }'; }
++SIGN="${GDW_SIGN_IDENTITY:-}"
++[[ -n "$SIGN" ]] || SIGN="$(identity "Apple Development")"
++[[ -n "$SIGN" ]] || SIGN="$(identity "GameDevWorkstation Local Signing")"
+ xattr -cr "$DIST/GameDevWorkstation.app"
+-codesign --force --deep --sign - "$DIST/GameDevWorkstation.app"
++if [[ -n "$SIGN" ]]; then
++  echo "==> Signing ($(security find-identity -v -p codesigning | awk -v h="$SIGN" '$2 == h { $1 = $2 = ""; sub(/^  /, ""); print; exit }'))"
++  # --deep doesn't reach code under Contents/Resources: sign the bundled backend (the process that
++  # reads the Keychain) and its libraries first, inside out. The backend gets a fixed identifier:
++  # PyInstaller's own ad-hoc one changes every build, and the Keychain remembers identifier + certificate.
++  BACKEND_DIR="$DIST/GameDevWorkstation.app/Contents/Resources/backend"
++  while IFS= read -r -d '' f; do
++    if file -b "$f" | grep -q "Mach-O"; then codesign --force --sign "$SIGN" "$f" 2>/dev/null; fi
++  done < <(find "$BACKEND_DIR" -type f ! -name gamedevworkstation-backend -print0)
++  codesign --force --sign "$SIGN" -i dev.local.gamedevworkstation.backend "$BACKEND_DIR/gamedevworkstation-backend"
++  codesign --force --deep --sign "$SIGN" "$DIST/GameDevWorkstation.app"
++  # --deep re-signs nested bundles only; check the backend kept its identifier and certificate.
++  codesign -dr - "$BACKEND_DIR/gamedevworkstation-backend" 2>&1 | grep -q 'identifier "dev.local.gamedevworkstation.backend" and certificate' \
++    || { echo "The backend isn't signed with the stable identity." >&2; exit 1; }
++elif [[ -n "${GDW_ALLOW_ADHOC:-}" ]]; then
++  echo "==> Signing (ad-hoc, GDW_ALLOW_ADHOC: the Keychain will ask again for this build)"
++  codesign --force --deep --sign - "$DIST/GameDevWorkstation.app"
++else
++  echo "No code-signing identity: run scripts/setup_signing.sh once (or set GDW_SIGN_IDENTITY)." >&2
++  echo "An ad-hoc build is a new app to the Keychain, which asks for your password again; GDW_ALLOW_ADHOC=1 builds one anyway." >&2
++  exit 1
++fi
+ codesign --verify --deep --strict "$DIST/GameDevWorkstation.app" && echo "    signature OK"
+ 
+ if [[ -n "${GDW_SKIP_DMG:-}" ]]; then echo; echo "Built: $DIST/GameDevWorkstation.app"; exit 0; fi
+diff --git a/scripts/setup_signing.sh b/scripts/setup_signing.sh
+new file mode 100755
+index 0000000..d3edf92
+--- /dev/null
++++ b/scripts/setup_signing.sh
+@@ -0,0 +1,37 @@
++#!/usr/bin/env bash
++# One-time: a self-signed code-signing certificate, "GameDevWorkstation Local Signing", in your login
++# keychain, trusted for code signing only. scripts/build_mac.sh then signs every build with it, so
++# the Keychain's "Always Allow" carries over from build to build (an ad-hoc signature changes each
++# build). The private key never leaves your login keychain; nothing is uploaded.
++#
++# macOS asks for your password to trust the certificate (and once more when codesign first uses the
++# key: choose Always Allow). Undo: delete "GameDevWorkstation Local Signing" in Keychain Access.
++# If you have Xcode with an Apple ID, an "Apple Development" certificate works too and needs no script.
++set -euo pipefail
++NAME="GameDevWorkstation Local Signing"
++KC="$HOME/Library/Keychains/login.keychain-db"
++if security find-identity -v -p codesigning | grep -q "\"$NAME\""; then
++  echo "\"$NAME\" is already set up."; exit 0
++fi
++TMP="$(mktemp -d -t gdw-signing)"
++trap 'rm -rf "$TMP"' EXIT
++cat > "$TMP/cert.cnf" <<CNF
++[req]
++distinguished_name = dn
++x509_extensions = ext
++prompt = no
++[dn]
++CN = $NAME
++[ext]
++basicConstraints = critical,CA:false
++keyUsage = critical,digitalSignature
++extendedKeyUsage = critical,codeSigning
++CNF
++/usr/bin/openssl req -x509 -newkey rsa:2048 -nodes -keyout "$TMP/key.pem" -out "$TMP/cert.pem" -days 3650 -config "$TMP/cert.cnf" 2>/dev/null
++PASS="$(/usr/bin/openssl rand -hex 16)"
++/usr/bin/openssl pkcs12 -export -inkey "$TMP/key.pem" -in "$TMP/cert.pem" -out "$TMP/id.p12" -passout "pass:$PASS" -name "$NAME" 2>/dev/null \
++  || /usr/bin/openssl pkcs12 -export -legacy -inkey "$TMP/key.pem" -in "$TMP/cert.pem" -out "$TMP/id.p12" -passout "pass:$PASS" -name "$NAME"
++security import "$TMP/id.p12" -k "$KC" -P "$PASS" -T /usr/bin/codesign
++echo "Trusting it for code signing (macOS asks for your password)…"
++security add-trusted-cert -r trustRoot -p codeSign -k "$KC" "$TMP/cert.pem"
++security find-identity -v -p codesigning | grep "\"$NAME\"" && echo "Done: builds are now signed with \"$NAME\"."

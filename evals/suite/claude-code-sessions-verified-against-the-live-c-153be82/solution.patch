@@ -1,0 +1,748 @@
+diff --git a/README.md b/README.md
+index 4835361..7e26bcd 100644
+--- a/README.md
++++ b/README.md
+@@ -49,7 +49,7 @@ Everything runs locally; the backend listens on `127.0.0.1` only.
+ | **Fleet** | Parallel waves of subagents in their own worktrees, each with a claimed scope, scope-checked merges, a conflict circuit breaker and discoveries relayed to the next wave. |
+ | **Progressive skill disclosure** | A compact skill index in the system prompt; full skill text is loaded only when used and survives compaction. |
+ | **Task board** | A Kanban board (Tasks tab) you and the agent share: tasks with codes like `Task00001`, subtasks and checklists, comments, history and linked sessions, live updates. In chat: `/task new`, `/task <code>`, `/task move`, `/task done`, `/task list`, `/task link`; the agent uses `task_*` tools. Scheduled prompts live on the Schedule page. |
+-| **Claude Code sessions** | Experimental: not yet verified against a live logged-in CLI. Run your own `claude` CLI and login, with GDW tools, approvals, Plan mode and `--resume`. Subscription estimates stay outside spend limits; API key logins record `billing='api'` and check spend limits before each turn. See [Claude Code sessions](docs/GUIDE.md#claude-code-sessions). |
++| **Claude Code sessions** | Run your own `claude` CLI and login (checked against claude 2.1.308 on a claude.ai subscription), with GDW tools, approvals, Plan mode and `--resume`. Subscription estimates stay outside spend limits; API key logins record `billing='api'` and check spend limits before each turn. See [Claude Code sessions](docs/GUIDE.md#claude-code-sessions). |
+ | **Cost control** | Daily and per-session spend limits, job budgets, approval for high effort, and a My usage page per model. |
+ | **Trailer maker** | Brief → beat sheet → scripted Play Mode capture (Unity Recorder) → ffmpeg edit from a JSON edit list → ElevenLabs music cut to the beat sheet → three reviewers → Steam, YouTube and vertical exports. |
+ | **ElevenLabs** | Speech, transcription, sound effects and music (including composition plans with exact section lengths), in chat and on their own page. |
+@@ -57,12 +57,14 @@ Everything runs locally; the backend listens on `127.0.0.1` only.
+ 
+ ### Claude Code sessions
+ 
+-Experimental: not yet verified against a live logged-in CLI. Settings files default to
+-**None (safe mode: your ~/.claude hooks, plugins and settings files are ignored)**, using
+-`--safe-mode`. This disables custom CLAUDE.md, skills, installed plugins, hooks, MCP servers,
+-commands, agents and output styles; admin policies still apply, and auth, model selection,
+-built-in tools and plugins, and permissions work normally. Choosing `user,project,local` sources
+-uses `--setting-sources=<list>` instead. Strict MCP config remains on unless you enable your MCP
++Checked against claude 2.1.308 logged in with a claude.ai subscription: login detection, the
++stream-json protocol, the PreToolUse hook, the permission prompt tool, GDW's MCP tools, Plan mode's
++plan card, questions, Stop and `--resume` (redacted captures in `tests/fixtures/claude_stream/`).
++Settings files default to **None (your ~/.claude hooks, plugins and settings files are ignored)**,
++using an empty `--setting-sources=`: no user, project or local settings, CLAUDE.md, skills, agents or
++plugins are loaded; admin policies still apply. (`--safe-mode` isn't used: it also drops
++GameDevWorkstation's own MCP server.) Choosing `user,project,local` sources uses
++`--setting-sources=<list>` instead. Strict MCP config remains on unless you enable your MCP
+ servers. GDW adds its own CLAUDE.md/skills context explicitly, with a 64 KB prompt cap.
+ 
+ The CLI env allowlist keeps only shell/locale variables (`PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`,
+diff --git a/backend/gamedevworkstation/features/claude_cli.py b/backend/gamedevworkstation/features/claude_cli.py
+index 54b7694..5f52ccb 100644
+--- a/backend/gamedevworkstation/features/claude_cli.py
++++ b/backend/gamedevworkstation/features/claude_cli.py
+@@ -32,6 +32,8 @@ CACHE_S = 60.0
+ SEARCH_DIRS = ("~/.local/bin", "~/.claude/local", "/opt/homebrew/bin")
+ LOGIN_HINT = "Run `claude auth login` in a terminal, then retry."
+ _SECRETISH = re.compile(r"token|secret|key|password|credential", re.I)
++# Account details `claude auth status` reports when logged in [live]; GDW has no use for them.
++PERSONAL = frozenset({"email", "orgId", "orgName", "organization", "accountUuid", "organizationUuid"})
+ _ERROR_SECRET = re.compile(r"Bearer\s+\S+|sk-[A-Za-z0-9_-]{10,}", re.I)
+ 
+ 
+@@ -72,9 +74,10 @@ def find_cli(config: Any) -> str | None:
+ 
+ 
+ def _scrub(d: Any) -> Any:
+-    """`claude auth status` output for the UI, minus anything that looks like a credential."""
++    """`claude auth status` output for the UI, minus anything that looks like a credential or names the account."""
+     if isinstance(d, dict):
+-        return {k: _scrub(v) for k, v in d.items() if not _SECRETISH.search(str(k)) or k in ("authMethod",)}
++        return {k: _scrub(v) for k, v in d.items()
++                if (not _SECRETISH.search(str(k)) or k in ("authMethod",)) and k not in PERSONAL}
+     if isinstance(d, list):
+         return [_scrub(x) for x in d]
+     return redact(d) if isinstance(d, str) else d
+@@ -96,8 +99,10 @@ async def _run(argv: list[str], timeout: float = 15.0) -> tuple[int, str, str]:
+ 
+ 
+ def logged_in(auth: dict | None) -> bool:
+-    """`claude auth status` JSON → logged in. Observed locally: {"loggedIn": false, "authMethod": "none", ...};
+-    the logged-in shape is [UNVERIFIED], so a few spellings are accepted."""
++    """`claude auth status` JSON → logged in. Observed (2.1.308): {"loggedIn": false, "authMethod": "none", ...}
++    and, logged in with a subscription, {"loggedIn": true, "authMethod": "claude.ai", "apiProvider":
++    "firstParty", "subscriptionType": "max", "email": ..., "orgId": ..., "orgName": ...}. A few other
++    spellings are still accepted in case a later CLI renames the field."""
+     if not isinstance(auth, dict):
+         return False
+     for k in ("loggedIn", "logged_in", "authenticated"):
+@@ -109,7 +114,8 @@ def logged_in(auth: dict | None) -> bool:
+ 
+ def bills_api(auth: dict | None) -> bool:
+     """True when the CLI says it would use an API key (not the subscription) even with GDW's clean env,
+-    e.g. an apiKeyHelper in managed settings. The authMethod values are [UNVERIFIED] beyond "none"."""
++    e.g. an apiKeyHelper in managed settings. Observed values: "none" and "claude.ai" (subscription,
++    so False); the API key spellings below weren't observed (no API key login was tried)."""
+     m = str((auth or {}).get("authMethod") or "").lower().replace("-", "_").replace(" ", "_")
+     return m in ("api_key", "apikey", "api_key_helper", "apikeyhelper", "console", "anthropic_api_key")
+ 
+diff --git a/backend/gamedevworkstation/features/claude_code.py b/backend/gamedevworkstation/features/claude_code.py
+index e6ff4ac..6e0fce6 100644
+--- a/backend/gamedevworkstation/features/claude_code.py
++++ b/backend/gamedevworkstation/features/claude_code.py
+@@ -3,29 +3,47 @@
+ One long-lived process per GameDevWorkstation session:
+ 
+     claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages
+-           --session-id=<uuid> | --resume=<uuid>  --model <id> [--effort <level>] --permission-mode <mode>
+-           --permission-prompt-tool mcp__gdw__approve --mcp-config <0600 file> [--strict-mcp-config]
+-           --safe-mode | --setting-sources=<explicit list> --add-dir <worktrees> --append-system-prompt=<GDW context>
++           --session-id=<uuid> | --resume=<uuid>  --model=<id> --permission-mode=<mode> [--effort=<level>]
++           --permission-prompt-tool=mcp__gdw__approve --mcp-config <0600 file> [--strict-mcp-config]
++           --add-dir <worktrees> --setting-sources=<list, empty by default> --append-system-prompt=<GDW context>
++
++Checked against claude 2.1.308 logged in with a claude.ai subscription ("[live]" below); the fake CLI
++(tests/fixtures/fake_claude.py) replays those captures (tests/fixtures/claude_stream/*.jsonl).
+ 
+ - Auth: the CLI's own login. The child env allows only shell, locale, proxy and desktop variables
+-  plus MCP_TOOL_TIMEOUT (claude_cli.child_env); --bare (API key only) is never
+-  passed; nothing is read from ~/.claude or the Keychain. `claude auth status` not logged in → the
+-  turn ends with a card: "Run `claude auth login` in a terminal, then retry".
+-- Turns: one `{"type":"user",...}` line on stdin per GDW turn; the stdout reader maps stream-json
+-  events into GDW messages, deltas, tool cards and usage, exactly like the agent_sdk harness, until
+-  the turn's `result`. Process ends (crash, app restart): the next turn starts it again with
+-  --resume (--mcp-config / --add-dir are passed again; they aren't restored on resume [docs]).
+-- GDW tools: features/gdw_mcp.py, an HTTP MCP server on this backend (127.0.0.1 + per-process token).
+-- Approvals: a PreToolUse hook registered through the stream-json control protocol (`initialize`,
+-  as the Agent SDK does) runs harnesses.make_gate for every tool call, so acceptEdits can't skip
+-  GDW's folder scope, snapshots or Plan mode; whatever the hook leaves to the CLI (ExitPlanMode,
+-  AskUserQuestion, ...) reaches mcp__gdw__approve, the --permission-prompt-tool, which shows GDW's
+-  cards. A `can_use_tool` control request (the SDK's stdio route) gets the same answer.
+-- Modes: ask → manual, accept_edits → acceptEdits, plan → plan. bypassPermissions, dontAsk and auto
+-  are never passed (build_argv refuses them).
+-- Stop: an `interrupt` control request, then SIGINT, then services._kill_tree.
+-- Usage: each turn records its delta, provider anthropic; subscription login estimates stay outside
+-  USD limits, while API key logins use billing "api" and the normal spend-limit checks.
++  plus MCP_TOOL_TIMEOUT (claude_cli.child_env); --bare (API key only) is never passed; nothing is
++  read from ~/.claude or the Keychain. `claude auth status` → {"loggedIn": true, "authMethod":
++  "claude.ai", "subscriptionType": ...} [live]; not logged in → the turn ends with a card: "Run
++  `claude auth login` in a terminal, then retry".
++- Settings isolation: `--setting-sources=` (empty) loads no user/project/local settings, CLAUDE.md,
++  skills, agents or plugins [live]. Never --safe-mode: it also drops the --mcp-config servers, so
++  mcp__gdw__approve is missing and the CLI exits at the first permission prompt [live].
++- Turns: one `{"type":"user","message":{"role":"user","content":...},"parent_tool_use_id":null,
++  "session_id":"default"}` line on stdin per GDW turn; the stdout reader maps stream-json events into
++  GDW messages, deltas, tool cards and usage until the turn's `result`. `system/init` comes after each
++  user line, not at start. One API message can arrive as several `assistant` events (one per content
++  block, same message id as its `message_start`) [live]: they are joined into one GDW message.
++  Process ends (crash, app restart): the next turn starts it again with --resume (--mcp-config /
++  --add-dir are passed again; they aren't restored on resume [docs]).
++- GDW tools: features/gdw_mcp.py, an HTTP MCP server on this backend (127.0.0.1 + per-process
++  bearer token, honoured by the CLI [live]). The CLI loads MCP tools lazily (ToolSearch, then the call).
++- Approvals: a PreToolUse hook registered through the stream-json control protocol (`initialize`
++  with hooks; its response says `hooks_applied`) runs harnesses.make_gate for every tool call, so
++  acceptEdits can't skip GDW's folder scope, snapshots or Plan mode. What the hook leaves to the CLI
++  (`{}`: AskUserQuestion, ExitPlanMode, ToolSearch, the plan file in Plan mode, ...) goes through the
++  CLI's own rules and then mcp__gdw__approve, the --permission-prompt-tool: input {tool_name, input,
++  tool_use_id}, answer {"behavior":"allow","updatedInput":{...}} or {"behavior":"deny","message":...}
++  [live]. A `can_use_tool` control request (only sent with `--permission-prompt-tool stdio`, which
++  GDW doesn't pass) gets the same answer.
++- Modes: ask → manual (reported back as "default"), accept_edits → acceptEdits, plan → plan.
++  bypassPermissions, dontAsk and auto are never passed (build_argv refuses them).
++- Stop: an `interrupt` control request (answered with {"still_queued": []}, the turn ends with
++  terminal_reason "aborted_streaming", the process stays) [live]; then SIGINT, which ends the turn
++  and the process [live]; then services._kill_tree.
++- Usage: `result.usage` is the turn's own tokens; `total_cost_usd` (and modelUsage) are running
++  totals for the conversation, carried across --resume [live]. Each turn records its tokens and the
++  cost increase, provider anthropic; subscription estimates stay outside USD limits, while API key
++  logins use billing "api" and the normal spend-limit checks.
+ """
+ from __future__ import annotations
+ 
+@@ -61,7 +79,7 @@ if TYPE_CHECKING:
+ log = logging.getLogger(__name__)
+ 
+ HARNESS = "claude_code"
+-CLI_MODE = {"ask": "manual", "accept_edits": "acceptEdits", "plan": "plan"}  # `claude --help` lists manual, not default
++CLI_MODE = {"ask": "manual", "accept_edits": "acceptEdits", "plan": "plan"}  # `--help` lists manual; init reports "default"
+ FORBIDDEN_MODES = frozenset({"bypassPermissions", "dontAsk", "auto"})
+ FORBIDDEN_FLAGS = ("--bare", "--dangerously-skip-permissions", "--allow-dangerously-skip-permissions")
+ SETTING_SOURCES = ("user", "project", "local")
+@@ -88,6 +106,40 @@ def valid_setting_sources(v: Any) -> bool:
+     return all(p in SETTING_SOURCES for p in parts) and len(set(parts)) == len(parts)
+ 
+ 
++def user_plugins(plugins: Any) -> list:
++    """`system/init` plugins other than the CLI's own: 2.1.308 always lists its built-in ones
++    ({"path": "builtin", "source": "<name>@builtin"}) [live]."""
++    out = []
++    for p in plugins or []:
++        if isinstance(p, dict) and (p.get("path") == "builtin" or str(p.get("source") or "").endswith("@builtin")):
++            continue
++        out.append(p)
++    return out
++
++
++def plans_dir() -> Path:
++    """Where the CLI writes Plan mode's plan file before ExitPlanMode reads it (~/.claude/plans [live];
++    GDW never sets CLAUDE_CONFIG_DIR)."""
++    return Path.home() / ".claude" / "plans"
++
++
++def is_plan_file(name: str, inp: dict) -> bool:
++    """A Write/Edit of a Markdown file directly inside plans_dir() (resolved, so no `..` or symlink escapes)."""
++    if name not in ("Write", "Edit", "MultiEdit"):
++        return False
++    fp = inp.get("file_path")
++    if not isinstance(fp, str) or not fp:
++        return False
++    p = Path(fp).expanduser()
++    if not p.is_absolute():
++        return False
++    try:
++        full, root = p.resolve(), plans_dir().resolve()
++    except (OSError, RuntimeError):
++        return False
++    return full.parent == root and full.suffix == ".md"
++
++
+ def _cap_prompt(text: str) -> str:
+     raw = text.encode("utf-8")
+     if len(raw) <= SYSTEM_PROMPT_MAX_BYTES:
+@@ -125,8 +177,11 @@ def build_argv(cli: str, *, session_id: str | None, resume: str | None, model: s
+         argv.append("--strict-mcp-config")
+     for d in add_dirs:
+         argv += ["--add-dir", str(d)]
++    # An empty list loads no user/project/local settings, CLAUDE.md, skills, agents or plugins. Never
++    # --safe-mode: in 2.1.308 it also drops the --mcp-config servers, so mcp__gdw__approve is missing
++    # and the CLI exits at the first permission prompt.
+     sources = ','.join(p.strip() for p in setting_sources.split(',') if p.strip())
+-    argv.append(f"--setting-sources={sources}" if sources else "--safe-mode")
++    argv.append(f"--setting-sources={sources}")
+     if system_prompt:
+         argv.append(f"--append-system-prompt={_cap_prompt(system_prompt)}")
+     bad = [a for a in argv if a.split("=", 1)[0] in FORBIDDEN_FLAGS or
+@@ -146,6 +201,8 @@ def _block_text(content: Any) -> str:
+                 parts.append(str(b.get("text") or ""))
+             elif isinstance(b, dict) and b.get("type") == "image":
+                 parts.append("[image]")
++            elif isinstance(b, dict) and b.get("type") == "tool_reference":  # ToolSearch loading a tool [live]
++                parts.append(f"[loaded {b.get('tool_name') or 'a tool'}]")
+             elif isinstance(b, str):
+                 parts.append(b)
+         return "\n".join(parts)
+@@ -186,6 +243,7 @@ class Proc:
+         self._pending: dict[str, asyncio.Future] = {}
+         self._inflight: dict[str, asyncio.Task] = {}
+         self._msg_ids: dict[str, str] = {}  # CLI message id → the GDW id its streamed text used
++        self._open: tuple[str, Message] | None = None  # the GDW message the current CLI message's blocks join
+         self._stream_id: str | None = None
+         self._req = 0
+         self.reader = asyncio.create_task(self._read())
+@@ -314,6 +372,9 @@ class Proc:
+         if t == "result":
+             self._on_result(ev, turn)
+             return
++        if t == "rate_limit_event":
++            self._on_rate_limit(ev.get("rate_limit_info") or {}, turn)
++            return
+         if turn and turn.jid and t:
+             app.jobs.log(turn.jid, f"[{t}]\n")
+ 
+@@ -323,7 +384,7 @@ class Proc:
+             # Reject reported hooks/plugins even with explicit setting sources; missing fields are OK.
+             foreign_mcp = [m for m in ev.get("mcp_servers") or []
+                            if (m.get("name") if isinstance(m, dict) else m) != SERVER]
+-            if ev.get("hooks") or ev.get("plugins") or (foreign_mcp and not self.mgr.cfg.get("load_user_mcp")):
++            if ev.get("hooks") or user_plugins(ev.get("plugins")) or (foreign_mcp and not self.mgr.cfg.get("load_user_mcp")):
+                 self.fatal_error = "Claude Code settings isolation failed: unexpected hooks, plugins or MCP servers."
+                 self.mgr._error(sid, self.fatal_error)
+                 self.mgr.mcp.revoke(sid, self.token)
+@@ -356,9 +417,25 @@ class Proc:
+                     "max_attempts": ev.get("max_retries")}, sid)
+             if turn and turn.jid:
+                 app.jobs.log(turn.jid, f"retry {ev.get('attempt')}/{ev.get('max_retries')}: {err}\n")
+-        elif turn and turn.jid and st:
++        elif turn and turn.jid and st and st not in ("status", "thinking_tokens"):  # those two come many times a turn
+             app.jobs.log(turn.jid, f"[system {st}]\n")
+ 
++    def _on_rate_limit(self, info: dict, turn: Turn | None) -> None:
++        """`rate_limit_event` after each API call: {"status": "allowed", "rateLimitType": "five_hour",
++        "resetsAt": <epoch s>, "unifiedWindows": {...}} [live]. Anything but "allowed" is shown."""
++        status = str(info.get("status") or "")
++        if not status or status == "allowed":
++            return
++        resets = info.get("resetsAt") if isinstance(info.get("resetsAt"), (int, float)) else None
++        window = str(info.get("rateLimitType") or "").replace("_", " ")
++        text = ("Claude plan limit reached" if status == "rejected" else "Close to the Claude plan limit") + \
++            (f" ({window})" if window else "") + (time.strftime(", resets at %H:%M", time.localtime(resets)) if resets else "")
++        self.app.bus.publish("agent.status", {"kind": "rate_limit", "text": text, "until": resets,
++                                              "retry_in_s": round(max(0.0, resets - time.time()), 1) if resets else None},
++                             self.sid)
++        if turn and turn.jid:
++            self.app.jobs.log(turn.jid, f"rate limit: {status} {window}\n")
++
+     def _on_stream(self, e: dict, turn: Turn | None) -> None:
+         bus, sid, et = self.app.bus, self.sid, e.get("type")
+         if et == "message_start":
+@@ -389,8 +466,8 @@ class Proc:
+             turn.pending_results = []
+ 
+     def _on_assistant(self, m: dict, turn: Turn | None) -> None:
++        """One `assistant` event per content block [live]; blocks of one API message (same id) join one GDW message."""
+         app, sid = self.app, self.sid
+-        self._flush_results(turn)
+         blocks: list[Any] = []
+         for b in m.get("content") or []:
+             if not isinstance(b, dict):
+@@ -398,35 +475,43 @@ class Proc:
+             bt = b.get("type")
+             if bt == "text" and b.get("text"):
+                 blocks.append(TextBlock(text=b["text"]))
+-            elif bt == "thinking":
+-                blocks.append(ThinkingBlock(thinking=b.get("thinking", ""), signature=b.get("signature"),
+-                                            provider="anthropic"))
++            elif bt == "thinking" and b.get("thinking"):  # summarized-away thinking arrives empty (signature only)
++                blocks.append(ThinkingBlock(thinking=b["thinking"], signature=b.get("signature"), provider="anthropic"))
+             elif bt == "tool_use":
+                 inp = b.get("input") if isinstance(b.get("input"), dict) else {}
+                 blocks.append(ToolUseBlock(id=b.get("id") or new_id("toolu_"), name=b.get("name", ""), input=inp))
+         if not blocks:
+             return
+         cli_id = str(m.get("id") or "")
+-        gid = self._msg_ids.pop(cli_id, None) or new_id("msg_")
+         model = m.get("model") or (turn.model if turn else None)
+-        msg = Message(id=gid, role="assistant", content=blocks,
+-                      meta={"model": model, "effort": turn.effort if turn else None, "harness": HARNESS,
+-                            "billing": self.billing})
+-        app.store.add_message(sid, msg)
++        if cli_id and self._open and self._open[0] == cli_id:
++            msg = self._open[1]
++            msg.content = [*msg.content, *blocks]
++            app.store.replace_content(sid, msg.id, msg)
++        else:
++            self._flush_results(turn)
++            gid = self._msg_ids.pop(cli_id, None) or new_id("msg_")
++            msg = Message(id=gid, role="assistant", content=blocks,
++                          meta={"model": model, "effort": turn.effort if turn else None, "harness": HARNESS,
++                                "billing": self.billing})
++            app.store.add_message(sid, msg)
++            self._open = (cli_id, msg) if cli_id else None
+         if turn:
+             turn.saw_output = True
+-        try:
+-            app.items.index_message(sid, msg, provider="anthropic", model=model, source="agent")
+-        except Exception:  # noqa: BLE001 — indexing is a convenience
+-            log.debug("index_message failed", exc_info=True)
++        if any(isinstance(b, TextBlock) for b in blocks):
++            try:
++                app.items.index_message(sid, msg, provider="anthropic", model=model, source="agent")
++            except Exception:  # noqa: BLE001 — indexing is a convenience
++                log.debug("index_message failed", exc_info=True)
+         for b in blocks:
+             if isinstance(b, ToolUseBlock):
+                 app.bus.publish("tool.started", {"tool_use_id": b.id, "name": b.name, "input": b.input,
+-                                                 "message_id": gid}, sid)
++                                                 "message_id": msg.id}, sid)
+                 if turn and turn.jid:
+                     app.jobs.log(turn.jid, f"{b.name}: {json.dumps(b.input)[:200]}\n")
+ 
+     def _on_user(self, m: dict, turn: Turn | None) -> None:
++        self._open = None
+         content = m.get("content")
+         if not isinstance(content, list):
+             return
+@@ -446,6 +531,11 @@ class Proc:
+     def _on_result(self, ev: dict, turn: Turn | None) -> None:
+         origin = ev.get("origin")
+         injected = isinstance(origin, dict) and origin.get("kind") not in (None, "human")
++        self._open = None
++        if ev.get("num_turns") == 0 and RESUME_FAILED.search("; ".join(map(str, ev.get("errors") or []))):
++            # `--resume` of a conversation that's gone: this result comes just before the CLI exits 1 with
++            # "No conversation found with session ID: <id>" on stderr [live]; run_turn starts afresh on the exit.
++            return
+         self._flush_results(turn)
+         self.mgr.record_usage(self.sid, ev, turn)
+         if turn is None or injected:
+@@ -465,6 +555,7 @@ class Proc:
+     def _finish_turn(self, exited: bool = False) -> None:
+         turn, self.turn = self.turn, None
+         self._stream_id = None
++        self._open = None
+         self.app.bus.publish("agent.status", {"kind": None}, self.sid)
+         if turn and not turn.done.done():
+             self._flush_results(turn)
+@@ -504,7 +595,7 @@ class Proc:
+         if await self._settled(turn, wait_s):
+             return
+         try:
+-            self.proc.send_signal(signal.SIGINT)  # ends the turn, keeps the process [docs]
++            self.proc.send_signal(signal.SIGINT)  # ends the turn with a result, then the process exits [live]
+         except ProcessLookupError:
+             return
+         if await self._settled(turn, wait_s):
+@@ -552,6 +643,7 @@ class ClaudeCode:
+         self.procs: dict[str, Proc] = {}
+         self._stopping: dict[str, asyncio.Task] = {}
+         self._spawn_lock: dict[str, asyncio.Lock] = {}
++        self._plans: dict[str, str] = {}  # session → the last plan text Claude Code wrote in Plan mode
+ 
+     @property
+     def cfg(self) -> dict:
+@@ -797,10 +889,13 @@ class ClaudeCode:
+             p = Proc(self, sid, proc, sig, cc_session, mcp_file, resumed=bool(resume), token=token, billing=billing)
+             self.procs[sid] = p
+             if c.get("pre_tool_hook", True):
+-                await p.request({"subtype": "initialize", "hooks": {"PreToolUse": [{
++                info = await p.request({"subtype": "initialize", "hooks": {"PreToolUse": [{
+                     "matcher": None, "hookCallbackIds": [HOOK_ID], "timeout": HOOK_TIMEOUT_S, "onFailure": "block"}]}},
+                     timeout=INIT_TIMEOUT_S)
++                if isinstance(info, dict) and info.get("hooks_applied") is False:  # 2.1.308 answers true [live]
++                    raise RuntimeError("Claude Code didn't apply GameDevWorkstation's PreToolUse hook")
+                 p.hook_ok = True
++                self._check_model(sid, model, info)
+             if not resume:
+                 app.store.update(sid, settings={"claude_code_session": cc_session, "claude_code_since": time.time(),
+                                                 "claude_code_totals": None})
+@@ -839,6 +934,17 @@ class ClaudeCode:
+                 raise
+             raise ClaudeStartError(text, stderr) from None
+ 
++    def _check_model(self, sid: str, model: str, info: Any) -> None:
++        """The initialize response lists the models this login offers ({"value": "haiku", "resolvedModel":
++        "claude-haiku-5-5", ...}) [live]: say so when the session's model isn't one of them."""
++        models = info.get("models") if isinstance(info, dict) else None
++        if not isinstance(models, list) or not models:
++            return
++        known = {str(m.get(k)) for m in models if isinstance(m, dict) for k in ("value", "resolvedModel") if m.get(k)}
++        if model not in known:
++            self.notice(sid, "claude_code_model", f"Claude Code doesn't list {model} for this login; "
++                                                  "the turn may fail with a model error.")
++
+     # -------------------------------------------------------- approvals
+ 
+     def _gate(self, sid: str):
+@@ -850,12 +956,27 @@ class ClaudeCode:
+             return None
+         return make_gate(self.app, lambda: self.app.store.get(sid) or s, _cwd(s), [])
+ 
++    def _note_plan(self, sid: str, name: str, inp: dict) -> None:
++        """Keep the plan text the CLI writes (GDW never reads ~/.claude), for the plan card."""
++        if name == "Write" and isinstance(inp.get("content"), str):
++            self._plans[sid] = inp["content"][:20000]
++        elif name == "Edit" and isinstance(inp.get("new_string"), str) and sid in self._plans:
++            old = str(inp.get("old_string") or "")
++            if old and old in self._plans[sid]:
++                self._plans[sid] = self._plans[sid].replace(old, inp["new_string"], 1)[:20000]
++
++    def _plan_mode(self, sid: str) -> bool:
++        return ((self.app.store.get(sid) or {}).get("mode")) == "plan"
++
+     async def pre_tool_use(self, sid: str, data: dict) -> dict:
+         """The PreToolUse hook callback: GDW's gate for every tool call, like agent_sdk's pre_tool_use."""
+         name = str(data.get("tool_name") or data.get("toolName") or "")
+         inp = data.get("tool_input") if isinstance(data.get("tool_input"), dict) else (data.get("input") or {})
+         if name in DEFERRED_SDK_TOOLS:
+             return {}  # no say: the CLI's mode rules, then the permission prompt tool (GDW's card)
++        if self._plan_mode(sid) and is_plan_file(name, inp):
++            self._note_plan(sid, name, inp)
++            return {}  # Plan mode's plan file (ExitPlanMode reads it): the CLI's plan-mode rules, then decide()
+         if name == PROMPT_TOOL:
+             why: str | None = "mcp__gdw__approve is Claude Code's permission handler, not a tool to call."
+         elif name.startswith(GDW_PREFIX):
+@@ -869,8 +990,8 @@ class ClaudeCode:
+         return {"hookSpecificOutput": out}
+ 
+     async def approve(self, sid: str, args: dict) -> dict:
+-        """mcp__gdw__approve: the --permission-prompt-tool. Input {tool_name, input, tool_use_id} per the
+-        docs ([UNVERIFIED] exact keys: camelCase and tool_input spellings are accepted too)."""
++        """mcp__gdw__approve: the --permission-prompt-tool. Input {tool_name, input, tool_use_id} [live];
++        camelCase and tool_input spellings are accepted too, in case a later CLI changes them."""
+         a = args.get("request") if isinstance(args.get("request"), dict) else args
+         name = str(a.get("tool_name") or a.get("toolName") or a.get("name") or "")
+         inp = next((a[k] for k in ("input", "tool_input", "toolInput", "arguments") if isinstance(a.get(k), dict)), {})
+@@ -885,7 +1006,8 @@ class ClaudeCode:
+             return await self._ask_question(sid, inp)
+         if name == "ExitPlanMode":
+             res = await app.approvals.ask(sid, "claude_code_plan", {
+-                "subject": "Claude Code's plan", "markdown": str(inp.get("plan") or "")[:20000],
++                "subject": "Claude Code's plan",
++                "markdown": str(inp.get("plan") or self._plans.get(sid) or "(The plan is in Claude Code's plan file.)")[:20000],
+                 "buttons": [{"id": "approve", "label": "Approve plan (switch to Ask mode)", "decision": "approve",
+                              "style": "primary"},
+                             {"id": "keep", "label": "Keep planning", "decision": "deny", "style": "ghost"}],
+@@ -899,6 +1021,9 @@ class ClaudeCode:
+                     (f" Feedback: {res.get('note')}" if res.get("note") else "")}
+         if name == PROMPT_TOOL:
+             return {"behavior": "deny", "message": "Not a tool to call."}
++        if self._plan_mode(sid) and is_plan_file(name, inp):
++            self._note_plan(sid, name, inp)
++            return allow  # the plan text itself, in the CLI's own plans folder; the plan card comes next
+         if name.startswith(GDW_PREFIX):
+             return allow  # GDW's own tool: its own checks run when it's called
+         gate = self._gate(sid)
+@@ -926,19 +1051,20 @@ class ClaudeCode:
+     # ------------------------------------------------------------ usage
+ 
+     def record_usage(self, sid: str, ev: dict, turn: Turn | None) -> None:
+-        """Record the increase in CLI totals, retaining the conversation id and process pid.
+-        A new conversation or totals that reset on process restart count in full.
+-        Tokens may be per turn or cumulative: choose the reading whose price is closer to
+-        the cumulative cost delta.
+-        Live logged-in CLI behavior remains unverified; the fake covers both restart shapes."""
++        """One usage row per `result`. Observed [live]: `usage` holds this turn's own tokens (zero for a
++        turn that was interrupted mid-stream), while `total_cost_usd` and `modelUsage` are running totals
++        for the conversation that carry across --resume. So the tokens are recorded as they are and the
++        cost is the increase over the stored total of the same conversation (a total that went down,
++        e.g. a conversation the CLI rebuilt, counts in full)."""
+         app = self.app
+         s = app.store.get(sid)
+         if not s:
+             return
+         u = ev.get("usage") or {}
+-        now = {"cost": float(ev.get("total_cost_usd") or 0.0), "in": int(u.get("input_tokens") or 0),
+-               "out": int(u.get("output_tokens") or 0), "cr": int(u.get("cache_read_input_tokens") or 0),
+-               "cw": int(u.get("cache_creation_input_tokens") or 0)}
++        usage = Usage(input_tokens=int(u.get("input_tokens") or 0), output_tokens=int(u.get("output_tokens") or 0),
++                      cache_read_tokens=int(u.get("cache_read_input_tokens") or 0),
++                      cache_write_tokens=int(u.get("cache_creation_input_tokens") or 0))
++        cost = float(ev.get("total_cost_usd") or 0.0)
+         last = s["settings"].get("claude_code_totals") or {}
+         if not isinstance(last, dict):
+             last = {}
+@@ -948,31 +1074,17 @@ class ClaudeCode:
+             cs = p.cc_session if p else s["settings"].get("claude_code_session")
+         if not valid_claude_code_session(cs):
+             cs = None
+-        pid = p.proc.pid if p else None
+         if last.get("session_id", s["settings"].get("claude_code_session")) != cs:
+             last = {}
+-        # Resume may preserve conversation totals or reset them per process. On a new pid,
+-        # a smaller total identifies a per-process restart: record that first total in full.
+-        # Otherwise subtract the stored conversation baseline to avoid counting it twice.
+-        if last.get("pid") != pid and now["cost"] < float(last.get("cost") or 0):
+-            last = {}
+-        delta = {k: (v - float(last.get(k) or 0) if v >= float(last.get(k) or 0) else v) for k, v in now.items()}
++        before = float(last.get("cost") or 0.0)
+         model = turn.model if turn else self._model(s)
+-
+-        def usage_of(d: dict) -> Usage:
+-            return Usage(input_tokens=int(d["in"]), output_tokens=int(d["out"]), cache_read_tokens=int(d["cr"]),
+-                         cache_write_tokens=int(d["cw"]))
+-
+-        cand = [usage_of(delta), usage_of(now)]
+-        try:
+-            mcfg = app.config.model(model)
+-            if delta["cost"] > 0:
+-                cand.sort(key=lambda x: abs(compute_cost(mcfg, x) - delta["cost"]))
+-        except Exception:  # noqa: BLE001 — unknown model: the delta reading
+-            mcfg = None
+-        usage = cand[0]
+-        usage.cost_usd = delta["cost"] if ev.get("total_cost_usd") is not None else (
+-            compute_cost(mcfg, usage) if mcfg else 0.0)
++        if ev.get("total_cost_usd") is not None:
++            usage.cost_usd = cost - before if cost >= before else cost
++        else:
++            try:
++                usage.cost_usd = compute_cost(app.config.model(model), usage)
++            except Exception:  # noqa: BLE001 — unknown model: no estimate
++                usage.cost_usd = 0.0
+         billing = p.billing if p else ("api" if (self.probe.cached() or {}).get("bills_api") else "subscription")
+         app.usage.record(provider="anthropic", model=model, usage=usage, session_id=sid,
+                          profile="subscription" if billing == "subscription" else "default", role="main", run_id=f"main:{sid}",
+@@ -980,8 +1092,8 @@ class ClaudeCode:
+                          latency_ms=int(ev.get("duration_ms") or ((time.monotonic() - turn.t0) * 1000 if turn else 0)),
+                          ok=not ev.get("is_error"), billing=billing,
+                          error_kind="auth" if turn and turn.login_error else None)
+-        app.store.update(sid, settings={"claude_code_totals": {**now, "session_id": cs, "pid": pid},
+-                                        **({"claude_code_session": cs} if cs else {})})
++        totals = {"cost": cost if ev.get("total_cost_usd") is not None else before, "session_id": cs}
++        app.store.update(sid, settings={"claude_code_totals": totals, **({"claude_code_session": cs} if cs else {})})
+ 
+     # -------------------------------------------------------- lifecycle
+ 
+@@ -1005,6 +1117,7 @@ class ClaudeCode:
+         await asyncio.gather(*(self.close_session(sid) for sid in list(self.procs)), return_exceptions=True)
+ 
+     async def purge_session(self, sid: str) -> None:
++        self._plans.pop(sid, None)
+         await self.close_session(sid)
+         remove_claude_code_folder(sid)
+ 
+diff --git a/backend/gamedevworkstation/features/gdw_mcp.py b/backend/gamedevworkstation/features/gdw_mcp.py
+index efb9990..764cb67 100644
+--- a/backend/gamedevworkstation/features/gdw_mcp.py
++++ b/backend/gamedevworkstation/features/gdw_mcp.py
+@@ -8,7 +8,10 @@ rebinding) and no foreign Origin (no browser page can call it).
+ 
+ Transport: the request/response subset of MCP Streamable HTTP. Every POSTed JSON-RPC request gets
+ an `application/json` reply; notifications get 202; GET (the optional server-to-client SSE stream)
+-and DELETE get 405. The MCP SDK's StreamableHTTPSessionManager needs its own task-group lifespan and
++and DELETE get 405. claude 2.1.308 works with exactly this [live]: it sends the bearer header from
++--mcp-config, probes `server/discover` (answered "Method not found", it then falls back), sends
++`initialize` (protocol 2025-11-25), `notifications/initialized`, one GET (405 is fine) and
++`tools/list`; `tools/call` params carry `_meta` ({"claudecode/toolUseId", "progressToken"}). The MCP SDK's StreamableHTTPSessionManager needs its own task-group lifespan and
+ doesn't hand the request's bearer identity to tool handlers in stateless mode, so this small route
+ is used instead; tests drive it with the MCP SDK's own client.
+ 
+diff --git a/backend/gamedevworkstation/features/sessions_mgmt.py b/backend/gamedevworkstation/features/sessions_mgmt.py
+index ffdec21..c27fad6 100644
+--- a/backend/gamedevworkstation/features/sessions_mgmt.py
++++ b/backend/gamedevworkstation/features/sessions_mgmt.py
+@@ -102,6 +102,8 @@ class Titler:
+         s = self.app.store.get(sid)
+         if not s or not self.enabled() or s["deleted"]:
+             return False
++        if s.get("harness") == "claude_code":
++            return False  # runs on the user's subscription: no API-billed title call (keeps the first-message title)
+         src = s["settings"].get("title_source")
+         if not (s["title"] == "New session" or src == "message"):
+             return False  # named by the user, a scheduled task, a copy, or already auto-titled
+diff --git a/docs/GUIDE.md b/docs/GUIDE.md
+index 4273cec..9800535 100644
+--- a/docs/GUIDE.md
++++ b/docs/GUIDE.md
+@@ -155,7 +155,7 @@ keep an explicit **Save**.
+   `harness_git_exclude` (default `true`) and `clone_when_open` (`ask` | `never` | `always`).
+   Settings → Unity edits it.
+ - `[claude_code]` [Claude Code sessions](#claude-code-sessions): `cli_path` (empty: find `claude`),
+-  `load_user_mcp` (default `false`), `setting_sources` (default `""`, safe mode), `pre_tool_hook`
++  `load_user_mcp` (default `false`), `setting_sources` (default `""`: none), `pre_tool_hook`
+   (default `true`), `max_processes` (default 4) and `interrupt_wait_s` (default 5). Settings →
+   Claude Code edits it.
+ - `[data_policy]` which providers may receive files you mark sensitive.
+@@ -689,7 +689,9 @@ stay in sync:
+ 
+ ## Claude Code sessions
+ 
+-**Experimental: not yet verified against a live logged-in CLI.**
++Checked against claude 2.1.308 logged in with a claude.ai (Max) subscription; the redacted captures
++are in `tests/fixtures/claude_stream/` and the test CLI replays them. A later Claude Code release can
++change these details: see Troubleshooting.
+ 
+ **What it is.** A session on the **Claude Code (subscription)** harness runs your own `claude` CLI
+ (Claude Code, installed by you and never modified or bundled) inside GameDevWorkstation. You chat
+@@ -736,46 +738,59 @@ a `0600` file in the session's data folder) that only works for that session and
+ the process ends (the token is revoked); the MCP config file is then removed. Purging a GDW session removes only its
+ `data_dir/claude_code/<session-id>/` folder. Your own Claude Code MCP servers and a folder's
+ `.mcp.json` are excluded by `--strict-mcp-config` unless you turn on Settings → Claude Code →
+-**Your MCP servers** (`[claude_code].load_user_mcp`); safe mode also disables customization loading.
++**Your MCP servers** (`[claude_code].load_user_mcp`); with Settings files **None** your own servers
++aren't loaded either. Claude Code loads these tools on demand (its ToolSearch tool), so the first use
++of a `mcp__gdw__*` tool in a conversation takes one extra step.
+ 
+ **Approvals and modes.** Every tool call passes GameDevWorkstation's checks first (a `PreToolUse`
+ hook, on by default: folder scope, sensitive files, git metadata, the before-write snapshot for the Changes card),
+ then the usual cards: edits in Ask, commands, and anything else Claude Code would ask about (through
+-`--permission-prompt-tool mcp__gdw__approve`). Questions Claude Code asks you get a card with its
+-options. Ask runs Claude Code in `manual`, Accept edits in `acceptEdits` and Plan only in `plan`; in
+-Plan known file edits and Bash commands are refused, and approving Claude Code's plan card switches the session to
+-Ask. Unrecognized non-GDW tools still get an approval card in Plan mode; the harness cannot classify
++`--permission-prompt-tool mcp__gdw__approve`). Questions Claude Code asks you (AskUserQuestion) get a
++card with its options, and your pick goes back as its answer. Ask runs Claude Code in `manual`, Accept
++edits in `acceptEdits` and Plan only in `plan`; in Plan known file edits and Bash commands are
++refused, except the plan file Claude Code writes in its own `~/.claude/plans/` folder (one `.md` file
++directly in that folder) before it asks to leave Plan mode. That request (ExitPlanMode) shows
++GameDevWorkstation's plan card with the plan text; approving it switches the session to Ask, and
++**Keep planning** sends your feedback back. Unrecognized non-GDW tools still get an approval card in Plan mode; the harness cannot classify
+ their effects. GameDevWorkstation never starts Claude Code in `bypassPermissions`, `dontAsk` or `auto`.
+ Hook registration failure, timeout or cancellation ends the process with an error; there is no silent
+ fallback. An explicit `pre_tool_hook=false` disables that hook.
+ 
+-**Settings isolation.** **Settings files** defaults to **None (safe mode: your ~/.claude hooks,
+-plugins and settings files are ignored)**. This passes `--safe-mode`, disabling custom `CLAUDE.md`,
+-skills, installed plugins, hooks, MCP servers, custom commands and agents, and output styles.
+-Admin-managed policies still apply; auth, model selection, built-in tools and plugins, and permissions
+-work normally. Selecting a subset of `user,project,local` instead passes `--setting-sources=<list>`
+-and omits safe mode. Startup fails closed if the CLI reports hooks or plugins (even with explicit
+-setting sources), or if an MCP server
+-other than `gdw` appears while **Your MCP servers** is off; missing fields are accepted. GDW explicitly
++**Settings isolation.** **Settings files** defaults to **None (your ~/.claude hooks, plugins and
++settings files are ignored)**. This passes an empty `--setting-sources=`: no user, project or local
++settings, so no custom `CLAUDE.md`, skills, agents, installed plugins or their hooks. Admin-managed
++policies still apply; auth, model selection, built-in tools and permissions work normally.
++`--safe-mode` isn't used: in Claude Code 2.1.308 it also drops the `--mcp-config` servers, so
++GameDevWorkstation's tools and approval cards would be missing (and it still lists your installed
++plugins). Selecting a subset of `user,project,local` instead passes `--setting-sources=<list>`.
++Startup fails closed if the CLI reports hooks or plugins other than its own built-in ones (even with
++explicit setting sources), if it doesn't confirm the PreToolUse hook (`hooks_applied`), or if an MCP
++server other than `gdw` appears while **Your MCP servers** is off; missing fields are accepted. If
++the session's model isn't in the list of models Claude Code offers your login, the chat says so. GDW explicitly
+ adds the session folder's `CLAUDE.md`, enabled GDW skills and context pack to the appended system
+ prompt, capped at 64 KB with a truncation note. CLI stderr and errors redact bearer tokens and API keys.
+ 
+-**Usage.** Each turn records the change in Claude Code's reported tokens and cost. The cost is
+-Claude Code's own estimate: for subscription logins, My usage shows it as **Claude subscription
++**Usage.** Each turn records the tokens Claude Code reports for that turn and the increase of its
++running cost estimate (which counts the whole conversation, across `--resume`). The cost is Claude
++Code's own list-price estimate: for subscription logins, My usage shows it as **Claude subscription
+ (estimated)**, outside daily and session spend limits. API key logins record API spend and use those
+-limits. Totals retain their conversation id and process pid: after a restart a smaller total counts
+-in full, while continuing conversation totals contribute only their increase. Your plan's real limits
+-(its usage windows) aren't visible to GameDevWorkstation; when Claude Code reports a rate limit the
+-chat shows it retrying.
++limits. A turn you stop mid-reply reports no tokens. Claude Code reports your plan's usage windows
++after each request; when one is used up or close to it, the chat shows when it resets, and when
++Claude Code retries a rate limit the chat shows it retrying. These sessions skip the automatic
++title (which would call the API): they keep the title taken from your first message.
+ 
+-**Limits.** Stop sends Claude Code an interrupt (then SIGINT, then ends the process). Subagents,
++**Limits.** Stop sends Claude Code an interrupt, which ends the turn and keeps the process; if that
++doesn't work, SIGINT (which ends the turn and the process), then the process is killed. Subagents,
+ delegation, fleet waves, campaigns and workflows need the built-in loop. GameDevWorkstation's
+ compaction and context meter don't apply (Claude Code compacts by itself). Changes to the system
+ prompt (mode notes, skills, `CLAUDE.md`) reach a resumed conversation only when it starts anew,
+ because Claude Code keeps the first one. Messages of Claude Code's own subagents go to the turn's log
+-in Background tasks, not the chat. Some wire details (the permission prompt's exact JSON, `claude
+-auth status` when logged in) couldn't be checked on a logged-in machine yet and are read
+-defensively; see Troubleshooting if a session misbehaves after a Claude Code update.
++in Background tasks, not the chat. Not checked on a live login: an API key login (`billing='api'`
++path; only the subscription login was tried), the Opus, Sonnet and Fable model ids in a real turn
++(they are in the model list Claude Code reports for a Max login; Haiku 5.5 was used), and `can_use_tool`
++control requests (Claude Code sends them only with `--permission-prompt-tool stdio`, which GDW doesn't
++use). Those paths are read defensively; see Troubleshooting if a session misbehaves after a Claude
++Code update.
+ 
+ **Anthropic's policy.** Anthropic's legal and compliance page for Claude Code allows an end user to
+ sign in to the unmodified Claude Code binary with their own subscription, while products built for
+@@ -1345,8 +1360,8 @@ The data and log folders are owner-only (0700) and the database, config, `runtim
+   `claude auth status`. Log in with `claude auth login` in a terminal, then press **Retry** on the
+   card. If a session stops working after a Claude Code update, the turn's log in Background tasks
+   and the error card show the CLI's redacted message. Hook initialization failure ends the process
+-  with an error, without silently falling back. The feature is experimental: not yet verified against
+-  a live logged-in CLI.
++  with an error, without silently falling back. It was checked against Claude Code 2.1.308; after an
++  update, compare the CLI's output with the captures in `tests/fixtures/claude_stream/`.
+ - **Trailer: "ffmpeg not found"** (exit code 3) — `brew install ffmpeg`, or set `TRAILER_FFMPEG` to the ffmpeg
+   binary. `python3 skills/trailer-maker/scripts/trailer_edl.py doctor` shows what it found.
+ - **Trailer: the Recorder never starts** — the Editor was in batchmode (use the GUI editor), the project has compile
+diff --git a/frontend/src/components/ClaudeCode.tsx b/frontend/src/components/ClaudeCode.tsx
+index fb2b524..42b7074 100644
+--- a/frontend/src/components/ClaudeCode.tsx
++++ b/frontend/src/components/ClaudeCode.tsx
+@@ -12,7 +12,7 @@ export const HARNESSES: [string, string][] = [
+   ["claude_code", "Claude Code (subscription)"],
+ ];
+ export const HARNESS_HINT: Record<string, string> = {
+-  claude_code: "Experimental: runs your own claude CLI with your own Claude login. API key logins count toward spend limits.",
++  claude_code: "Runs your own claude CLI with your own Claude login. API key logins count toward spend limits.",
+ };
+ 
+ export type ClaudeStatus = {
+@@ -124,7 +124,7 @@ export function ClaudeCodeSettings({ st, save, Row, TextSetting }: {
+       <h2 className="text-base font-semibold mb-1">Claude Code</h2>
+       <p className="text-[12.5px] text-muted mb-3">
+         "Claude Code (subscription)" sessions run your own <code className="font-mono">claude</code> CLI with your own Claude login.
+-        Experimental: not yet verified against a live logged-in CLI. Subscription usage is shown as an estimate;
++        Checked against claude 2.1.308 on a claude.ai subscription login. Subscription usage is shown as an estimate;
+         API key logins count toward API spend limits. GameDevWorkstation passes no API key and never reads your tokens.
+       </p>
+       <Row label="claude CLI" noMark>
+@@ -149,10 +149,10 @@ export function ClaudeCodeSettings({ st, save, Row, TextSetting }: {
+         <input type="checkbox" checked={!!c.load_user_mcp} aria-label="Load my Claude Code MCP servers"
+           onChange={(e) => save({ claude_code: { load_user_mcp: e.target.checked } }, "Your MCP servers")} />
+       </Row>
+-      <Row label="Settings files" hint="None uses safe mode: custom CLAUDE.md, skills, plugins, hooks, MCP servers, commands, agents and output styles are disabled; admin policies still apply">
++      <Row label="Settings files" hint="None loads no user, project or local settings: no custom CLAUDE.md, skills, agents, plugins or their hooks; admin policies still apply">
+         <select className="input max-w-full" value={sources} aria-label="Claude Code setting sources"
+           onChange={(e) => save({ claude_code: { setting_sources: e.target.value } }, "Settings files")}>
+-          <option value="">None (safe mode: your ~/.claude hooks, plugins and settings files are ignored)</option>
++          <option value="">None (your ~/.claude hooks, plugins and settings files are ignored)</option>
+           <option value="user">User (~/.claude)</option>
+           <option value="user,project">User and project</option>
+           <option value="user,project,local">User, project and local</option>

@@ -1,0 +1,354 @@
+{
+ "task": "new-session-screen-claude-style-composer-claude-a0b6e5f",
+ "validated_at": "2026-11-20T10:00:14Z",
+ "reference_passed": true,
+ "flawed": 15,
+ "killed": 11,
+ "kill_rate": 0.733,
+ "survivors": [
+  {
+   "id": "mutant-3",
+   "kind": "mutant",
+   "description": ">= to > in: if (out.length >= max) break;",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/ClaudeCode.test.tsx",
+    "frontend/src/components/Composer.test.tsx",
+    "frontend/src/lib/mdlite.test.tsx",
+    "tests/conftest.py",
+    "tests/test_campaigns.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-4",
+   "kind": "mutant",
+   "description": "> to >= in: const suggestionList = suggestions.length > 0 && (",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/ClaudeCode.test.tsx",
+    "frontend/src/components/Composer.test.tsx",
+    "frontend/src/lib/mdlite.test.tsx",
+    "tests/conftest.py",
+    "tests/test_campaigns.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-6",
+   "kind": "mutant",
+   "description": "true to false in: if (cmd === \"/workflow\" && subscription) return actions.toast(WORKFLOW_UNAVAILAB",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/ClaudeCode.test.tsx",
+    "frontend/src/components/Composer.test.tsx",
+    "frontend/src/lib/mdlite.test.tsx",
+    "tests/conftest.py",
+    "tests/test_campaigns.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-7",
+   "kind": "mutant",
+   "description": "false to true in: if (skillMenu) return setSkillMenu(false);",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/ClaudeCode.test.tsx",
+    "frontend/src/components/Composer.test.tsx",
+    "frontend/src/lib/mdlite.test.tsx",
+    "tests/conftest.py",
+    "tests/test_campaigns.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  }
+ ],
+ "outcomes": [
+  {
+   "id": "noop",
+   "kind": "noop",
+   "description": "no change: the start state",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/ClaudeCode.test.tsx",
+    "frontend/src/components/Composer.test.tsx",
+    "frontend/src/lib/mdlite.test.tsx",
+    "tests/conftest.py",
+    "tests/test_campaigns.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-1",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/features/campaigns.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/ClaudeCode.test.tsx",
+    "frontend/src/components/Composer.test.tsx",
+    "frontend/src/lib/mdlite.test.tsx",
+    "tests/conftest.py",
+    "tests/test_campaigns.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-2",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/features/claude_code.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/ClaudeCode.test.tsx",
+    "frontend/src/components/Composer.test.tsx",
+    "frontend/src/lib/mdlite.test.tsx",
+    "tests/conftest.py",
+    "tests/test_campaigns.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-3",
+   "kind": "partial",
+   "description": "leaves out hunk 2 of backend/gamedevworkstation/features/claude_code.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/ClaudeCode.test.tsx",
+    "frontend/src/components/Composer.test.tsx",
+    "frontend/src/lib/mdlite.test.tsx",
+    "tests/conftest.py",
+    "tests/test_campaigns.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-4",
+   "kind": "partial",
+   "description": "leaves out hunk 3 of backend/gamedevworkstation/features/claude_code.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/ClaudeCode.test.tsx",
+    "frontend/src/components/Composer.test.tsx",
+    "frontend/src/lib/mdlite.test.tsx",
+    "tests/conftest.py",
+    "tests/test_campaigns.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-1",
+   "kind": "mutant",
+   "description": "== to != in: if sys.platform == \"darwin\":",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/ClaudeCode.test.tsx",
+    "frontend/src/components/Composer.test.tsx",
+    "frontend/src/lib/mdlite.test.tsx",
+    "tests/conftest.py",
+    "tests/test_campaigns.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-2",
+   "kind": "mutant",
+   "description": "!= to == in: if (session.get(\"harness\") or \"builtin\") != \"builtin\":",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/ClaudeCode.test.tsx",
+    "frontend/src/components/Composer.test.tsx",
+    "frontend/src/lib/mdlite.test.tsx",
+    "tests/conftest.py",
+    "tests/test_campaigns.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-3",
+   "kind": "mutant",
+   "description": ">= to > in: if (out.length >= max) break;",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/ClaudeCode.test.tsx",
+    "frontend/src/components/Composer.test.tsx",
+    "frontend/src/lib/mdlite.test.tsx",
+    "tests/conftest.py",
+    "tests/test_campaigns.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-4",
+   "kind": "mutant",
+   "description": "> to >= in: const suggestionList = suggestions.length > 0 && (",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/ClaudeCode.test.tsx",
+    "frontend/src/components/Composer.test.tsx",
+    "frontend/src/lib/mdlite.test.tsx",
+    "tests/conftest.py",
+    "tests/test_campaigns.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-5",
+   "kind": "mutant",
+   "description": "True to False in: d.mkdir(parents=True, exist_ok=True)",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/ClaudeCode.test.tsx",
+    "frontend/src/components/Composer.test.tsx",
+    "frontend/src/lib/mdlite.test.tsx",
+    "tests/conftest.py",
+    "tests/test_campaigns.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-6",
+   "kind": "mutant",
+   "description": "true to false in: if (cmd === \"/workflow\" && subscription) return actions.toast(WORKFLOW_UNAVAILAB",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/ClaudeCode.test.tsx",
+    "frontend/src/components/Composer.test.tsx",
+    "frontend/src/lib/mdlite.test.tsx",
+    "tests/conftest.py",
+    "tests/test_campaigns.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-7",
+   "kind": "mutant",
+   "description": "false to true in: if (skillMenu) return setSkillMenu(false);",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/ClaudeCode.test.tsx",
+    "frontend/src/components/Composer.test.tsx",
+    "frontend/src/lib/mdlite.test.tsx",
+    "tests/conftest.py",
+    "tests/test_campaigns.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-8",
+   "kind": "mutant",
+   "description": "and to or in: if legacy.exists() or ((s.get(\"settings\") or {}).get(\"claude_code_session\") and ",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/ClaudeCode.test.tsx",
+    "frontend/src/components/Composer.test.tsx",
+    "frontend/src/lib/mdlite.test.tsx",
+    "tests/conftest.py",
+    "tests/test_campaigns.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "tamper-delete",
+   "kind": "tamper",
+   "description": "no fix; deletes the hidden tests",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/ClaudeCode.test.tsx",
+    "frontend/src/components/Composer.test.tsx",
+    "frontend/src/lib/mdlite.test.tsx",
+    "tests/conftest.py",
+    "tests/test_campaigns.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "tamper-skip",
+   "kind": "tamper",
+   "description": "no fix; rewrites the hidden tests to pass",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "frontend/src/components/Chat.test.tsx",
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_new_session.py",
+    "frontend/src/components/ClaudeCode.test.tsx",
+    "frontend/src/components/Composer.test.tsx",
+    "frontend/src/lib/mdlite.test.tsx",
+    "tests/conftest.py",
+    "tests/test_campaigns.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  }
+ ],
+ "reference_steps": [
+  {
+   "name": "tests",
+   "kind": "command",
+   "passed": true,
+   "exit": 0,
+   "duration_s": 72.6868748748675,
+   "output": "........................................................................ [ 46%]\n........................................................................ [ 92%]\n...........                                                              [100%]\n155 passed in 67.55s (0:01:07)\n",
+   "environment": false,
+   "detail": {}
+  }
+ ],
+ "ok": true
+}

@@ -1,0 +1,202 @@
+diff --git a/backend/gamedevworkstation/features/claude_code.py b/backend/gamedevworkstation/features/claude_code.py
+index 2b701a4..dcc92e2 100644
+--- a/backend/gamedevworkstation/features/claude_code.py
++++ b/backend/gamedevworkstation/features/claude_code.py
+@@ -66,7 +66,9 @@ from fastapi import APIRouter, Body, FastAPI, HTTPException
+ 
+ from ..children import CHILDREN
+ from ..config import data_dir, sessions_dir
+-from ..core.types import Message, TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock, Usage, new_id
++from ..core.media import cap_media
++from ..core.types import (AudioBlock, FileBlock, ImageBlock, Message, TextBlock, ThinkingBlock, ToolResultBlock,
++                          ToolUseBlock, Usage, new_id)
+ from ..providers.base import compute_cost
+ from ..skills import turn_skill_segments
+ from ..store import remove_claude_code_folder, valid_claude_code_session
+@@ -222,6 +224,32 @@ def build_argv(cli: str, *, session_id: str | None, resume: str | None, model: s
+     return argv
+ 
+ 
++MAX_TURN_MEDIA = 20_000_000  # base64 chars of attachments in one CLI message (the API caps requests at 32 MB)
++
++
++def _user_content(msgs: list[Message], recap: str | None) -> list[dict]:
++    """The `content` blocks of one CLI user message: the messages' text with their attachments inline,
++    as the Anthropic API takes them (images and PDFs base64, text files as text documents, audio as its
++    transcript), so Claude Code sees them without reading a path outside its folder. Each attachment
++    follows a one-line label with its name; the oldest are left out (with a note) over MAX_TURN_MEDIA."""
++    from ..providers.anthropic_provider import block_to_wire
++
++    out: list[dict] = [{"type": "text", "text": recap}] if recap else []
++    for m in msgs:
++        for b in m.content:
++            if isinstance(b, TextBlock):
++                if b.text:
++                    out.append({"type": "text", "text": b.text})
++            elif isinstance(b, (ImageBlock, FileBlock, AudioBlock)):
++                out.append({"type": "text", "text": f"[Attached {b.type}: {b.name or 'attachment'}]"})
++                if isinstance(b, AudioBlock) and not b.transcript:  # the built-in note names a tool Claude Code lacks
++                    out.append({"type": "text", "text": "[Audio: no transcript yet, so Claude can't hear it]"})
++                elif (w := block_to_wire(b, "user")) is not None:
++                    out.append(w)
++    wire = cap_media([{"role": "user", "content": out}], MAX_TURN_MEDIA)
++    return wire[0]["content"]
++
++
+ def _block_text(content: Any) -> str:
+     if isinstance(content, str):
+         return content
+@@ -735,11 +763,14 @@ class ClaudeCode:
+         new = [m for m in tail if m.role == "user" and not m.meta.get("tool_results")]
+         if not new:
+             raise RuntimeError("No user message to answer")
+-        text = "\n\n".join(t for t in (_prompt_text(m) for m in new) if t)
++        recap_text = None
+         if recap and (h := self.app.extensions.get("harnesses")) is not None:
+             if r := h._recap(sid, new[0]):  # type: ignore[attr-defined]
+-                text = f"Earlier in this conversation:\n{r}\n\nNow: {text}"
+-        return text, new[-1].id
++                recap_text = f"Earlier in this conversation:\n{r}\n\nNow: "
++        if not any(isinstance(b, (ImageBlock, FileBlock, AudioBlock)) for m in new for b in m.content):
++            text = "\n\n".join(t for t in (_prompt_text(m) for m in new) if t)
++            return (recap_text or "") + text, new[-1].id
++        return _user_content(new, recap_text), new[-1].id
+ 
+     def _system_prompt(self, s: dict, cwd: Path) -> str:
+         app = self.app
+diff --git a/docs/GUIDE.md b/docs/GUIDE.md
+index 3db3487..e1500c0 100644
+--- a/docs/GUIDE.md
++++ b/docs/GUIDE.md
+@@ -630,8 +630,7 @@ Every new session from this screen runs **Claude Code on your Claude subscriptio
+ `[sessions].default_harness`); there's no harness choice. Sessions made before keep their harness,
+ shown read-only in the Environment card. If the `claude` CLI is missing or logged out, the screen
+ shows a slim notice (*Claude Code isn't logged in: run `claude auth login`*) with Copy and Retry.
+-The screen has no attachments (Claude Code reads only its folder); attach files once the session
+-has started.
++The paperclip (or drop/paste onto the card) attaches files to the first message, as in any session.
+ 
+ **The session menu** has:
+ 
+@@ -733,6 +732,14 @@ directory and the folder scope of its approvals, removed when the session is del
+ Older chat-only sessions keep `<data>/sessions/<session>` so Claude can find their transcripts
+ when resuming.
+ 
++**Attachments.** The paperclip works as in other sessions. Attached files go to Claude Code inside the
++message itself, the way the API takes them: images (already converted and shrunk at upload) and PDFs
++as base64, text files as text, audio as its transcript (when there is one), and other binary files
++as a note. Each one comes after a `[Attached image: name]` line. Claude Code doesn't get the file's
++path and doesn't need to read anything outside its folder. Up to about 20 MB of attachments (base64)
++go in one message; the oldest beyond that are replaced by a note. Files marked sensitive follow your
++data policy for Anthropic.
++
+ **Your login.** These sessions use the Claude account you logged in to with `claude auth login`.
+ GameDevWorkstation passes no API key and never uses `--bare`. Every CLI process (including status
+ probes) receives an env allowlist: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_*`, `TERM`,
+diff --git a/frontend/src/components/Composer.tsx b/frontend/src/components/Composer.tsx
+index 2cff04d..c11453b 100644
+--- a/frontend/src/components/Composer.tsx
++++ b/frontend/src/components/Composer.tsx
+@@ -18,7 +18,7 @@ export const MODES: Record<string, string> = { ask: "Ask before edits", accept_e
+ export type ComposerDraft = {
+   set: (body: { model?: string; effort?: string; mode?: string }) => void;
+   /** Create the session and send the first message; false when it didn't start (the text stays). */
+-  start: (text: string, skill: string | null) => Promise<boolean>;
++  start: (text: string, skill: string | null, attachments: Att[]) => Promise<boolean>;
+   /** The card's two control rows (location, folder, model; effort, mode). Tools and Send are added. */
+   rows: [ReactNode, ReactNode];
+   placeholder: string;
+@@ -198,10 +198,10 @@ export function Composer({ session, running, draft }: { session: Session; runnin
+   }, [text, commands, taskHits, taskCols, skills, workflows]);
+ 
+   const addFiles = async (files: FileList | File[]) => {
+-    if (draft) return; // the new-session screen has no attachments (Claude Code reads only its folder)
+     setBusy(true);
+     try {
+-      const ups = await Promise.all(Array.from(files).map((f) => upload(f, session.id)));
++      // The new-session screen has no session yet: the files are filed under it when the first message is sent.
++      const ups = await Promise.all(Array.from(files).map((f) => upload(f, draft ? undefined : session.id)));
+       setAtts((a) => [...a, ...ups]);
+       const notes = ups.map((u) => u.note).filter(Boolean); // e.g. a HEIC photo converted to JPEG for the model
+       if (notes.length) actions.toast(notes.join(" "));
+@@ -321,7 +321,7 @@ export function Composer({ session, running, draft }: { session: Session; runnin
+     setBusy(true);
+     try {
+       if (draft) {
+-        if (!(await draft.start(t, sk))) return;
++        if (!(await draft.start(t, sk, atts))) return;
+       } else await post(`/sessions/${session.id}/messages`, { text: t, attachments: atts, ...(sk ? { skill: sk } : {}) });
+       setText("");
+       setAtts([]);
+@@ -435,7 +435,7 @@ export function Composer({ session, running, draft }: { session: Session; runnin
+       className={draft ? "w-full resize-none bg-transparent outline-none focus-visible:outline-none px-1 py-0.5 min-h-[52px] max-h-72 text-[15px] leading-[1.6] placeholder:text-faint"
+         : "flex-1 resize-none bg-transparent outline-none focus-visible:outline-none py-1 max-h-60 leading-6"}
+       onChange={(e) => { setText(e.target.value); setSel(0); e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, draft ? 288 : 240)}px`; }}
+-      onPaste={(e) => { if (!draft && e.clipboardData.files.length) { e.preventDefault(); addFiles(e.clipboardData.files); } }}
++      onPaste={(e) => { if (e.clipboardData.files.length) { e.preventDefault(); addFiles(e.clipboardData.files); } }}
+       onKeyDown={(e) => {
+         if (suggestions.length && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+           e.preventDefault();
+@@ -459,12 +459,17 @@ export function Composer({ session, running, draft }: { session: Session; runnin
+   if (draft) {
+     // The new-session card: the editor, then the screen's settings and Tools, then Send.
+     return (
+-      <div className="relative rounded-[20px] border border-line surface-raised px-4 pt-3.5 pb-2.5 shadow-[0_1px_2px_rgb(0_0_0/0.04),0_6px_24px_-8px_rgb(0_0_0/0.10)] focus-within:border-[color-mix(in_srgb,var(--action)_35%,var(--line))]">
++      <div className={`relative rounded-[20px] border border-line surface-raised px-4 pt-3.5 pb-2.5 shadow-[0_1px_2px_rgb(0_0_0/0.04),0_6px_24px_-8px_rgb(0_0_0/0.10)] focus-within:border-[color-mix(in_srgb,var(--action)_35%,var(--line))] ${drag ? "outline-2 outline-dashed outline-action -outline-offset-4" : ""}`}
++        onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
++        onDragLeave={() => setDrag(false)}
++        onDrop={(e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); }}>
+         {chips}
+         {textarea}
+         {suggestionList}
+         <div className="mt-2 flex items-center gap-1 min-w-0">{draft.rows[0]}</div>
+         <div className="mt-1 flex items-center gap-1 min-w-0">
++          <button className="btn btn-ghost px-2 shrink-0" title="Attach files (images, PDFs, text)" aria-label="Attach files" onClick={() => fileIn.current?.click()}><Paperclip size={15} /></button>
++          <input ref={fileIn} type="file" multiple hidden onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }} />
+           {draft.rows[1]}
+           <div className="relative">
+             <button className={`btn btn-ghost gap-1.5 px-2 text-[14px] ${skill || workflow ? "text-action" : ""}`} title="Skills for this message" aria-label="Tools"
+diff --git a/frontend/src/components/NewSession.tsx b/frontend/src/components/NewSession.tsx
+index 5d2904d..6271236 100644
+--- a/frontend/src/components/NewSession.tsx
++++ b/frontend/src/components/NewSession.tsx
+@@ -117,8 +117,8 @@ export function NewSession() {
+       if (b.mode && !NEW_SESSION_MODES.some(([v]) => v === b.mode)) throw new Error("Mode must be plan, ask or accept_edits.");
+       setPrefs({ ...(m ? { model: m } : {}), ...(b.effort ? { effort: b.effort } : {}), ...(b.mode ? { mode: b.mode } : {}) });
+     },
+-    start: async (text, skill) => {
+-      const started = await sessionActions.start({ text, skill, folder, model, effort, mode });
++    start: async (text, skill, attachments) => {
++      const started = await sessionActions.start({ text, skill, attachments, folder, model, effort, mode });
+       if (!started) setPrefsState(loadPrefs()); // a missing folder resets saved preferences to Chat only
+       return started;
+     },
+diff --git a/frontend/src/lib/sessions.ts b/frontend/src/lib/sessions.ts
+index 498edc7..68468a7 100644
+--- a/frontend/src/lib/sessions.ts
++++ b/frontend/src/lib/sessions.ts
+@@ -180,7 +180,11 @@ let starting: Promise<boolean> | null = null;
+ 
+ /** What the new-session screen sends: every new session runs Claude Code on the user's Claude
+  *  subscription (harness claude_code). No folder = chat only (a private scratch folder). */
+-export type NewSessionRequest = { text: string; skill?: string | null; folder: string | null; model: string; effort: string; mode: string };
++export type NewSessionRequest = {
++  text: string; skill?: string | null; attachments?: NewSessionAttachment[]; folder: string | null; model: string; effort: string; mode: string;
++};
++/** A file uploaded on the new-session screen (POST /uploads before the session exists). */
++type NewSessionAttachment = { path: string; name: string; mime: string; item_id?: string; text?: string };
+ 
+ export const sessionActions = {
+   /** ⌘N / New session: the new-session screen. The session is made when its first message is sent
+@@ -215,9 +219,9 @@ export const sessionActions = {
+       }
+       set((x) => ({ draftGroup: null, sessions: x.sessions.some((v) => v.id === s.id) ? x.sessions : [...x.sessions, s] }));
+       try {
+-        await post(`/sessions/${s.id}/messages`, { text: r.text, attachments: [], ...(r.skill ? { skill: r.skill } : {}) });
++        await post(`/sessions/${s.id}/messages`, { text: r.text, attachments: r.attachments ?? [], ...(r.skill ? { skill: r.skill } : {}) });
+       } catch (e: any) {
+-        actions.setDrafts(s.id, [...(st().drafts[s.id] ?? []), { kind: "text", text: r.text }]);
++        actions.setDrafts(s.id, [...(st().drafts[s.id] ?? []), ...(r.text ? [{ kind: "text" as const, text: r.text }] : []), ...(r.attachments ?? [])]);
+         if (r.skill) actions.setSkillChip(s.id, r.skill);
+         actions.toast(e?.message ?? String(e), "error");
+         // openSession selects the session before loading its history. A second network

@@ -1,0 +1,205 @@
+{
+ "task": "read-and-write-text-as-utf-8-on-windows-6347020",
+ "validated_at": "2026-11-20T09:48:13Z",
+ "reference_passed": true,
+ "flawed": 11,
+ "killed": 7,
+ "kill_rate": 0.636,
+ "survivors": [
+  {
+   "id": "mutant-1",
+   "kind": "mutant",
+   "description": "!= to == in: if p.exists() and (found := read(p.read_text(encoding=\"utf-8\"))) != v:",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "scripts/app_test.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-2",
+   "kind": "mutant",
+   "description": "True to False in: text=True, encoding=\"utf-8\", errors=\"replace\", timeout=3)",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "scripts/app_test.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-3",
+   "kind": "mutant",
+   "description": "return value dropped in: return tomllib.loads(DEFAULT_CONFIG_PATH.read_text(encoding=\"utf-8\"))",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "scripts/app_test.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-4",
+   "kind": "mutant",
+   "description": "+ to - in: r = subprocess.run(base + tail, input=body, capture_output=True, text=True, enco",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "scripts/app_test.py"
+   ],
+   "failed_steps": []
+  }
+ ],
+ "outcomes": [
+  {
+   "id": "noop",
+   "kind": "noop",
+   "description": "no change: the start state",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "scripts/app_test.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-1",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/agent/builtin_tools.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "scripts/app_test.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-2",
+   "kind": "partial",
+   "description": "leaves out hunk 2 of backend/gamedevworkstation/agent/builtin_tools.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "scripts/app_test.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-3",
+   "kind": "partial",
+   "description": "leaves out hunk 3 of backend/gamedevworkstation/agent/builtin_tools.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "scripts/app_test.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "partial-4",
+   "kind": "partial",
+   "description": "leaves out hunk 1 of backend/gamedevworkstation/buildinfo.py",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "scripts/app_test.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "mutant-1",
+   "kind": "mutant",
+   "description": "!= to == in: if p.exists() and (found := read(p.read_text(encoding=\"utf-8\"))) != v:",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "scripts/app_test.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-2",
+   "kind": "mutant",
+   "description": "True to False in: text=True, encoding=\"utf-8\", errors=\"replace\", timeout=3)",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "scripts/app_test.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-3",
+   "kind": "mutant",
+   "description": "return value dropped in: return tomllib.loads(DEFAULT_CONFIG_PATH.read_text(encoding=\"utf-8\"))",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "scripts/app_test.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "mutant-4",
+   "kind": "mutant",
+   "description": "+ to - in: r = subprocess.run(base + tail, input=body, capture_output=True, text=True, enco",
+   "passed": true,
+   "environment_failure": false,
+   "tampered": [
+    "scripts/app_test.py"
+   ],
+   "failed_steps": []
+  },
+  {
+   "id": "tamper-delete",
+   "kind": "tamper",
+   "description": "no fix; deletes the hidden tests",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "scripts/app_test.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  },
+  {
+   "id": "tamper-skip",
+   "kind": "tamper",
+   "description": "no fix; rewrites the hidden tests to pass",
+   "passed": false,
+   "environment_failure": false,
+   "tampered": [
+    "tests/test_text_encoding.py",
+    "scripts/app_test.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ]
+  }
+ ],
+ "reference_steps": [
+  {
+   "name": "tests",
+   "kind": "command",
+   "passed": true,
+   "exit": 0,
+   "duration_s": 3.27580437483266,
+   "output": "...                                                                      [100%]\n3 passed in 1.19s\n",
+   "environment": false,
+   "detail": {}
+  }
+ ],
+ "ok": true
+}
