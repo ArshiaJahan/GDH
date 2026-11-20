@@ -706,6 +706,10 @@ class Level:
                 "shots": self.shots}
 
 
+def _is_replay_test(name: str) -> bool:
+    return "ReplayVerificationTests" in name or "LogMatchesCheckpoints" in name
+
+
 def _brief(r: dict, fresh: bool | None = None) -> dict:
     d = r.get("detail") or {}
     return {"id": r["id"], "level": r["level"], "status": r["status"], "source": r["source"], "observed": r["observed"],
@@ -886,9 +890,14 @@ class Ladder:
             st = crit["detail"]["results"][ac.id]
             cands.append((crit["ts"], st == "PASS", [crit], f"check_criteria {st}"))
         names = ac.values("test")
-        if names:
+        # A replay verification test proves something only through a tool-observed replay_verified report:
+        # an EditMode run "covering" the milestone never ran it (it needs a recorded archive and a request).
+        replay_names = [n for n in names if _is_replay_test(n)]
+        test_names = [n for n in names if n not in replay_names]
+        tests_cand = None
+        if test_names:
             got = []
-            for name in names:
+            for name in test_names:
                 hit = None
                 for r in rows:
                     d = r["detail"]
@@ -906,11 +915,13 @@ class Ladder:
                 if hit is None:
                     break
                 got.append(hit)
-            if len(got) == len(names):
-                cands.append((min(h[0] for h in got), all(h[1] for h in got), [h[2] for h in got],
-                              "; ".join(h[3] for h in got if not h[1]) or "tests passed"))
+            if len(got) == len(test_names):
+                tests_cand = (min(h[0] for h in got), all(h[1] for h in got), [h[2] for h in got],
+                              "; ".join(h[3] for h in got if not h[1]) or "tests passed")
+        if tests_cand is not None and not replay_names:
+            cands.append(tests_cand)
         # Replay-verified evidence for headless ACs with replay verification tests.
-        if any("ReplayVerificationTests" in n or "LogMatchesCheckpoints" in n for n in names):
+        if replay_names:
             for r in rows:
                 d = r["detail"]
                 if d.get("kind") != "replay_verified":
@@ -934,7 +945,13 @@ class Ladder:
                 detail = "replay_verified pass"
                 if env == "differs":
                     detail += " (environment differs)"
-                cands.append((r["ts"], True, [r], detail))
+                if test_names:  # the AC also names ordinary tests: it needs both kinds of evidence
+                    if tests_cand is None:
+                        continue
+                    detail = f"{detail}; {tests_cand[3]}"
+                    cands.append((min(r["ts"], tests_cand[0]), tests_cand[1], [r, *tests_cand[2]], detail))
+                else:
+                    cands.append((r["ts"], True, [r], detail))
         return cands
 
     def _ac_level(self, ac: AC, story: Story, rows: list[dict], content: tuple[float, str | None], lv: Level,

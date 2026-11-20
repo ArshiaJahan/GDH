@@ -21,15 +21,31 @@ import { EffortMeter, ProviderDot, fmtUsd, modelLabel, tiersOf, useModelCatalog 
 const EMPTY: Msg[] = [];
 const STOPPABLE_JOBS = new Set(["subagent", "codex_cli", "command"]);
 
-/** "Rate limited, retrying in Ns" with a live countdown. */
+/** A wait as people say it: 45s, 3m 20s, 2h 5m, 6d 7h. */
+export function formatWait(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 90) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+  return `${Math.floor(s / 86400)}d ${Math.floor((s % 86400) / 3600)}h`;
+}
+
+/** A retry ("Rate limited, retrying in 8s") counts down live; a plan-limit notice (no retry attempt) keeps its own
+ *  text and adds how long until the window resets. */
+export function statusText(s: AgentStatus, nowMs: number): string {
+  const left = s.until ? Math.max(0, Math.ceil(s.until - nowMs / 1000)) : null;
+  if (s.kind !== "rate_limit" || left == null) return s.text ?? "";
+  if (s.attempt == null) return s.text ? `${s.text} (in ${formatWait(left)})` : `Rate limited for ${formatWait(left)}`;
+  return `Rate limited, retrying in ${formatWait(left)}`;
+}
+
 function StatusLine({ s }: { s: AgentStatus }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 500);
     return () => clearInterval(t);
   }, []);
-  const left = s.until ? Math.max(0, Math.ceil(s.until - now / 1000)) : null;
-  const text = s.kind === "rate_limit" && left != null ? `Rate limited, retrying in ${left}s` : s.text;
+  const text = statusText(s, now);
   return (
     <div role="status" className="my-2 flex items-center gap-1.5 text-[13px] text-warn">
       <Clock size={13} /> {text}

@@ -124,9 +124,15 @@ class GdwMcp:
         return f"http://127.0.0.1:{int(port)}{PATH}"
 
     def config_json(self, token: str) -> dict:
-        """The --mcp-config document for one claude process (`type` is required for URL servers [docs])."""
+        """The --mcp-config document for one claude process (`type` is required for URL servers [docs]).
+
+        `timeout` (ms) lifts Claude Code's 300 s idle limit for this server only: a Unity batch run or an
+        approval card the user hasn't answered yet sends nothing for minutes, and the CLI would abort the call
+        while the work (or the card) carried on."""
+        from .claude_cli import MCP_TOOL_TIMEOUT_MS
         return {"mcpServers": {SERVER: {"type": "http", "url": self.url(),
-                                        "headers": {"Authorization": f"Bearer {token}"}}}}
+                                        "headers": {"Authorization": f"Bearer {token}"},
+                                        "timeout": MCP_TOOL_TIMEOUT_MS}}}
 
     # -------------------------------------------------------------- tools
 

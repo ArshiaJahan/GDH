@@ -384,6 +384,19 @@ def _local_platform_name() -> str:
     return {"Darwin": "macOS", "Windows": "Windows", "Linux": "Linux"}.get(name, name)
 
 
+def _os_family(name: str) -> str:
+    """macOS / Windows / Linux from a platform string: Unity writes SystemInfo.operatingSystem ("Mac OS X 26.6.2",
+    "Windows 11  (10.0.22631) 64bit"), Python writes "Darwin"; "" when unknown."""
+    n = name.lower()
+    if any(k in n for k in ("mac os", "macos", "darwin", "osx")):
+        return "macOS"
+    if "windows" in n:
+        return "Windows"
+    if "linux" in n:
+        return "Linux"
+    return ""
+
+
 def _local_cpu_model() -> str | None:
     try:
         if platform.system() == "Darwin":
@@ -419,14 +432,30 @@ def _manifest_dependencies(root: Path) -> dict[str, str] | None:
 
 
 def _project_identifier(root: Path) -> str | None:
+    """Application.identifier as Unity reports it: the Standalone entry of applicationIdentifier, or, when the
+    project never set one (`applicationIdentifier: {}`), Unity's default com.<companyName>.<productName>."""
     try:
         text = (root / "ProjectSettings" / "ProjectSettings.asset").read_text(errors="replace", encoding="utf-8")
     except OSError:
         return None
-    m = re.search(r"^\s*applicationIdentifier:\s*\n\s+[A-Za-z]+:\s*(\S+)", text, re.M)
-    if not m:
-        m = re.search(r"^\s*applicationIdentifier:\s*(\S+)", text, re.M)
-    return m.group(1) if m else None
+    block = re.search(r"^\s*applicationIdentifier:[ \t]*\n((?:[ \t]+[A-Za-z]+:[^\n]*\n)+)", text, re.M)
+    if block:
+        entries = dict(re.findall(r"^\s+([A-Za-z]+):\s*(\S+)", block.group(1), re.M))
+        ident = entries.get("Standalone") or next(iter(entries.values()), None)
+        if ident:
+            return ident
+    one = re.search(r"^\s*applicationIdentifier:[ \t]*(\S+)", text, re.M)
+    if one and one.group(1) not in ("{}", "[]"):
+        return one.group(1)
+    company = re.search(r"^\s*companyName:[ \t]*(.+?)\s*$", text, re.M)
+    product = re.search(r"^\s*productName:[ \t]*(.+?)\s*$", text, re.M)
+    if not company or not product:
+        return None
+
+    def part(v: str) -> str:
+        return re.sub(r"[^A-Za-z0-9_.-]", "-", v.strip())
+
+    return f"com.{part(company.group(1))}.{part(product.group(1))}"
 
 
 def _scene_guid(root: Path, scene_path: str | None) -> str | None:
@@ -457,9 +486,9 @@ def environment_diff(root: Path, header: dict | None, *, scene_hint: str | None 
         diff.add("unity_version")
 
     os_info = header.get("os") if isinstance(header.get("os"), dict) else {}
-    recorded_platform = str(os_info.get("platform") or "")
-    current_platform = _local_platform_name()
-    if recorded_platform and current_platform and current_platform.lower() not in recorded_platform.lower():
+    recorded_platform = _os_family(str(os_info.get("platform") or ""))
+    current_platform = _os_family(_local_platform_name())
+    if recorded_platform and current_platform and recorded_platform != current_platform:
         diff.add("os")
 
     cpu = header.get("cpu") if isinstance(header.get("cpu"), dict) else {}
@@ -889,12 +918,35 @@ def _tool_output(op: str, run_id: str, result: "BridgeResult | None", report: di
 
 # --------------------------------------------------------------------------- ops
 
-_WATCHDOGS: set[asyncio.Task] = set()
+_WATCHDOGS: dict[str, asyncio.Task] = {}  # session id -> the stop timer of its current recording
 
 
-def _arm_record_limit(app: "AppState", session: dict, run_id: str, replay_cfg: dict) -> asyncio.Task | None:
-    """[unity.replay] max_seconds: stop a live recording that runs past the limit (L3)."""
-    limit = _cfg_int(replay_cfg, "max_seconds", 600)
+def _record_seconds(args: dict, replay_cfg: dict) -> int:
+    """How long a recording may run: the call's `max_seconds`, never above [unity.replay] max_seconds."""
+    cap = _cfg_int(replay_cfg, "max_seconds", 600)
+    value = args.get("max_seconds")
+    if value is None:
+        return cap
+    seconds = _as_int(value, field="max_seconds")
+    if seconds < 1 or (cap > 0 and seconds > cap):
+        raise ReplayOpError("bad_max_seconds",
+                            f"max_seconds must be 1-{cap} ([unity.replay] max_seconds), got {seconds}"
+                            if cap > 0 else f"max_seconds must be at least 1, got {seconds}")
+    return seconds
+
+
+def _disarm_record_limit(session_id: str) -> None:
+    task = _WATCHDOGS.pop(session_id, None)
+    if task is not None and not task.done():
+        task.cancel()
+
+
+def _arm_record_limit(app: "AppState", session: dict, run_id: str, replay_cfg: dict,
+                      seconds: int | None = None) -> asyncio.Task | None:
+    """Stop a live recording after `seconds` (default [unity.replay] max_seconds). One timer per session: a new
+    recording or a stop replaces it, so an old timer can't stop a later run."""
+    _disarm_record_limit(session["id"])
+    limit = _cfg_int(replay_cfg, "max_seconds", 600) if seconds is None else seconds
     if limit <= 0:
         return None
 
@@ -903,19 +955,21 @@ def _arm_record_limit(app: "AppState", session: dict, run_id: str, replay_cfg: d
         try:
             from .unity_bridge import get_bridge
             await get_bridge(app).replay_cancel(session, consent=_gate_consent(app, session))
-            log.info("replay: recording %s stopped at [unity.replay] max_seconds=%s", run_id, limit)
+            log.info("replay: recording %s stopped after max_seconds=%s", run_id, limit)
         except Exception:  # noqa: BLE001 — best effort
             log.debug("replay: max_seconds stop failed", exc_info=True)
 
     task = asyncio.create_task(_watch())
-    _WATCHDOGS.add(task)
-    task.add_done_callback(_WATCHDOGS.discard)
+    sid = session["id"]
+    _WATCHDOGS[sid] = task
+    task.add_done_callback(lambda t: _WATCHDOGS.pop(sid, None) if _WATCHDOGS.get(sid) is t else None)
     return task
 
 
 
 async def _op_stop(app: "AppState", session: dict, root: Path, run_id: str, br: Any) -> ToolOutput:
     """Stop the job for this run_id and cancel any live Editor replay session."""
+    _disarm_record_limit(session["id"])
     stopped_job = None
     for job in app.jobs.list() or []:
         if job.get("id") and job.get("status") in ("running", "queued") \
@@ -1040,6 +1094,7 @@ async def run_replay_op(app: "AppState", session: dict, op: str, args: dict,
         else:
             request = _validated_request(op, args, replay_cfg=replay_cfg)
             run_id = request["run_id"]
+            record_seconds = _record_seconds(args, replay_cfg) if op == "record" else None
     except ReplayOpError as exc:
         return ToolOutput(f"Replay {op}: {exc}", is_error=True)
 
@@ -1062,7 +1117,7 @@ async def run_replay_op(app: "AppState", session: dict, op: str, args: dict,
                                      consent=consent, cancel=cancel)
         if result.status == "pass":
             _index_artifacts(app, session, [request_path])
-            _arm_record_limit(app, session, run_id, replay_cfg)
+            _arm_record_limit(app, session, run_id, replay_cfg, seconds=record_seconds)
         return _tool_output(op, run_id, result, None)
 
     archive, precheck_status, precheck_message = _read_archive(root, request, replay_cfg)
@@ -1178,7 +1233,13 @@ def register(app_: "FastAPI", api: "APIRouter", S: "AppState") -> None:
     async def record(sid: str, body: dict = Body(...)) -> dict:
         s = _session(sid)
         _root(s)
-        return await _dispatch(s, "record", _prepare(s, "record", body))
+        request = _prepare(s, "record", body)
+        if body.get("max_seconds") is not None:  # a record-time limit, not part of the frozen request
+            try:
+                request["max_seconds"] = _record_seconds(body, get_bridge(S).cfg().get("replay") or {})
+            except ReplayOpError as exc:
+                raise HTTPException(exc.http_status, str(exc)) from exc
+        return await _dispatch(s, "record", request)
 
     @api.post("/api/sessions/{sid}/replays/{run_id}/stop")
     async def stop(sid: str, run_id: str) -> dict:

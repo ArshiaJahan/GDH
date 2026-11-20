@@ -519,7 +519,8 @@ class Proc:
         resets = info.get("resetsAt") if isinstance(info.get("resetsAt"), (int, float)) else None
         window = str(info.get("rateLimitType") or "").replace("_", " ")
         text = ("Claude plan limit reached" if status == "rejected" else "Close to the Claude plan limit") + \
-            (f" ({window})" if window else "") + (time.strftime(", resets at %H:%M", time.localtime(resets)) if resets else "")
+            (f" ({window})" if window else "") + (time.strftime(", resets %a %H:%M" if resets - time.time() > 86400 else ", resets at %H:%M",
+                           time.localtime(resets)) if resets else "")
         self.app.bus.publish("agent.status", {"kind": "rate_limit", "text": text, "until": resets,
                                               "retry_in_s": round(max(0.0, resets - time.time()), 1) if resets else None},
                              self.sid)

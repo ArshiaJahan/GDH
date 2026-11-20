@@ -1707,7 +1707,10 @@ class UnityBridge:
             if problem:
                 return BridgeResult("skipped", problem, "cli_batch")
             xml = self._paths(root, f"replay-{op}", "xml")
-            extra_args = ["-gdwReplayRequest", request_path] if request_path else []
+            log_path = xml.with_suffix(".log")
+            # The Editor's own log (the CLI prints only a JSON envelope): the report's log_sha256 hashes it, and
+            # L3 replay_verified evidence needs that digest.
+            extra_args = (["-gdwReplayRequest", request_path] if request_path else []) + ["-logFile", str(log_path)]
             try:
                 argv = uc.argv_test_batch(cli, root, platform, xml, t,
                                           test_filter="Gdw.Replay.Tests.ReplayVerificationTests.LogMatchesCheckpoints",
@@ -1717,7 +1720,6 @@ class UnityBridge:
             if why := await self.ensure_allowed(session, gate_op, gate_key, route="cli_batch", argv=argv,
                                                 consent=consent, capture=capture, detail=detail):
                 return BridgeResult("skipped", f"replay didn't run: {why}", "cli_batch")
-            log_path = xml.with_suffix(".log")
             run = await self.runner.run(session, argv, project=root,
                                         label=f"Unity replay · {op} · CLI batch",
                                         timeout_s=t, log_path=log_path, cancel=cancel)

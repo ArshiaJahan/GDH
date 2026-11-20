@@ -18,7 +18,7 @@ from ..core.types import ChatRequest, Message, TextBlock, Usage
 from ..providers.base import ProviderError
 from ..usage import BudgetExceeded
 from . import pi_research
-from .pi_contracts import (COLLECTOR_VERSION, MAX_QUESTIONS, TEMPLATE_VERSION, Answer, EvalResult, ImproverOutcome,
+from .pi_contracts import (COLLECTOR_VERSION, loads_reply, MAX_QUESTIONS, TEMPLATE_VERSION, Answer, EvalResult, ImproverOutcome,
                            PiFormatError, Question, TaskCard, parse_eval)
 from .unity_bridge import is_unity_project
 
@@ -264,8 +264,7 @@ def _question_payload(q: Question, i: int, n: int, run_id: str, message_id: str)
 
 
 def _json_object(text: str) -> dict:
-    body = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", (text or "").strip(), flags=re.I)
-    data = json.loads(body)
+    data = loads_reply(text)
     if not isinstance(data, dict):
         raise ValueError("expected an object")
     return data

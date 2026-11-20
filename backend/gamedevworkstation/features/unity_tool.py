@@ -91,6 +91,9 @@ SCHEMA = obj({
                     "description": "project-relative .gdwreplay path (default Logs/harness/replay/<run_id>/run.gdwreplay)"},
     "seed": {"type": "integer", "minimum": 0, "maximum": 4294967295,
              "description": "uint32 seed for deterministic RNG"},
+    "max_seconds": {"type": "integer", "minimum": 1,
+                    "description": "record: stop the recording after this many seconds "
+                                   "(at most [unity.replay] max_seconds, 600 by default)"},
     "fixed_dt": {"type": "number", "exclusiveMinimum": 0, "maximum": 1,
                  "description": "fixed timestep in seconds (0.001-1.0)"},
     "capture": {"type": "object", "additionalProperties": False, "required": ["formats"],

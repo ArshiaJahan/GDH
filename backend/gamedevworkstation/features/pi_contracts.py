@@ -226,13 +226,28 @@ def _fact_text(f: Any) -> str:
     return str(f).strip() if isinstance(f, (int, float)) else ""
 
 
+def loads_reply(text: str) -> Any:
+    """A model's JSON reply: drops a code fence, accepts raw newlines/tabs inside strings (models write them in
+    multi-line fields) and, failing that, the outermost {...} when the model wrapped the object in prose."""
+    body = _FENCE.sub("", (text or "").strip())
+    try:
+        return json.loads(body, strict=False)
+    except json.JSONDecodeError as first:
+        start, end = body.find("{"), body.rfind("}")
+        if 0 <= start < end and (start, end) != (0, len(body) - 1):
+            try:
+                return json.loads(body[start:end + 1], strict=False)
+            except json.JSONDecodeError:
+                pass
+        raise first
+
+
 def parse_eval(text: str) -> EvalResult:
     """Parse the evaluator's reply (one JSON object, optional code fence) or raise PiFormatError."""
     if not isinstance(text, str) or not text.strip():
         raise PiFormatError("empty evaluator output")
-    body = _FENCE.sub("", text.strip())
     try:
-        data: Any = json.loads(body)
+        data: Any = loads_reply(text)
     except json.JSONDecodeError as e:
         raise PiFormatError(f"not JSON: {e.msg}") from e
     if not isinstance(data, dict):

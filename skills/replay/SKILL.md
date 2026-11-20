@@ -81,7 +81,8 @@ Pinned: Unity 6000.3.21f1, Input System 1.20.1, Test Framework 1.6.0.
    then). Recording is live-Editor only and needs change permission (the
    code is shown first). The call returns once recording has started. Stop it
    with `unity op=replay_stop run_id=...`; it also stops by itself after
-   `[unity.replay] max_seconds` (default 600). Output: `<project>/Logs/harness/
+   `max_seconds=N` when given (for "record about 12 s", pass 12), never later
+   than `[unity.replay] max_seconds` (default 600). Output: `<project>/Logs/harness/
    replay/<run_id>/run.gdwreplay`.
 
 3. **Replay.** `unity op=replay run_id=...` replays a recorded archive on the

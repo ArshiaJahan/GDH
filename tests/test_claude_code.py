@@ -206,6 +206,9 @@ def test_turn_flags_env_and_event_mapping(live, tmp_path):
     server = json.loads(cfg.read_text())["mcpServers"]["gdw"]
     assert server["type"] == "http" and server["url"] == f"http://127.0.0.1:{live.port}/mcp/gdw"
     assert server["headers"]["Authorization"].startswith("Bearer ") and "Bearer t" != server["headers"]["Authorization"]
+    # A batch Unity run or an unanswered approval card is silent for minutes; the CLI's 300 s idle limit
+    # must not abort the call while the work carries on.
+    assert server["timeout"] >= 3600 * 1000
     # Subscription auth only: no key, token, base URL, cloud switch or config dir reaches the CLI.
     for k in LEAKY:
         assert k not in env, k

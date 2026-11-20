@@ -94,6 +94,11 @@ class Approvals:
         except asyncio.TimeoutError:
             self.resolve(aid, "deny")
             return {"status": "denied", "timed_out": True}
+        except asyncio.CancelledError:
+            # The caller gave up (a tool call the client aborted, a cancelled task): nothing will act on an
+            # answer now, so the card mustn't stay open looking live.
+            self.expire(aid)
+            raise
 
     def expire_session(self, session_id: str) -> int:
         """A stopped run can't act on its open cards any more. Returns how many were open."""
