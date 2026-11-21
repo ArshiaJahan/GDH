@@ -1292,7 +1292,7 @@ UNIT_SCHEMA = {
     "type": "object",
     "properties": {
         "name": {"type": "string"},
-        "tier": {"type": "string", "description": "claude.fast|claude.standard|claude.deep|codex.fast|codex.standard|codex.cli"},
+        "tier": {"type": "string", "description": "claude.fast|claude.standard|claude.deep|codex.fast|codex.standard|codex.deep|codex.computer|codex.cli"},
         "effort": {"type": "string", "description": "none|low|medium|high (fleet units stay at or below high)"},
         "instructions": {"type": "string", "description": "Self-contained brief for this unit"},
         "scope": {"type": "array", "items": {"type": "string"},

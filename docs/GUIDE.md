@@ -138,17 +138,21 @@ keep an explicit **Save**.
   (`tool_output_chars`, 30,000; `tool_output_images`, 4). A longer result reaches the model cut, with
   the full text saved as an item it can page through with `read_output(id, offset)`.
 - `[accounts]` key profiles per provider.
-- `[tiers]` what `claude.fast / standard / deep` and `codex.fast / standard / cli` mean. Defaults:
+- `[tiers]` what `claude.fast / standard / deep` and `codex.fast / standard / deep / computer / cli` mean. Defaults:
 
   | Tier | Model | Shown as |
   | --- | --- | --- |
   | `claude.fast` | `claude-haiku-5-5` | Haiku 5.5 · claude.fast |
   | `claude.standard` | `claude-sonnet-5-5` | Sonnet 5.5 · claude.standard |
   | `claude.deep` | `claude-opus-5-5` | Opus 5.5 · claude.deep |
-  | `codex.fast` | `gpt-6.1-terra` | GPT-6.1 Terra · codex.fast |
+  | `codex.fast` | `gpt-6.1-sol` | GPT-6.1 Sol · codex.fast |
   | `codex.standard` | `gpt-6.1-sol` | GPT-6.1 Sol · codex.standard |
+  | `codex.deep` | `gpt-6.2-sol` | GPT-6.2 Sol · codex.deep |
+  | `codex.computer` | `gpt-6.1-terra` | GPT-6.1 Terra · codex.computer |
   | `codex.cli` | `gpt-6.1-sol` (passed to `codex exec`) | GPT-6.1 Sol · codex.cli |
 
+  OpenAI rule: fast and standard handle regular coding (fast is for quick mechanical work);
+  deep handles complex coding and design; computer handles computer use, screenshots and visual checks.
   The tier keys keep their names (the delegation skill routes by them); the `codex.*` tiers run
   GPT-6 models because OpenAI retired its `*-codex` API models.
 - `[delegation]` `max_parallel` (4 Claude+Codex API subagents and 2 Codex CLI runs by default,
@@ -1879,12 +1883,12 @@ The data and log folders are owner-only (0700) and the database, config, `runtim
 
 - **No Codex API models anymore.** OpenAI has retired its `*-codex` API models
   (`gpt-5.3-codex`, the last one, shuts down 2027-04-01), and Codex now runs on the GPT-6 family.
-  The `codex.*` tiers therefore map to GPT-6.1 Terra (`gpt-6.1-terra`, fast) and GPT-6.1 Sol
-  (`gpt-6.1-sol`, standard and CLI); GPT-6 Astra and GPT-6 Luna are in the catalog too. Change
-  them in Settings → Models, which lists the OpenAI tiers with their models' real names.
+  The `codex.*` tiers therefore map to GPT-6.1 Sol (`gpt-6.1-sol`, fast, standard and CLI),
+  GPT-6.2 Sol (`gpt-6.2-sol`, deep), and GPT-6.1 Terra (`gpt-6.1-terra`, computer);
+  GPT-6 Astra and GPT-6 Luna are in the catalog too. Change them in Settings → Models, which lists the OpenAI tiers with their models' real names.
 - **No thinking.** The "lowest / no-thinking" effort level maps per model: Haiku 5.5 →
   `thinking: disabled`, Sonnet 5.5 → `between_tools`, Opus 5.5 → `low` (it can't turn thinking
-  off), GPT-6.1 Sol → `low` (it rejects `none`), Terra/Luna → `none`.
+  off), GPT-6.1 Sol / GPT-6.2 Sol → `low` (they reject `none`), Terra/Luna → `none`.
 - **Codex CLI sandbox flag.** The CLI dropped `--full-auto`, so GameDevWorkstation uses
   `--sandbox workspace-write` (or `read-only` in Plan mode).
 - **ElevenLabs defaults** are `eleven_v4` for speech and `scribe_v2` for transcription

@@ -67,8 +67,8 @@ def test_codex_cli_resolves_stored_tier_key(env, fake_codex, tmp_path):  # noqa:
     s.db.execute("UPDATE sessions SET model='codex.fast' WHERE id=?", [sid])  # bypasses the store
     c.post(f"/api/sessions/{sid}/messages", json={"text": "write a file"}, headers=H)
     wait_idle(c, sid)
-    a = json.loads(fake_codex.read_text().splitlines()[0])["args"]
-    assert a[a.index("-m") + 1] == "gpt-6.1-terra"
+    a = json.loads(fake_codex.read_text(encoding="utf-8").splitlines()[0])["args"]
+    assert a[a.index("-m") + 1] == "gpt-6.1-sol"
 
 
 def test_startup_rewrites_tier_keys(tmp_path):

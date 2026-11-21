@@ -34,6 +34,7 @@ BUILTINS = {
     "claude-handoff": "Hand the current conversation off to a fresh background agent",
     "game-designer": "Expert game design partner with 15+ years of applied craft.",
     "cost-effective-claude-delegation": "Do a task in any project at the lowest total cost",
+    "delegation-tiers": "Which subagent tier and effort to pick for each kind of unit",
     "high-performance-claude-delegation": "Finish a task as fast and as well as possible",
     "unity-router": "Picks which Unity game-creation skills to load for a task",
 }

@@ -1,7 +1,7 @@
 """Subagents: one level deep, own tool loop, max turns, spend cap, results as compact text.
 
 Routes:
-- Claude / Codex API tiers (claude.*, codex.fast, codex.standard) run the built-in loop.
+- Claude / Codex API tiers (claude.*, codex.fast, codex.standard, codex.deep, codex.computer) run the built-in loop.
 - codex.cli runs `codex exec` non-interactively in its own git worktree.
 
 Concurrency: `max_parallel.claude_codex` API subagents and `max_parallel.codex_cli` CLI runs
@@ -254,6 +254,12 @@ class SubagentManager:
                 "cwd": str(sub.worktree_plan), "role": "main"})
             if res["status"] != "approved":
                 raise PermissionError("User declined the Codex CLI run.")
+        if (tier == "claude.deep" or "opus" in model.lower()) and not self.app.approvals.allowlisted("opus_subagent", tier):
+            res = await self.app.approvals.ask(ctx.session_id, "opus_subagent", {
+                "subject": f"Opus subagent: {sub.name}", "name": sub.name, "tier": tier, "model": model,
+                "effort": effort, "instructions": sub.instructions[:600]})
+            if res["status"] != "approved":
+                raise PermissionError("The user declined an Opus subagent. Continue with claude.standard (Sonnet) in smaller slices.")
         self.subs[sub_id] = sub
         sub.job_id = self.app.jobs.start(ctx.session_id, "codex_cli" if is_cli else "subagent",
                                          f"{sub.name} · {tier} · {effort}", {"subagent": sub_id}, status="queued")
@@ -544,8 +550,10 @@ def _register_tools(app: "AppState", mgr: SubagentManager) -> None:
         return ToolOutput(mgr.compact_result(sub), is_error=sub.status != "done", untrusted=f"subagent:{sub.name}")
 
     add("spawn_subagent",
-        "Launch a subagent for one unit of work (see the delegation skill). provider: claude|codex. tier: "
-        "claude.fast|claude.standard|claude.deep|codex.fast|codex.standard|codex.cli. effort: none|low|medium|high "
+        "Launch a subagent for one unit of work (see the delegation and delegation-tiers skills). provider: claude|codex. tier: "
+        "claude.fast|claude.standard|claude.deep|codex.fast|codex.standard|codex.deep|codex.computer|codex.cli. "
+        "OpenAI rule: fast/standard for regular coding, deep for complex coding and design, "
+        "computer for computer use, screenshots and visual checks. effort: none|low|medium|high "
         "(xhigh/max need approval_token from request_effort_approval). tools: names to grant (default read-only "
         "file tools; for web research grant web_search and web_fetch). worktree: give it its own git worktree (always for parallel code edits; codex.cli always "
         "gets one). Returns immediately when run_in_background (default true).",

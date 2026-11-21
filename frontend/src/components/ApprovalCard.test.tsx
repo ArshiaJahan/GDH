@@ -14,6 +14,18 @@ import { SkillLoadRow } from "./rows/SkillLoadRow";
 afterEach(() => { cleanup(); post.mockClear(); });
 
 describe("generic approval card", () => {
+  it("shows the Opus title, tier, effort and brief before consent", async () => {
+    render(<ApprovalCard a={{ id: "apr_opus", kind: "opus_subagent", status: "pending", session_id: "s", payload: {
+      subject: "Opus subagent: review", name: "review", tier: "claude.deep", model: "claude-opus-5-5",
+      effort: "medium", instructions: "Check the design before implementation.",
+    } }} />);
+    expect(screen.getByText("Start an Opus subagent?")).toBeTruthy();
+    expect(screen.getByText("Tier: claude.deep · Effort: medium")).toBeTruthy();
+    expect(screen.getByText("Check the design before implementation.")).toBeTruthy();
+    await act(async () => { fireEvent.click(screen.getByText("Decline")); });
+    expect(post).toHaveBeenCalledWith("/approvals/apr_opus", { decision: "deny" });
+  });
+
   it("shows subject and markdown, and answers with the chosen button and the note", async () => {
     render(<ApprovalCard a={{ id: "apr_1", kind: "gate_escalation", status: "pending", session_id: "s", payload: {
       subject: "Gate still fails", markdown: "**3 errors** in Hit.cs", note: { label: "Your notes" },

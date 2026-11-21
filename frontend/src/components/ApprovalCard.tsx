@@ -7,6 +7,7 @@ import { EffortMeter, fmtUsd, modelLabel } from "./ui";
 
 const KIND_TITLE: Record<string, string> = {
   effort: "Allow effort above high?",
+  opus_subagent: "Start an Opus subagent?",
   command: "Run this command?",
   edit: "Allow this edit?",
   delete: "Delete this file?",
@@ -20,7 +21,7 @@ const KIND_TITLE: Record<string, string> = {
 
 /** Kinds with their own body below; any other kind gets the generic card (payload.subject,
  *  payload.markdown, payload.buttons, payload.note; see lib/api.ts GenericApprovalPayload). */
-const DEDICATED = new Set(["effort", "command", "edit", "delete", "elevenlabs", "shared_tool", "mcp_tool", "mcp_install", "skill_install"]);
+const DEDICATED = new Set(["effort", "opus_subagent", "command", "edit", "delete", "elevenlabs", "shared_tool", "mcp_tool", "mcp_install", "skill_install"]);
 
 /** Small estimates read better as "<$0.01" than "$0.0004". */
 const fmtEstimate = (n: number) => (n > 0 && n < 0.01 ? "<$0.01" : fmtUsd(n));
@@ -53,6 +54,15 @@ export function ApprovalCard({ a }: { a: Approval }) {
         {done && <span className="ml-auto chip">{a.status}</span>}
       </div>
       <div className="px-3 py-2 text-[13px] space-y-1.5">
+        {a.kind === "opus_subagent" && (
+          <>
+            <div className="font-medium">{p.name ?? p.subject}</div>
+            <div>Tier: {p.tier} · Effort: {p.effort}</div>
+            {p.model && <div className="text-muted">{p.model}</div>}
+            <div className="text-muted">Brief</div>
+            <pre className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{p.instructions}</pre>
+          </>
+        )}
         {a.kind === "effort" && (
           <>
             <div className="flex items-center gap-2">

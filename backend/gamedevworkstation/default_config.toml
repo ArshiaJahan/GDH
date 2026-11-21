@@ -25,9 +25,11 @@ elevenlabs = ["default"]
 "claude.standard" = "claude-sonnet-5-5"  # Sonnet 5.5
 "claude.deep" = "claude-opus-5-5"        # Opus 5.5; or "claude-fable-5-1" (Fable 5.1) for the hardest work ($10/$50)
 # OpenAI retired its *-codex API models (gpt-5.3-codex is the last, off 2027-04-01);
-# Codex now runs on the GPT-6 family, so the "codex.*" tiers route there.
-"codex.fast" = "gpt-6.1-terra"           # GPT-6.1 Terra
-"codex.standard" = "gpt-6.1-sol"         # GPT-6.1 Sol
+# OpenAI rule: Sol 6.1 for regular coding, Sol 6.2 for complex coding/design, Terra for computer/visual work.
+"codex.fast" = "gpt-6.1-sol"             # Regular coding: quick mechanical work, same model as standard
+"codex.standard" = "gpt-6.1-sol"         # Regular (non-complex) coding
+"codex.deep" = "gpt-6.2-sol"             # Complex coding and design
+"codex.computer" = "gpt-6.1-terra"       # Computer use, screenshots and visual checks
 "codex.cli" = "gpt-6.1-sol"              # GPT-6.1 Sol, passed to `codex exec` (Codex CLI's own default)
 
 [delegation]
@@ -149,9 +151,9 @@ fail_open_notice = true             # say so when a gate couldn't run (e.g. Unit
 # A story whose changed files match these needs a fresh screenshot before it's done.
 visual_globs = ["*.unity", "*.prefab", "*.uxml", "*.uss", "*.shader", "*.shadergraph", "*.mat", "*.anim",
                 "*.controller", "*.vfx", "*.png", "*.psd", "*.aseprite", "Assets/**/UI/**", "Assets/**/Art/**"]
-critique_tier = "claude.standard"   # the three L4 reviewers
+critique_tier = "claude.standard"   # the three L4 reviewers; OpenAI visual alternative: "codex.computer"
 critique_rounds = 2                 # then an escalation card
-arbiter_tier = ""                   # e.g. "codex.standard" for one binding pass first; empty = ask you
+arbiter_tier = ""                   # e.g. "codex.computer" for a binding visual pass; empty = ask you
 
 [campaigns]
 # Multi-session work with a plan, phases and checks (and one-session chains, `/workflow` in chat).
@@ -340,6 +342,22 @@ long_context = { threshold = 272000, input = 20.0, output = 75.0, cache_write = 
 
 [models."gpt-6.1-sol"]
 display_name = "GPT-6.1 Sol"
+provider = "openai"
+context_window = 1050000
+max_output = 128000
+input = 2.0
+output = 10.0
+cache_write = 2.5
+cache_read = 0.10
+efforts = ["low", "medium", "high", "xhigh", "max"]
+no_thinking = "low"
+vision = true
+long_context = { threshold = 272000, input = 4.0, output = 15.0, cache_write = 5.0, cache_read = 0.20 }
+
+# List price ($2/$10, $0.10 cached) from third-party price pages on 2026-11-21;
+# check against OpenAI's pricing page before relying on it.
+[models."gpt-6.2-sol"]
+display_name = "GPT-6.2 Sol"
 provider = "openai"
 context_window = 1050000
 max_output = 128000

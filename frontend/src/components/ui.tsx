@@ -49,7 +49,7 @@ export function isTier(x?: string | null): boolean {
   return !!x && tierModel(x) !== undefined;
 }
 
-/** Tier keys that route to a model, in config order (gpt-6.1-sol → ["codex.standard", "codex.cli"]). */
+/** Tier keys that route to a model, in config order (gpt-6.1-sol → ["codex.fast", "codex.standard", "codex.cli"]). */
 export function tiersOf(model?: string | null): string[] {
   return Object.entries(catalog()?.tiers ?? {}).filter(([, m]) => m === model).map(([t]) => t);
 }

@@ -26,8 +26,8 @@ log = logging.getLogger(__name__)
 
 # Built-in skills shown first in the composer's skill menu (in this order).
 FEATURED_SKILLS = ["graphify", "grilling", "claude-handoff", "game-designer",
-                   "cost-effective-claude-delegation", "high-performance-claude-delegation", "unity-router"]
-NATIVE_BY_NAME = {"delegation"}
+                   "cost-effective-claude-delegation", "delegation-tiers", "high-performance-claude-delegation", "unity-router"]
+NATIVE_BY_NAME = {"delegation", "delegation-tiers"}
 MAX_SKILL_FILE = 200_000
 
 
@@ -287,7 +287,9 @@ def skill_invocation(name: str) -> str:
 
 TOOL_MAPPING_NOTE = """Skills marked runtime="claude-code" were written for Claude Code. Follow them with GameDevWorkstation's tools:
 - Agent/Task subagents → spawn_subagent (opus → tier claude.deep, sonnet → claude.standard, haiku → claude.fast; \
-Codex/GPT models → codex.fast, codex.standard or codex.cli). Parallel or background agents → run_in_background true, \
+Codex/GPT models → codex.fast / codex.standard for regular coding, codex.deep for complex coding and design, \
+codex.computer for computer use / screenshots / visual checks, or codex.cli for CLI execution). \
+Parallel or background agents → run_in_background true, \
 then get_subagent_result.
 - Bash → run_command. Read → read_file; Glob/LS → list_dir; Grep → search. Write → write_file; Edit/MultiEdit → edit_file.
 - WebSearch → web_search; WebFetch → web_fetch.

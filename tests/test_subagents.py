@@ -42,7 +42,7 @@ class SmartFake(FakeProvider):
 def repo(tmp_path):
     d = tmp_path / "repo"
     d.mkdir()
-    (d / "README.md").write_text("hi\n")
+    (d / "README.md").write_text("hi\n", encoding="utf-8")
     for c in (["git", "init", "-q", "-b", "main"], ["git", "add", "-A"],
               ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"]):
         subprocess.run(c, cwd=d, check=True)
@@ -85,9 +85,9 @@ async def test_three_units_parallel_routed_worktrees_and_stats(app, repo):
     # Parallel: total wall time well under the sum of the subagents' call times.
     serial = sum(e - s for s, e in app.claude.windows + app.codex.windows)
     assert time.monotonic() - t0 < serial * 0.75
-    # Routed per the table: extraction on claude.fast (Haiku), mechanical edits on codex.fast (GPT-6.1 Terra).
+    # Routed per the table: extraction on claude.fast (Haiku), mechanical edits on codex.fast (GPT-6.1 Sol).
     assert {c.model for c in app.claude.calls} == {"claude-haiku-5-5"}
-    assert {c.model for c in app.codex.calls} == {"gpt-6.1-terra"}
+    assert {c.model for c in app.codex.calls} == {"gpt-6.1-sol"}
     assert all(c.effort == "low" for c in app.claude.calls + app.codex.calls)
     # Separate worktrees for the code units, none for the extraction unit.
     mgr = app.extensions["subagents"]
@@ -110,6 +110,8 @@ async def test_three_units_parallel_routed_worktrees_and_stats(app, repo):
 
 
 async def test_above_high_subagent_needs_approval_token(app, repo):
+    # This test isolates effort tokens; Opus consent is covered by test_tier_policy.
+    app.config.modes["allowlist"] = ["opus_subagent:claude.deep"]
     ctx = ctx_for(app, repo)
     out = await app.tools.run(ctx, "spawn_subagent", {"name": "deep", "tier": "claude.deep", "effort": "max",
                                                       "instructions": "prove it"})

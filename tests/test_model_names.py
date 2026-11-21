@@ -15,10 +15,11 @@ H = {"Authorization": "Bearer t"}
 NAMES = {
     "claude-fable-5-1": "Fable 5.1", "claude-opus-5-5": "Opus 5.5", "claude-sonnet-5-5": "Sonnet 5.5",
     "claude-haiku-5-5": "Haiku 5.5", "gpt-6-astra": "GPT-6 Astra", "gpt-6.1-sol": "GPT-6.1 Sol",
-    "gpt-6.1-terra": "GPT-6.1 Terra", "gpt-6-luna": "GPT-6 Luna",
+    "gpt-6.2-sol": "GPT-6.2 Sol", "gpt-6.1-terra": "GPT-6.1 Terra", "gpt-6-luna": "GPT-6 Luna",
 }
 TIERS = {"claude.fast": "claude-haiku-5-5", "claude.standard": "claude-sonnet-5-5", "claude.deep": "claude-opus-5-5",
-         "codex.fast": "gpt-6.1-terra", "codex.standard": "gpt-6.1-sol", "codex.cli": "gpt-6.1-sol"}
+         "codex.fast": "gpt-6.1-sol", "codex.standard": "gpt-6.1-sol", "codex.deep": "gpt-6.2-sol",
+         "codex.computer": "gpt-6.1-terra", "codex.cli": "gpt-6.1-sol"}
 
 
 @pytest.fixture
@@ -29,10 +30,10 @@ def client(tmp_path):
         yield c
 
 
-def test_default_catalog_has_display_names_and_unchanged_tiers(cfg):
+def test_default_catalog_has_display_names_and_tiers(cfg):
     assert {k: m.display_name for k, m in cfg.models.items()} == NAMES
-    assert cfg.tiers == TIERS  # tier keys and routing are untouched
-    assert cfg.label("gpt-6.1-sol") == "GPT-6.1 Sol · codex.standard"
+    assert cfg.tiers == TIERS
+    assert cfg.label("gpt-6.1-sol") == "GPT-6.1 Sol · codex.fast"
     assert cfg.label("gpt-6.1-sol", "codex.cli") == "GPT-6.1 Sol · codex.cli"
     assert cfg.label("claude-opus-5-5") == "Opus 5.5 · claude.deep"
     assert cfg.label("gpt-6-astra") == "GPT-6 Astra"  # no tier routes to it
@@ -53,11 +54,11 @@ def test_derive_display_name(mid, name):
 def test_older_config_without_display_name_falls_back(tmp_path, monkeypatch):
     # A defaults file from before display_name existed, plus a user file adding a custom model.
     old_defaults = tmp_path / "old_default.toml"
-    old_defaults.write_text(re.sub(r'(?m)^display_name = ".*"\n', "", config_mod.DEFAULT_CONFIG_PATH.read_text()))
-    assert "display_name =" not in old_defaults.read_text()
+    old_defaults.write_text(re.sub(r'(?m)^display_name = ".*"\n', "", config_mod.DEFAULT_CONFIG_PATH.read_text(encoding="utf-8")), encoding="utf-8")
+    assert "display_name =" not in old_defaults.read_text(encoding="utf-8")
     monkeypatch.setattr(config_mod, "DEFAULT_CONFIG_PATH", old_defaults)
     user = tmp_path / "config.toml"
-    user.write_text('[models."gpt-5.4-mini"]\nprovider = "openai"\n\n[models."my-local"]\nprovider = "openai"\n')
+    user.write_text('[models."gpt-5.4-mini"]\nprovider = "openai"\n\n[models."my-local"]\nprovider = "openai"\n', encoding="utf-8")
     cfg = load_config(user)
     for mid, name in NAMES.items():
         assert cfg.models[mid].display_name == name
@@ -68,7 +69,7 @@ def test_older_config_without_display_name_falls_back(tmp_path, monkeypatch):
 
 def test_user_display_name_overrides_default(tmp_path):
     user = tmp_path / "config.toml"
-    user.write_text('[models."gpt-6.1-sol"]\ndisplay_name = "Sol"\n')
+    user.write_text('[models."gpt-6.1-sol"]\ndisplay_name = "Sol"\n', encoding="utf-8")
     cfg = load_config(user)
     assert cfg.models["gpt-6.1-sol"].display_name == "Sol"
     assert cfg.models["gpt-6.1-sol"].input == 2.0  # rest of the entry still comes from defaults
@@ -80,12 +81,12 @@ def test_api_exposes_display_names_and_tier_map(client):
     assert st["tiers"] == TIERS
     assert st["tier_models"]["codex.standard"] == {"model": "gpt-6.1-sol", "display_name": "GPT-6.1 Sol", "provider": "openai"}
     assert st["tier_models"]["codex.cli"] == {"model": "gpt-6.1-sol", "display_name": "GPT-6.1 Sol", "provider": "openai"}
-    assert st["tier_models"]["codex.fast"]["display_name"] == "GPT-6.1 Terra"
+    assert st["tier_models"]["codex.fast"]["display_name"] == "GPT-6.1 Sol"
     assert st["tier_models"]["claude.deep"] == {"model": "claude-opus-5-5", "display_name": "Opus 5.5", "provider": "anthropic"}
 
     env = client.get("/api/environment", headers=H).json()
     by_id = {m["id"]: m for m in env["models"]}
-    assert by_id["gpt-6.1-terra"]["display_name"] == "GPT-6.1 Terra" and by_id["gpt-6.1-terra"]["tier"] == "codex.fast"
+    assert by_id["gpt-6.1-terra"]["display_name"] == "GPT-6.1 Terra" and by_id["gpt-6.1-terra"]["tier"] == "codex.computer"
     assert env["tier_models"] == st["tier_models"]
 
     s = client.get("/api/settings", headers=H).json()

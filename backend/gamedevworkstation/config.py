@@ -181,7 +181,7 @@ class Config(BaseModel):
         return self.model(model_id).display_name or derive_display_name(model_id)
 
     def label(self, model_id: str, tier: str | None = None) -> str:
-        """UI label: 'GPT-6.1 Sol · codex.standard'. The tier defaults to the first one routing to the model."""
+        """UI label: 'GPT-6.1 Sol · codex.fast'. The tier defaults to the first one routing to the model."""
         tier = tier or self.tier_of(model_id)
         name = self.display_name(model_id)
         return f"{name} · {tier}" if tier else name

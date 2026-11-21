@@ -369,6 +369,16 @@ model tiers, delegation budgets, spend limits, modes and allowlist, `[skills]`, 
 `[ladder]`, `[campaigns]`, `[fleet]` and `[unity]` (the Unity backend: `auto`, `mcp` or `cli`, the
 Unity CLI path and the Unity job timeouts). See the [guide](docs/GUIDE.md#configuration).
 
+OpenAI tiers follow the owner's model rule:
+
+| Tier | Model | Work |
+| --- | --- | --- |
+| `codex.fast` | `gpt-6.1-sol` | Quick mechanical coding |
+| `codex.standard` | `gpt-6.1-sol` | Regular coding |
+| `codex.deep` | `gpt-6.2-sol` | Complex coding and design |
+| `codex.computer` | `gpt-6.1-terra` | Computer use, screenshots and visual checks |
+| `codex.cli` | `gpt-6.1-sol` | Codex CLI execution |
+
 <details>
 <summary><b>Project layout</b></summary>
 

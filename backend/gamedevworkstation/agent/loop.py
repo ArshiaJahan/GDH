@@ -120,6 +120,7 @@ class AgentRunner:
         mp = d.get("max_parallel", {}) or {}
         seg.append(f"Session folder: {folder}\nMode: {mode.get(session['mode'], session['mode'])}\n"
                    f"Model tiers: {tiers}\n"
+                   "Tier policy: when you spawn a subagent, follow the delegation-tiers skill; where it differs from the delegation skill's routing table, delegation-tiers wins. Opus (claude.deep) subagents need the user's approval.\n"
                    f"Delegation: max_parallel {mp.get('claude_codex', 4)} API subagents + {mp.get('codex_cli', 2)} "
                    f"Codex CLI runs; confirm_over_usd = {d.get('confirm_over_usd')}; "
                    f"job_budget_usd = {d.get('job_budget_usd')}\nToday: {dt.date.today().isoformat()}"

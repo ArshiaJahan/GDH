@@ -13,7 +13,7 @@ const SECTIONS = [["accounts", "Accounts"], ["models", "Models and effort"], ["d
 const PROVIDER_NAME: Record<string, string> = { anthropic: providerLabel("anthropic"), openai: providerLabel("openai"), elevenlabs: providerLabel("elevenlabs") };
 
 /** A provider's configured models by real name, each with the tiers routing to it:
- *  "GPT-6 Astra, GPT-6.1 Sol (codex.standard, codex.cli), …". Empty for providers without a catalog. */
+ *  "GPT-6 Astra, GPT-6.1 Sol (codex.fast, codex.standard, codex.cli), …". Empty for providers without a catalog. */
 function modelsLine(st: any, provider: string): string {
   return Object.entries(st.models as Record<string, any>).filter(([, m]) => m.provider === provider).map(([id, m]) => {
     const tiers = Object.entries(st.tiers as Record<string, string>).filter(([, x]) => x === id).map(([t]) => t);
@@ -247,7 +247,7 @@ function AddProfile({ onAdd }: { onAdd: (profile: string, key: string) => void }
 // Tier keys are unchanged ("codex.*" stays); the groups only name the models behind them.
 const TIER_GROUPS: [string, string, string][] = [
   ["claude", "Claude tiers", "The claude.* tiers run Anthropic models."],
-  ["codex", "OpenAI tiers", "OpenAI retired its *-codex API models, so the codex.* tiers run GPT-6 models."],
+  ["codex", "OpenAI tiers", "Defaults: fast/standard use GPT-6.1 Sol for regular coding, deep uses GPT-6.2 Sol for complex coding and design, computer uses GPT-6.1 Terra for computer use and visual checks; cli uses GPT-6.1 Sol."],
   ["", "Other tiers", ""],
 ];
 const tierGroup = (tier: string) => (tier.startsWith("claude.") ? "claude" : tier.startsWith("codex.") ? "codex" : "");
