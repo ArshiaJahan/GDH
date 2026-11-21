@@ -1,0 +1,509 @@
+diff --git a/README.md b/README.md
+index 4835361..a67646a 100644
+--- a/README.md
++++ b/README.md
+@@ -49,7 +49,7 @@ Everything runs locally; the backend listens on `127.0.0.1` only.
+ | **Fleet** | Parallel waves of subagents in their own worktrees, each with a claimed scope, scope-checked merges, a conflict circuit breaker and discoveries relayed to the next wave. |
+ | **Progressive skill disclosure** | A compact skill index in the system prompt; full skill text is loaded only when used and survives compaction. |
+ | **Task board** | A Kanban board (Tasks tab) you and the agent share: tasks with codes like `Task00001`, subtasks and checklists, comments, history and linked sessions, live updates. In chat: `/task new`, `/task <code>`, `/task move`, `/task done`, `/task list`, `/task link`; the agent uses `task_*` tools. Scheduled prompts live on the Schedule page. |
+-| **Claude Code sessions** | Experimental: not yet verified against a live logged-in CLI. Run your own `claude` CLI and login, with GDW tools, approvals, Plan mode and `--resume`. Subscription estimates stay outside spend limits; API key logins record `billing='api'` and check spend limits before each turn. See [Claude Code sessions](docs/GUIDE.md#claude-code-sessions). |
++| **Claude Code sessions** | Run your own `claude` CLI and login, with GDW tools, approvals, Plan mode and `--resume`. Subscription estimates stay outside spend limits; API key logins record `billing='api'` and check spend limits before each turn. See [Claude Code sessions](docs/GUIDE.md#claude-code-sessions). |
+ | **Cost control** | Daily and per-session spend limits, job budgets, approval for high effort, and a My usage page per model. |
+ | **Trailer maker** | Brief → beat sheet → scripted Play Mode capture (Unity Recorder) → ffmpeg edit from a JSON edit list → ElevenLabs music cut to the beat sheet → three reviewers → Steam, YouTube and vertical exports. |
+ | **ElevenLabs** | Speech, transcription, sound effects and music (including composition plans with exact section lengths), in chat and on their own page. |
+@@ -57,12 +57,12 @@ Everything runs locally; the backend listens on `127.0.0.1` only.
+ 
+ ### Claude Code sessions
+ 
+-Experimental: not yet verified against a live logged-in CLI. Settings files default to
+-**None (safe mode: your ~/.claude hooks, plugins and settings files are ignored)**, using
+-`--safe-mode`. This disables custom CLAUDE.md, skills, installed plugins, hooks, MCP servers,
+-commands, agents and output styles; admin policies still apply, and auth, model selection,
+-built-in tools and plugins, and permissions work normally. Choosing `user,project,local` sources
+-uses `--setting-sources=<list>` instead. Strict MCP config remains on unless you enable your MCP
++Checked with real turns on claude 2.1.308 (claude.ai login). Settings files default to **None
++(your ~/.claude hooks, plugins and settings files are ignored)**, passing an empty
++`--setting-sources=`: no custom CLAUDE.md, skills, installed plugins, hooks or settings; admin
++policies still apply, and auth, model selection, built-in tools and the CLI's built-in plugins work
++normally. (`--safe-mode` isn't used: it also dropped GDW's own MCP server.) Choosing
++`user,project,local` sources passes `--setting-sources=<list>`. Strict MCP config remains on unless you enable your MCP
+ servers. GDW adds its own CLAUDE.md/skills context explicitly, with a 64 KB prompt cap.
+ 
+ The CLI env allowlist keeps only shell/locale variables (`PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`,
+@@ -70,6 +70,8 @@ The CLI env allowlist keeps only shell/locale variables (`PATH`, `HOME`, `USER`,
+ case, `XDG_*`, `__CF_USER_TEXT_ENCODING`, plus GDW's `MCP_TOOL_TIMEOUT`. Credentials and arbitrary
+ secrets are excluded. Each process's MCP bearer token is revoked and its config file removed when
+ the process ends. Hook registration failure ends the process with an error, without silent fallback.
++Not checked live yet: API key logins, `--resume` after an app restart with a changed CLI version,
++the CLI's own subagents, and `can_use_tool` control requests.
+ Plan mode blocks known file edits and commands; other non-GDW tools receive an approval card.
+ Subscription logins record estimates outside spend limits; CLI API key logins record `billing='api'`
+ and check normal spend limits before each turn. See the [guide](docs/GUIDE.md#claude-code-sessions).
+diff --git a/backend/gamedevworkstation/features/claude_code.py b/backend/gamedevworkstation/features/claude_code.py
+index e6ff4ac..4f71165 100644
+--- a/backend/gamedevworkstation/features/claude_code.py
++++ b/backend/gamedevworkstation/features/claude_code.py
+@@ -5,12 +5,14 @@ One long-lived process per GameDevWorkstation session:
+     claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages
+            --session-id=<uuid> | --resume=<uuid>  --model <id> [--effort <level>] --permission-mode <mode>
+            --permission-prompt-tool mcp__gdw__approve --mcp-config <0600 file> [--strict-mcp-config]
+-           --safe-mode | --setting-sources=<explicit list> --add-dir <worktrees> --append-system-prompt=<GDW context>
++           --setting-sources=<explicit list, empty by default> --add-dir <worktrees> --append-system-prompt=<GDW context>
+ 
+ - Auth: the CLI's own login. The child env allows only shell, locale, proxy and desktop variables
+-  plus MCP_TOOL_TIMEOUT (claude_cli.child_env); --bare (API key only) is never
+-  passed; nothing is read from ~/.claude or the Keychain. `claude auth status` not logged in → the
+-  turn ends with a card: "Run `claude auth login` in a terminal, then retry".
++  plus MCP_TOOL_TIMEOUT (claude_cli.child_env); --bare (API key only) is never passed; nothing is
++  read from ~/.claude or the Keychain. --safe-mode isn't used: it also drops the --mcp-config server.
++  The init event must show no hooks, user plugins (the CLI's built-in ones are ignored) or foreign MCP
++  servers, and the PreToolUse hook must be applied; otherwise the process ends (fail closed).
++  `claude auth status` not logged in → the turn ends with a card: "Run `claude auth login` in a terminal, then retry".
+ - Turns: one `{"type":"user",...}` line on stdin per GDW turn; the stdout reader maps stream-json
+   events into GDW messages, deltas, tool cards and usage, exactly like the agent_sdk harness, until
+   the turn's `result`. Process ends (crash, app restart): the next turn starts it again with
+@@ -21,7 +23,8 @@ One long-lived process per GameDevWorkstation session:
+   GDW's folder scope, snapshots or Plan mode; whatever the hook leaves to the CLI (ExitPlanMode,
+   AskUserQuestion, ...) reaches mcp__gdw__approve, the --permission-prompt-tool, which shows GDW's
+   cards. A `can_use_tool` control request (the SDK's stdio route) gets the same answer.
+-- Modes: ask → manual, accept_edits → acceptEdits, plan → plan. bypassPermissions, dontAsk and auto
++- Modes: ask → default, accept_edits → acceptEdits, plan → plan (writes allowed only to the CLI's
++  plan file in ~/.claude/plans, so ExitPlanMode reaches GDW's plan card). bypassPermissions, dontAsk and auto
+   are never passed (build_argv refuses them).
+ - Stop: an `interrupt` control request, then SIGINT, then services._kill_tree.
+ - Usage: each turn records its delta, provider anthropic; subscription login estimates stay outside
+@@ -61,7 +64,7 @@ if TYPE_CHECKING:
+ log = logging.getLogger(__name__)
+ 
+ HARNESS = "claude_code"
+-CLI_MODE = {"ask": "manual", "accept_edits": "acceptEdits", "plan": "plan"}  # `claude --help` lists manual, not default
++CLI_MODE = {"ask": "default", "accept_edits": "acceptEdits", "plan": "plan"}  # the live CLI rejects "manual"
+ FORBIDDEN_MODES = frozenset({"bypassPermissions", "dontAsk", "auto"})
+ FORBIDDEN_FLAGS = ("--bare", "--dangerously-skip-permissions", "--allow-dangerously-skip-permissions")
+ SETTING_SOURCES = ("user", "project", "local")
+@@ -88,6 +91,39 @@ def valid_setting_sources(v: Any) -> bool:
+     return all(p in SETTING_SOURCES for p in parts) and len(set(parts)) == len(parts)
+ 
+ 
++def user_plugins(plugins: Any) -> list:
++    """The init event's plugins minus the CLI's built-in ones (`name@builtin`, source/scope "builtin"):
++    those load whatever the setting sources say, so only the others break isolation."""
++    out = []
++    for p in plugins if isinstance(plugins, list) else ([plugins] if plugins else []):
++        if isinstance(p, dict):
++            name = str(p.get("name") or p.get("id") or "")
++            src = str(p.get("source") or p.get("scope") or p.get("marketplace") or "").lower()
++            if p.get("builtin") or p.get("isBuiltin") or src in ("builtin", "built-in") or name.endswith("@builtin"):
++                continue
++        elif isinstance(p, str) and p.endswith("@builtin"):
++            continue
++        out.append(p)
++    return out
++
++
++def plans_dir() -> Path:
++    """Where the CLI writes Plan mode's plan file; the only place a plan-mode session may write."""
++    return Path.home() / ".claude" / "plans"
++
++
++def _is_plan_file(inp: dict) -> bool:
++    raw = inp.get("file_path") or inp.get("path") or inp.get("notebook_path")
++    if not isinstance(raw, str) or not raw:
++        return False
++    try:
++        f = Path(os.path.expanduser(raw)).resolve()
++        root = plans_dir().resolve()
++    except (OSError, RuntimeError):
++        return False
++    return f.parent == root and f.suffix == ".md"
++
++
+ def _cap_prompt(text: str) -> str:
+     raw = text.encode("utf-8")
+     if len(raw) <= SYSTEM_PROMPT_MAX_BYTES:
+@@ -111,7 +147,7 @@ def build_argv(cli: str, *, session_id: str | None, resume: str | None, model: s
+         raise ValueError("Unknown Claude Code setting sources")
+     if not valid_claude_code_session(resume if resume is not None else session_id):
+         raise ValueError("Claude Code session id must be a UUID")
+-    pm = CLI_MODE.get(mode, "manual")
++    pm = CLI_MODE.get(mode, "default")
+     if pm in FORBIDDEN_MODES:  # unreachable by construction; kept as a hard stop
+         raise ValueError(f"permission mode {pm} is never used")
+     argv = [cli, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+@@ -126,7 +162,7 @@ def build_argv(cli: str, *, session_id: str | None, resume: str | None, model: s
+     for d in add_dirs:
+         argv += ["--add-dir", str(d)]
+     sources = ','.join(p.strip() for p in setting_sources.split(',') if p.strip())
+-    argv.append(f"--setting-sources={sources}" if sources else "--safe-mode")
++    argv.append(f"--setting-sources={sources}")  # empty: no user/project/local settings, MCP config still loads
+     if system_prompt:
+         argv.append(f"--append-system-prompt={_cap_prompt(system_prompt)}")
+     bad = [a for a in argv if a.split("=", 1)[0] in FORBIDDEN_FLAGS or
+@@ -186,6 +222,7 @@ class Proc:
+         self._pending: dict[str, asyncio.Future] = {}
+         self._inflight: dict[str, asyncio.Task] = {}
+         self._msg_ids: dict[str, str] = {}  # CLI message id → the GDW id its streamed text used
++        self._last_assistant: tuple[str, Message] | None = None  # to join split assistant events
+         self._stream_id: str | None = None
+         self._req = 0
+         self.reader = asyncio.create_task(self._read())
+@@ -314,17 +351,24 @@ class Proc:
+         if t == "result":
+             self._on_result(ev, turn)
+             return
++        if t == "rate_limit_event":
++            self._on_rate_limit(ev.get("rate_limit_info") or {}, turn)
++            return
+         if turn and turn.jid and t:
+             app.jobs.log(turn.jid, f"[{t}]\n")
+ 
+     def _on_system(self, ev: dict, turn: Turn | None) -> None:
+         app, sid, st = self.app, self.sid, ev.get("subtype")
+         if st == "init":
+-            # Reject reported hooks/plugins even with explicit setting sources; missing fields are OK.
++            # Reject reported hooks/user plugins even with explicit setting sources; missing fields are OK.
++            # The CLI's built-in plugins are always listed and don't count.
+             foreign_mcp = [m for m in ev.get("mcp_servers") or []
+                            if (m.get("name") if isinstance(m, dict) else m) != SERVER]
+-            if ev.get("hooks") or ev.get("plugins") or (foreign_mcp and not self.mgr.cfg.get("load_user_mcp")):
+-                self.fatal_error = "Claude Code settings isolation failed: unexpected hooks, plugins or MCP servers."
++            no_hook = self.mgr.cfg.get("pre_tool_hook", True) and not self.hook_ok
++            if (ev.get("hooks") or user_plugins(ev.get("plugins")) or no_hook
++                    or (foreign_mcp and not self.mgr.cfg.get("load_user_mcp"))):
++                self.fatal_error = ("Claude Code's PreToolUse hook wasn't applied; the process was stopped." if no_hook else
++                                    "Claude Code settings isolation failed: unexpected hooks, plugins or MCP servers.")
+                 self.mgr._error(sid, self.fatal_error)
+                 self.mgr.mcp.revoke(sid, self.token)
+                 asyncio.create_task(self.kill())
+@@ -359,6 +403,21 @@ class Proc:
+         elif turn and turn.jid and st:
+             app.jobs.log(turn.jid, f"[system {st}]\n")
+ 
++    def _on_rate_limit(self, info: dict, turn: Turn | None) -> None:
++        """The CLI's Claude plan limit report: shown when it isn't plain "allowed"."""
++        status = str(info.get("status") or "")
++        if turn and turn.jid:
++            self.app.jobs.log(turn.jid, f"[rate limit {status} {info.get('rateLimitType') or ''}]\n")
++        if not status or status == "allowed":
++            return
++        resets = info.get("resetsAt")
++        until = float(resets) if isinstance(resets, (int, float)) else None
++        kind = str(info.get("rateLimitType") or "").replace("_", " ")
++        text = ("Claude plan limit reached" if status == "rejected" else "Close to the Claude plan limit") + \
++            (f" ({kind})" if kind else "") + (time.strftime(", resets at %H:%M", time.localtime(until)) if until else "")
++        self.app.bus.publish("agent.status", {"kind": "rate_limit", "text": text, "until": until,
++                                              "status": status}, self.sid)
++
+     def _on_stream(self, e: dict, turn: Turn | None) -> None:
+         bus, sid, et = self.app.bus, self.sid, e.get("type")
+         if et == "message_start":
+@@ -387,6 +446,7 @@ class Proc:
+             self.app.store.add_message(self.sid, Message(role="user", content=turn.pending_results,
+                                                          meta={"tool_results": True}))
+             turn.pending_results = []
++            self._last_assistant = None
+ 
+     def _on_assistant(self, m: dict, turn: Turn | None) -> None:
+         app, sid = self.app, self.sid
+@@ -398,7 +458,7 @@ class Proc:
+             bt = b.get("type")
+             if bt == "text" and b.get("text"):
+                 blocks.append(TextBlock(text=b["text"]))
+-            elif bt == "thinking":
++            elif bt == "thinking" and (b.get("thinking") or "").strip():  # the CLI also sends empty ones
+                 blocks.append(ThinkingBlock(thinking=b.get("thinking", ""), signature=b.get("signature"),
+                                             provider="anthropic"))
+             elif bt == "tool_use":
+@@ -407,12 +467,21 @@ class Proc:
+         if not blocks:
+             return
+         cli_id = str(m.get("id") or "")
+-        gid = self._msg_ids.pop(cli_id, None) or new_id("msg_")
+-        model = m.get("model") or (turn.model if turn else None)
+-        msg = Message(id=gid, role="assistant", content=blocks,
+-                      meta={"model": model, "effort": turn.effort if turn else None, "harness": HARNESS,
+-                            "billing": self.billing})
+-        app.store.add_message(sid, msg)
++        last = self._last_assistant
++        if cli_id and last and last[0] == cli_id:
++            # The live CLI sends one assistant event per content block of the same API message: join them.
++            msg = last[1]
++            msg.content = [*msg.content, *blocks]
++            app.store.replace_content(sid, msg.id, msg)
++            gid, model = msg.id, msg.meta.get("model")
++        else:
++            gid = self._msg_ids.pop(cli_id, None) or new_id("msg_")
++            model = m.get("model") or (turn.model if turn else None)
++            msg = Message(id=gid, role="assistant", content=blocks,
++                          meta={"model": model, "effort": turn.effort if turn else None, "harness": HARNESS,
++                                "billing": self.billing})
++            app.store.add_message(sid, msg)
++        self._last_assistant = (cli_id, msg) if cli_id else None
+         if turn:
+             turn.saw_output = True
+         try:
+@@ -850,6 +919,11 @@ class ClaudeCode:
+             return None
+         return make_gate(self.app, lambda: self.app.store.get(sid) or s, _cwd(s), [])
+ 
++    def _plan_write(self, sid: str, name: str, inp: dict) -> bool:
++        """A plan-mode session writing its plan file in ~/.claude/plans (nothing else there, no other mode)."""
++        s = self.app.store.get(sid)
++        return bool(s and s["mode"] == "plan" and name in ("Write", "Edit", "MultiEdit") and _is_plan_file(inp))
++
+     async def pre_tool_use(self, sid: str, data: dict) -> dict:
+         """The PreToolUse hook callback: GDW's gate for every tool call, like agent_sdk's pre_tool_use."""
+         name = str(data.get("tool_name") or data.get("toolName") or "")
+@@ -860,6 +934,8 @@ class ClaudeCode:
+             why: str | None = "mcp__gdw__approve is Claude Code's permission handler, not a tool to call."
+         elif name.startswith(GDW_PREFIX):
+             why = None  # GameDevWorkstation's own tool: it applies its own approvals and Plan mode when it runs
++        elif self._plan_write(sid, name, inp):
++            why = None  # Plan mode's own plan file: the CLI then offers ExitPlanMode, i.e. GDW's plan card
+         else:
+             gate = self._gate(sid)
+             why = await gate(name, inp) if gate else "This session no longer exists."
+@@ -899,8 +975,8 @@ class ClaudeCode:
+                     (f" Feedback: {res.get('note')}" if res.get("note") else "")}
+         if name == PROMPT_TOOL:
+             return {"behavior": "deny", "message": "Not a tool to call."}
+-        if name.startswith(GDW_PREFIX):
+-            return allow  # GDW's own tool: its own checks run when it's called
++        if name.startswith(GDW_PREFIX) or self._plan_write(sid, name, inp):
++            return allow  # GDW's own tool (its own checks run when it's called), or Plan mode's plan file
+         gate = self._gate(sid)
+         why = await gate(name, inp) if gate else "This session no longer exists."
+         return {"behavior": "deny", "message": why} if why else allow
+@@ -926,11 +1002,12 @@ class ClaudeCode:
+     # ------------------------------------------------------------ usage
+ 
+     def record_usage(self, sid: str, ev: dict, turn: Turn | None) -> None:
+-        """Record the increase in CLI totals, retaining the conversation id and process pid.
+-        A new conversation or totals that reset on process restart count in full.
+-        Tokens may be per turn or cumulative: choose the reading whose price is closer to
+-        the cumulative cost delta.
+-        Live logged-in CLI behavior remains unverified; the fake covers both restart shapes."""
++        """Record one turn: the live CLI reports per-turn tokens in `usage` and the conversation's
++        running cost in `total_cost_usd`, so tokens are taken as they are and the cost is the increase
++        over the stored total (a new conversation or a per-process reset counts in full). A failed
++        resume records nothing: no turn ran."""
++        if ev.get("is_error") and RESUME_FAILED.search(" ".join(map(str, [ev.get("result") or "", *(ev.get("errors") or [])]))):
++            return
+         app = self.app
+         s = app.store.get(sid)
+         if not s:
+@@ -963,14 +1040,11 @@ class ClaudeCode:
+             return Usage(input_tokens=int(d["in"]), output_tokens=int(d["out"]), cache_read_tokens=int(d["cr"]),
+                          cache_write_tokens=int(d["cw"]))
+ 
+-        cand = [usage_of(delta), usage_of(now)]
++        usage = usage_of(now)
+         try:
+             mcfg = app.config.model(model)
+-            if delta["cost"] > 0:
+-                cand.sort(key=lambda x: abs(compute_cost(mcfg, x) - delta["cost"]))
+-        except Exception:  # noqa: BLE001 — unknown model: the delta reading
++        except Exception:  # noqa: BLE001 — unknown model: the CLI's own cost only
+             mcfg = None
+-        usage = cand[0]
+         usage.cost_usd = delta["cost"] if ev.get("total_cost_usd") is not None else (
+             compute_cost(mcfg, usage) if mcfg else 0.0)
+         billing = p.billing if p else ("api" if (self.probe.cached() or {}).get("bills_api") else "subscription")
+diff --git a/backend/gamedevworkstation/features/sessions_mgmt.py b/backend/gamedevworkstation/features/sessions_mgmt.py
+index ffdec21..bca26d3 100644
+--- a/backend/gamedevworkstation/features/sessions_mgmt.py
++++ b/backend/gamedevworkstation/features/sessions_mgmt.py
+@@ -102,6 +102,8 @@ class Titler:
+         s = self.app.store.get(sid)
+         if not s or not self.enabled() or s["deleted"]:
+             return False
++        if s.get("harness") == "claude_code":
++            return False  # a Claude Code session runs on the user's Claude login; the auto title would bill the API
+         src = s["settings"].get("title_source")
+         if not (s["title"] == "New session" or src == "message"):
+             return False  # named by the user, a scheduled task, a copy, or already auto-titled
+diff --git a/docs/GUIDE.md b/docs/GUIDE.md
+index 4273cec..9611f93 100644
+--- a/docs/GUIDE.md
++++ b/docs/GUIDE.md
+@@ -141,7 +141,7 @@ keep an explicit **Save**.
+   See [Campaigns and workflows](#campaigns-and-workflows).
+ - `[fleet]` parallel waves: `enabled`, `max_units` (writing units per wave), `unit_timeout_min`
+   (`build`, `research`) and `relay_tokens` (discoveries passed to the next wave).
+-- `[sessions]` `auto_title` (name new sessions after the first reply, default on), `trash_days`
++- `[sessions]` `auto_title` (name new sessions after the first reply, default on; Claude Code sessions are skipped because the title call would bill the API), `trash_days`
+   (sessions in Trash are deleted for good after this many days, default 30) and
+   `event_retention_days` (how long the event log keeps events, default 7; see Settings → Storage).
+ - `[mcp.presets.<key>]` built-in MCP servers (name, transport, command, args, description) added
+@@ -689,7 +689,9 @@ stay in sync:
+ 
+ ## Claude Code sessions
+ 
+-**Experimental: not yet verified against a live logged-in CLI.**
++Checked with real turns on claude 2.1.308 (claude.ai login). Not checked live yet: API key logins,
++`--resume` after an app restart with a changed CLI version, the CLI's own subagents, and
++`can_use_tool` control requests (the hook and `--permission-prompt-tool` route was).
+ 
+ **What it is.** A session on the **Claude Code (subscription)** harness runs your own `claude` CLI
+ (Claude Code, installed by you and never modified or bundled) inside GameDevWorkstation. You chat
+@@ -742,20 +744,22 @@ the process ends (the token is revoked); the MCP config file is then removed. Pu
+ hook, on by default: folder scope, sensitive files, git metadata, the before-write snapshot for the Changes card),
+ then the usual cards: edits in Ask, commands, and anything else Claude Code would ask about (through
+ `--permission-prompt-tool mcp__gdw__approve`). Questions Claude Code asks you get a card with its
+-options. Ask runs Claude Code in `manual`, Accept edits in `acceptEdits` and Plan only in `plan`; in
+-Plan known file edits and Bash commands are refused, and approving Claude Code's plan card switches the session to
++options. Ask runs Claude Code in `default`, Accept edits in `acceptEdits` and Plan only in `plan`; in
++Plan known file edits and Bash commands are refused, except writing the CLI's own plan file in
++`~/.claude/plans` (so `ExitPlanMode` reaches the plan card), and approving Claude Code's plan card switches the session to
+ Ask. Unrecognized non-GDW tools still get an approval card in Plan mode; the harness cannot classify
+ their effects. GameDevWorkstation never starts Claude Code in `bypassPermissions`, `dontAsk` or `auto`.
+ Hook registration failure, timeout or cancellation ends the process with an error; there is no silent
+ fallback. An explicit `pre_tool_hook=false` disables that hook.
+ 
+-**Settings isolation.** **Settings files** defaults to **None (safe mode: your ~/.claude hooks,
+-plugins and settings files are ignored)**. This passes `--safe-mode`, disabling custom `CLAUDE.md`,
+-skills, installed plugins, hooks, MCP servers, custom commands and agents, and output styles.
+-Admin-managed policies still apply; auth, model selection, built-in tools and plugins, and permissions
+-work normally. Selecting a subset of `user,project,local` instead passes `--setting-sources=<list>`
+-and omits safe mode. Startup fails closed if the CLI reports hooks or plugins (even with explicit
+-setting sources), or if an MCP server
++**Settings isolation.** **Settings files** defaults to **None (your ~/.claude hooks, plugins and
++settings files are ignored)**. This passes an empty `--setting-sources=`, so no custom `CLAUDE.md`,
++skills, installed plugins, hooks, custom commands, agents or output styles load. `--safe-mode` isn't
++used: on the live CLI it also dropped GDW's own `--mcp-config` server. Admin-managed policies still
++apply; auth, model selection, built-in tools and the CLI's built-in plugins work normally. Selecting
++a subset of `user,project,local` passes `--setting-sources=<list>`. Startup fails closed if the CLI
++reports hooks or plugins other than its built-in ones (even with explicit setting sources), if the
++PreToolUse hook wasn't applied, or if an MCP server
+ other than `gdw` appears while **Your MCP servers** is off; missing fields are accepted. GDW explicitly
+ adds the session folder's `CLAUDE.md`, enabled GDW skills and context pack to the appended system
+ prompt, capped at 64 KB with a truncation note. CLI stderr and errors redact bearer tokens and API keys.
+@@ -1345,8 +1349,7 @@ The data and log folders are owner-only (0700) and the database, config, `runtim
+   `claude auth status`. Log in with `claude auth login` in a terminal, then press **Retry** on the
+   card. If a session stops working after a Claude Code update, the turn's log in Background tasks
+   and the error card show the CLI's redacted message. Hook initialization failure ends the process
+-  with an error, without silently falling back. The feature is experimental: not yet verified against
+-  a live logged-in CLI.
++  with an error, without silently falling back.
+ - **Trailer: "ffmpeg not found"** (exit code 3) — `brew install ffmpeg`, or set `TRAILER_FFMPEG` to the ffmpeg
+   binary. `python3 skills/trailer-maker/scripts/trailer_edl.py doctor` shows what it found.
+ - **Trailer: the Recorder never starts** — the Editor was in batchmode (use the GUI editor), the project has compile
+diff --git a/tests/fixtures/fake_claude.py b/tests/fixtures/fake_claude.py
+index a6a0f53..6b8ac82 100755
+--- a/tests/fixtures/fake_claude.py
++++ b/tests/fixtures/fake_claude.py
+@@ -167,7 +167,8 @@ def result(text, *, is_error=False, subtype="success", **extra):
+     save()
+     emit({"type": "result", "subtype": subtype, "is_error": is_error, "result": text, "session_id": sid,
+           "duration_ms": 50, "num_turns": state["turns"], "total_cost_usd": state["cost"],
+-          "usage": {"input_tokens": state["in"], "output_tokens": state["out"], "cache_read_input_tokens": 0,
++          # like the live CLI: tokens are this turn's, total_cost_usd is the conversation's running total
++          "usage": {"input_tokens": 1000, "output_tokens": 800, "cache_read_input_tokens": 0,
+                     "cache_creation_input_tokens": 0}, **extra})
+ 
+ 
+diff --git a/tests/test_claude_code.py b/tests/test_claude_code.py
+index 6c721b8..b1d9fa4 100644
+--- a/tests/test_claude_code.py
++++ b/tests/test_claude_code.py
+@@ -189,9 +189,9 @@ def test_turn_flags_env_and_event_mapping(live, tmp_path):
+     assert _opt(argv, "--session-id") == s["settings"]["claude_code_session"]
+     assert _opt(argv, "--resume") is None
+     assert _opt(argv, "--model") == "claude-sonnet-5-5"
+-    assert _opt(argv, "--permission-mode") == "manual"
++    assert _opt(argv, "--permission-mode") == "default"
+     assert _opt(argv, "--permission-prompt-tool") == "mcp__gdw__approve"
+-    assert _opt(argv, "--setting-sources") is None and "--safe-mode" in argv
++    assert _opt(argv, "--setting-sources") == "" and "--safe-mode" not in argv
+     assert _opt(argv, "--append-system-prompt").startswith("You are running inside GameDevWorkstation")
+     assert _opt(argv, "--add-dir") == str(live.S.worktrees_root(sid))
+     assert "--bare" not in argv and not any("dangerously" in a for a in argv)
+@@ -238,7 +238,7 @@ def test_never_forbidden_modes(tmp_path, monkeypatch):
+     for mode in ("ask", "accept_edits", "plan", "bogus"):
+         argv = ccm.build_argv("claude", mode=mode, **base)
+         pm = _opt(argv, "--permission-mode")
+-        assert pm in ("manual", "acceptEdits", "plan") and pm not in ccm.FORBIDDEN_MODES
++        assert pm in ("default", "acceptEdits", "plan") and pm not in ccm.FORBIDDEN_MODES
+         assert not any(f in argv for f in ccm.FORBIDDEN_FLAGS)
+     assert set(ccm.CLI_MODE.values()).isdisjoint(ccm.FORBIDDEN_MODES)
+     assert {"bypassPermissions", "dontAsk", "auto"} <= ccm.FORBIDDEN_MODES
+@@ -640,8 +640,8 @@ def test_settings_isolation_flags(tmp_path, sources):
+     argv = ccm.build_argv("fake", session_id="12345678-1234-1234-1234-123456789abc", resume=None,
+                           model="m", effort=None, mode="ask", mcp_config=tmp_path / "m.json", add_dirs=[],
+                           system_prompt=None, setting_sources=sources, strict_mcp=True)
+-    assert ("--safe-mode" in argv) == (not sources)
+-    assert _opt(argv, "--setting-sources") == (sources.replace(" ", "") if sources else None)
++    assert "--safe-mode" not in argv
++    assert _opt(argv, "--setting-sources") == sources.replace(" ", "")
+     assert "--strict-mcp-config" in argv and "--restricted" not in argv
+     with pytest.raises(ValueError, match="setting sources"):
+         ccm.build_argv("fake", session_id="12345678-1234-1234-1234-123456789abc", resume=None,
+@@ -665,6 +665,21 @@ async def test_init_customizations_fail_closed(rig, init, sources):
+     assert not [m for m in rig.app.store.messages(rig.sid) if m.meta.get("harness")]
+ 
+ 
++def test_user_plugins_ignores_builtin():
++    assert ccm.user_plugins(None) == [] and ccm.user_plugins([]) == []
++    assert ccm.user_plugins([{"name": "x@builtin"}, {"name": "y", "source": "builtin"}, "z@builtin"]) == []
++    assert ccm.user_plugins([{"name": "mine", "path": "/p"}, "other"]) == [{"name": "mine", "path": "/p"}, "other"]
++
++
++def test_plans_dir_and_plan_file(monkeypatch, tmp_path):
++    monkeypatch.setenv("HOME", str(tmp_path))
++    assert ccm.plans_dir() == tmp_path / ".claude" / "plans"
++    assert ccm._is_plan_file({"file_path": str(tmp_path / ".claude" / "plans" / "p.md")})
++    assert not ccm._is_plan_file({"file_path": str(tmp_path / ".claude" / "plans" / ".." / "settings.md")})
++    assert not ccm._is_plan_file({"file_path": str(tmp_path / ".claude" / "plans" / "sub" / "p.md")})
++    assert not ccm._is_plan_file({"file_path": str(tmp_path / "p.md")})
++
++
+ async def test_init_accepts_missing_fields_and_explicit_customization_opt_in(rig):
+     rig.configure(init={"hooks": None, "plugins": None, "mcp_servers": None})
+     await rig.send()
+@@ -1095,12 +1110,13 @@ async def test_unknown_non_gdw_tool_in_plan_mode_shows_approval_card(rig):
+     assert (await task)["behavior"] == "deny"
+ 
+ 
+-def test_claude_code_docs_describe_experimental_isolation_and_billing():
++def test_claude_code_docs_describe_isolation_and_billing():
+     root = Path(__file__).resolve().parents[1]
+     for path in (root / "README.md", root / "docs" / "GUIDE.md"):
+         text = " ".join(path.read_text().lower().split())
+-        for phrase in ("experimental: not yet verified against a live logged-in cli", "env allowlist",
+-                       "--safe-mode", "hooks, plugins and settings files are ignored", "token",
++        assert "not yet verified against a live logged-in cli" not in text, path
++        for phrase in ("checked with real turns on claude 2.1.308", "not checked live", "env allowlist",
++                       "--setting-sources=", "hooks, plugins and settings files are ignored", "token",
+                        "revoked", "hook registration failure", "approval card", "billing='api'", "spend limits"):
+             assert phrase in text, (path, phrase)
+ 
+@@ -1126,3 +1142,29 @@ async def test_purge_expired_removes_claude_code_folder(rig):
+ 
+     assert await TrashJanitor(rig.app).run_once_async() == [rig.sid]
+     assert not folder.exists() and rig.sid not in rig.cc.procs
++
++
++async def test_split_assistant_events_join_and_empty_thinking_dropped(rig):
++    await rig.send()
++    p = rig.cc.procs[rig.sid]
++    before = len(rig.app.store.messages(rig.sid))
++    p._on_assistant({"id": "msg_split", "content": [{"type": "thinking", "thinking": "", "signature": "s"}]}, None)
++    assert len(rig.app.store.messages(rig.sid)) == before
++    p._on_assistant({"id": "msg_split", "content": [{"type": "text", "text": "one"}]}, None)
++    p._on_assistant({"id": "msg_split", "content": [{"type": "text", "text": "two"}]}, None)
++    msgs = rig.app.store.messages(rig.sid)
++    assert len(msgs) == before + 1 and [b.text for b in msgs[-1].content] == ["one", "two"]
++
++
++async def test_plan_mode_allows_only_the_plan_file(rig, monkeypatch, tmp_path):
++    monkeypatch.setenv("HOME", str(tmp_path))
++    await rig.send()
++    rig.app.store.update(rig.sid, mode="plan")
++    plan = {"file_path": str(tmp_path / ".claude" / "plans" / "p.md"), "content": "x"}
++    out = await rig.cc.pre_tool_use(rig.sid, {"tool_name": "Write", "tool_input": plan})
++    assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
++    other = {"file_path": str(tmp_path / ".claude" / "settings.json"), "content": "x"}
++    out = await rig.cc.pre_tool_use(rig.sid, {"tool_name": "Write", "tool_input": other})
++    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
++    rig.app.store.update(rig.sid, mode="ask")
++    assert not rig.cc._plan_write(rig.sid, "Write", plan)

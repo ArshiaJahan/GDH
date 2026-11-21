@@ -1,0 +1,710 @@
+diff --git a/README.md b/README.md
+index f5b178a..d2cc701 100644
+--- a/README.md
++++ b/README.md
+@@ -316,7 +316,7 @@ click around without keys, run with `GDW_FAKE_PROVIDERS=1`.
+ | `make dev` | Build the UI and run the backend in your browser |
+ | `make backend` + `make ui` | Backend plus hot-reloading UI on :5173 |
+ | `make live` | The desktop window from this checkout, with UI hot reload |
+-| `make app` | Build `dist/GameDevWorkstation.app` and `dist/GameDevWorkstation.dmg` (ad-hoc signed) |
++| `make app` | Build `dist/GameDevWorkstation.app` and `dist/GameDevWorkstation.dmg` (signed with a stable local identity: run `scripts/signing_identity.sh --create` once; `GDW_ALLOW_ADHOC=1` builds ad-hoc) |
+ | `make install` | Copy the built app to `/Applications` |
+ | `make release` | Bump the version and publish to the local updates folder |
+ | `make test` | Backend tests, UI type check and UI tests |
+diff --git a/backend/gamedevworkstation/features/claude_code.py b/backend/gamedevworkstation/features/claude_code.py
+index 8caf850..2981397 100644
+--- a/backend/gamedevworkstation/features/claude_code.py
++++ b/backend/gamedevworkstation/features/claude_code.py
+@@ -91,6 +91,54 @@ GDW_PREFIX = f"mcp__{SERVER}__"
+ HOOK_ID = "gdw_pre_tool_use"
+ INIT_TIMEOUT_S = 30.0
+ STDERR_KEEP = 8000
++
++# Modes of a Claude Code folder session (new-session screen, settings.skipper / settings.central_doc).
++# After each turn the app asks Claude Code (a quiet turn: its reply isn't shown) for the Central doc or
++# a Skipper handoff and saves it under <folder>/.gdw/sessions/<id>/. Skipper then continues the work in
++# a fresh Claude Code conversation that starts from the handoff; with Central doc on, the doc is the handoff.
++DOC_NAME = "central.md"
++DOC_KEEP = 40_000
++SKIPPER_DONE = re.compile(r"^\s*STATUS:\s*done\b", re.I)
++DOC_PROMPT = ("[GDW Central doc] Update this session's central doc: one Markdown summary of the session (goal, "
++              "decisions, current state, files that matter, next steps, open questions). Keep what is still true, "
++              "change what isn't. Don't use tools. Reply with only the full updated doc.")
++HANDOFF_PROMPT = ("[GDW Skipper] Write a handoff for a fresh Claude Code conversation that will continue this work "
++                  "without this conversation's history: goal, what's done, current state, files that matter, the "
++                  "exact next steps, open questions. If the work is finished and nothing is left to do, make the "
++                  "first line `STATUS: done`. Don't use tools. Reply with only the handoff in Markdown.")
++SKIPPER_START = ("[GDW Skipper] You're continuing work from an earlier Claude Code conversation. Its handoff:\n\n"
++                 "{handoff}\n\nContinue the work from the next steps.")
++
++
++def session_doc_dir(s: dict) -> Path | None:
++    """<folder>/.gdw/sessions/<id>/: where a folder session's Central doc and handoffs are saved."""
++    return Path(s["folder"]) / ".gdw" / "sessions" / s["id"] if s.get("folder") else None
++
++
++def session_modes(s: dict) -> tuple[bool, bool]:
++    """(skipper, central_doc): on for Claude Code folder sessions only."""
++    st = s.get("settings") or {}
++    ok = bool(s.get("folder")) and s.get("harness", HARNESS) == HARNESS
++    return ok and bool(st.get("skipper")), ok and bool(st.get("central_doc"))
++
++
++def read_doc(path: Path | str | None, limit: int = DOC_KEEP) -> str:
++    """The end of a saved doc ("" when there's none)."""
++    try:
++        return Path(str(path)).read_text(encoding="utf-8", errors="replace")[-limit:] if path else ""
++    except OSError:
++        return ""
++
++
++def doc_prompt(skipper: bool, central: bool, doc: str) -> str:
++    parts = [DOC_PROMPT] if central else []
++    if skipper:
++        parts.append(HANDOFF_PROMPT if not central else
++                     "[GDW Skipper] This doc is also the handoff: a fresh Claude Code conversation continues the work "
++                     "from it alone, so make the next steps exact. If the work is finished, make the first line `STATUS: done`.")
++    if central:
++        parts.append(f"The doc so far:\n<doc>\n{doc}\n</doc>" if doc.strip() else "There is no doc yet: write it.")
++    return "\n\n".join(parts)
+ SYSTEM_PROMPT_MAX_BYTES = 64 * 1024
+ PROMPT_TRUNCATED = "\n\n[GDW CLAUDE.md/skills context truncated to fit the 64 KB system prompt limit.]"
+ LOGIN_ERRORS = ("authentication_failed", "oauth_org_not_allowed", "account_on_hold")
+@@ -282,6 +330,8 @@ class Turn:
+     pending_results: list[ToolResultBlock] = field(default_factory=list)
+     login_error: bool = False
+     saw_output: bool = False
++    quiet: bool = False  # an app-side turn (Central doc, Skipper handoff): its reply isn't shown
++    reply: list[str] = field(default_factory=list)
+ 
+ 
+ class Proc:
+@@ -497,6 +547,8 @@ class Proc:
+             self.app.jobs.log(turn.jid, f"rate limit: {status} {window}\n")
+ 
+     def _on_stream(self, e: dict, turn: Turn | None) -> None:
++        if turn and turn.quiet:
++            return
+         bus, sid, et = self.app.bus, self.sid, e.get("type")
+         if et == "message_start":
+             cli_id = str((e.get("message") or {}).get("id") or "")
+@@ -528,6 +580,10 @@ class Proc:
+     def _on_assistant(self, m: dict, turn: Turn | None) -> None:
+         """One `assistant` event per content block [live]; blocks of one API message (same id) join one GDW message."""
+         app, sid = self.app, self.sid
++        if turn and turn.quiet:
++            turn.saw_output = True
++            turn.reply += [b["text"] for b in m.get("content") or [] if isinstance(b, dict) and b.get("type") == "text" and b.get("text")]
++            return
+         blocks: list[Any] = []
+         for b in m.get("content") or []:
+             if not isinstance(b, dict):
+@@ -600,6 +656,13 @@ class Proc:
+         self.mgr.record_usage(self.sid, ev, turn)
+         if turn is None or injected:
+             return  # a background-task turn the CLI started by itself: its usage counts, our turn goes on
++        if turn.quiet:
++            if not ev.get("is_error") and isinstance(ev.get("result"), str) and ev["result"].strip():
++                turn.reply = [ev["result"]]
++            elif ev.get("is_error"):
++                turn.reply = []
++            self._finish_turn()
++            return
+         for f in dict.fromkeys(turn.touched):
+             self.app.changes.notify(self.sid, f, "anthropic", turn.model)
+         if ev.get("is_error") or str(ev.get("subtype") or "success") != "success":
+@@ -830,67 +893,147 @@ class ClaudeCode:
+         jid = app.jobs.start(sid, HARNESS, f"Claude Code turn · {app.config.label(model)}",
+                              {"model": model, "billing": billing})
+         status = "failed"
++        hops, handoff = 0, None
+         try:
+-            for attempt in (0, 1):
+-                try:
+-                    proc = await self._ensure(s, model, effort, resume)
+-                except ClaudeStartError as e:
+-                    if resume and attempt == 0 and RESUME_FAILED.search(e.stderr):
+-                        app.store.update(sid, settings={"claude_code_session": None, "claude_code_totals": None})
+-                        resume = None
+-                        app.jobs.log(jid, f"resume failed, starting a new Claude Code conversation: {e.stderr[-300:]}\n")
+-                        continue
+-                    if LOGIN_TEXT.search(e.stderr):
+-                        self.probe.forget()
+-                        self.login_card(sid, e.stderr)
+-                    else:
+-                        self._error(sid, str(e))
+-                    return
+-                proc.billing = billing
+-                touched: list[Path] = []
+-                turn = Turn(sid=sid, model=model, effort=effort, jid=jid, touched=touched,
+-                            gate=make_gate(app, lambda: app.store.get(sid) or s, session_cwd(s), touched))
+-                proc.turn = turn
+-                proc.last_used = time.monotonic()
+-                if proc.reader.done():  # it already exited (bad flags, crash at start)
+-                    proc._finish_turn(exited=True)
+-                prompt, last_id = self._prompt(sid, recap=not proc.resumed and not resume)
+-                try:
+-                    await proc.send({"type": "user", "message": {"role": "user", "content": prompt},
+-                                     "parent_tool_use_id": None, "session_id": "default"})
+-                    app.store.update(sid, settings={"claude_code_sent": last_id})
+-                except (BrokenPipeError, ConnectionResetError, RuntimeError):
+-                    pass  # the process is gone; the reader ends the turn
+-                try:
+-                    res = await asyncio.shield(turn.done)
+-                except asyncio.CancelledError:
+-                    status = "cancelled"
+-                    self._stopping[sid] = asyncio.create_task(proc.interrupt(float(self.cfg.get("interrupt_wait_s", 5))))
+-                    raise
+-                if res.get("exited"):
+-                    err = proc.stderr.strip()
+-                    if proc.fatal_error:
++            while True:
++                for attempt in (0, 1):
++                    try:
++                        proc = await self._ensure(s, model, effort, resume)
++                    except ClaudeStartError as e:
++                        if resume and attempt == 0 and RESUME_FAILED.search(e.stderr):
++                            app.store.update(sid, settings={"claude_code_session": None, "claude_code_totals": None})
++                            resume = None
++                            app.jobs.log(jid, f"resume failed, starting a new Claude Code conversation: {e.stderr[-300:]}\n")
++                            continue
++                        if LOGIN_TEXT.search(e.stderr):
++                            self.probe.forget()
++                            self.login_card(sid, e.stderr)
++                        else:
++                            self._error(sid, str(e))
+                         return
+-                    if resume and attempt == 0 and not turn.saw_output and RESUME_FAILED.search(err):
+-                        # The saved conversation is gone (30-day cleanup, another machine): start fresh with a recap.
+-                        app.store.update(sid, settings={"claude_code_session": None, "claude_code_totals": None})
+-                        resume = None
+-                        app.jobs.log(jid, f"resume failed, starting a new Claude Code conversation: {err[-300:]}\n")
+-                        continue
+-                    if turn.login_error or LOGIN_TEXT.search(err):
+-                        self.probe.forget()
+-                        self.login_card(sid, err)
+-                    else:
+-                        self._error(sid, f"Claude Code exited ({res.get('code')}): {err[-800:] or 'no output'}")
++                    proc.billing = billing
++                    touched: list[Path] = []
++                    turn = Turn(sid=sid, model=model, effort=effort, jid=jid, touched=touched,
++                                gate=make_gate(app, lambda: app.store.get(sid) or s, session_cwd(s), touched))
++                    proc.turn = turn
++                    proc.last_used = time.monotonic()
++                    if proc.reader.done():  # it already exited (bad flags, crash at start)
++                        proc._finish_turn(exited=True)
++                    if handoff is None:
++                        prompt, last_id = self._prompt(sid, recap=not proc.resumed and not resume)
++                    else:  # a Skipper hop: the fresh conversation starts from the handoff
++                        prompt, last_id = SKIPPER_START.format(handoff=handoff), None
++                    try:
++                        await proc.send({"type": "user", "message": {"role": "user", "content": prompt},
++                                         "parent_tool_use_id": None, "session_id": "default"})
++                        if last_id:
++                            app.store.update(sid, settings={"claude_code_sent": last_id})
++                    except (BrokenPipeError, ConnectionResetError, RuntimeError):
++                        pass  # the process is gone; the reader ends the turn
++                    try:
++                        res = await asyncio.shield(turn.done)
++                    except asyncio.CancelledError:
++                        status = "cancelled"
++                        self._stopping[sid] = asyncio.create_task(proc.interrupt(float(self.cfg.get("interrupt_wait_s", 5))))
++                        raise
++                    if res.get("exited"):
++                        err = proc.stderr.strip()
++                        if proc.fatal_error:
++                            return
++                        if resume and attempt == 0 and not turn.saw_output and RESUME_FAILED.search(err):
++                            # The saved conversation is gone (30-day cleanup, another machine): start fresh with a recap.
++                            app.store.update(sid, settings={"claude_code_session": None, "claude_code_totals": None})
++                            resume = None
++                            app.jobs.log(jid, f"resume failed, starting a new Claude Code conversation: {err[-300:]}\n")
++                            continue
++                        if turn.login_error or LOGIN_TEXT.search(err):
++                            self.probe.forget()
++                            self.login_card(sid, err)
++                        else:
++                            self._error(sid, f"Claude Code exited ({res.get('code')}): {err[-800:] or 'no output'}")
++                        return
++                    status = "done"
++                    break
++                else:
+                     return
+-                status = "done"
+-                return
++                handoff = await self._after_turn(s, proc, model, effort, jid)
++                if handoff is None:
++                    return
++                if hops >= int(self.cfg.get("skipper_max_hops", 8)):
++                    self.notice(sid, "skipper", f"Skipper stopped after {hops} fresh conversations in a row. "
++                                                "Send a message to go on.")
++                    return
++                hops += 1
++                # A fresh Claude Code conversation that starts from the handoff.
++                await self.close_session(sid)
++                app.store.update(sid, settings={"claude_code_session": None, "claude_code_totals": None})
++                resume = None
++                s = app.store.get(sid) or s
++                self.notice(sid, "skipper", f"Skipper: continuing in a fresh Claude Code conversation from handoff "
++                                            f"{(s['settings'] or {}).get('skipper_hops')}.")
+         except asyncio.CancelledError:
+             status = "cancelled"
+             raise
+         finally:
+             app.jobs.finish(jid, status)
+ 
++    async def _after_turn(self, s: dict, proc: Proc, model: str, effort: str | None, jid: str | None) -> str | None:
++        """Central doc / Skipper after a finished turn. Returns the handoff to continue from (Skipper),
++        or None when there's nothing to continue."""
++        app, sid = self.app, s["id"]
++        s = app.store.get(sid) or s
++        skipper, central = session_modes(s)
++        d = session_doc_dir(s)
++        if not (skipper or central) or d is None:
++            return None
++        doc_path = d / DOC_NAME
++        text = await self._quiet_turn(proc, s, model, effort, jid, doc_prompt(skipper, central, read_doc(doc_path)))
++        if not text:
++            self.notice(sid, "skipper" if skipper else "central_doc",
++                        "Claude Code didn't write the " + ("handoff" if skipper and not central else "central doc") + " this turn.")
++            return None
++        try:
++            d.mkdir(parents=True, exist_ok=True)
++            if central:
++                doc_path.write_text(text + "\n", encoding="utf-8")
++            if skipper:
++                n = int((s.get("settings") or {}).get("skipper_hops") or 0) + 1
++                hp = doc_path if central else d / f"handoff-{n:03d}.md"
++                if not central:
++                    hp.write_text(text + "\n", encoding="utf-8")
++                app.store.update(sid, settings={"skipper_hops": n, "skipper_handoff": str(hp)})
++        except OSError as e:
++            self._error(sid, f"Couldn't save to {d}: {e}")
++            return None
++        app.bus.publish("session.doc", {"path": str(doc_path if central else d), "skipper": skipper, "central_doc": central}, sid)
++        if not skipper:
++            return None
++        if SKIPPER_DONE.search(text):
++            self.notice(sid, "skipper", "Skipper: the handoff says the work is done.")
++            return None
++        return text
++
++    async def _quiet_turn(self, proc: Proc, s: dict, model: str, effort: str | None, jid: str | None, prompt: str) -> str:
++        """Ask the live conversation something without showing it in the transcript; its reply text."""
++        app, sid = self.app, s["id"]
++        if not proc.alive():
++            return ""
++        turn = Turn(sid=sid, model=model, effort=effort, jid=jid, quiet=True,
++                    gate=make_gate(app, lambda: app.store.get(sid) or s, session_cwd(s), []))
++        proc.turn = turn
++        proc.last_used = time.monotonic()
++        try:
++            await proc.send({"type": "user", "message": {"role": "user", "content": prompt},
++                             "parent_tool_use_id": None, "session_id": "default"})
++        except (BrokenPipeError, ConnectionResetError, RuntimeError):
++            pass
++        try:
++            res = await asyncio.shield(turn.done)
++        except asyncio.CancelledError:
++            self._stopping[sid] = asyncio.create_task(proc.interrupt(float(self.cfg.get("interrupt_wait_s", 5))))
++            raise
++        return "" if res.get("exited") else "\n\n".join(turn.reply).strip()
++
+     async def _ensure(self, s: dict, model: str, effort: str | None, resume: str | None) -> Proc:
+         sid = s["id"]
+         lock = self._spawn_lock.setdefault(sid, asyncio.Lock())
+diff --git a/backend/gamedevworkstation/server.py b/backend/gamedevworkstation/server.py
+index 4fc878f..764b30b 100644
+--- a/backend/gamedevworkstation/server.py
++++ b/backend/gamedevworkstation/server.py
+@@ -210,11 +210,17 @@ def create_app(token: str, state: AppState | None = None) -> FastAPI:
+             # Not checked for the CLI: without it the session still opens, and its first turn says
+             # how to install or log in (claude_code.run_turn).
+             harness = new_session_harness(S.config)
++        # Modes (Skipper, Central doc): Claude Code folder sessions only (claude_code.after_turn).
++        modes = {k: True for k in ("skipper", "central_doc") if body.get(k)}
++        if modes and (not folder or harness != "claude_code"):
++            raise HTTPException(400, "Skipper and Central doc need a Claude Code folder session.")
+         s = S.store.create(title=body.get("title") or "New session", folder=folder,
+                            model=_model_arg(body["model"]) if body.get("model") else None,
+                            effort=body.get("effort"), mode=body.get("mode"), harness=harness)  # skill disclosure: store.create
+         if group_id:  # ⌘N in a grouped session: the new one joins that group
+             s = S.store.update(s["id"], group_id=group_id) or s
++        if modes:
++            s = S.store.update(s["id"], settings=modes) or s
+         return s
+ 
+     def _check_mode(mode: Any) -> None:
+diff --git a/frontend/src/components/NewSession.test.tsx b/frontend/src/components/NewSession.test.tsx
+index 158a36a..8d4530a 100644
+--- a/frontend/src/components/NewSession.test.tsx
++++ b/frontend/src/components/NewSession.test.tsx
+@@ -114,7 +114,7 @@ describe("NewSession", () => {
+     await mount();
+     await act(async () => { fireEvent.change(box(), { target: { value: "Keep this task" } }); });
+     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Send" })); });
+-    expect(select("Location").value).toBe("folder");
++    expect(select("Location").value).toBe("/kept");
+     expect(useStore.getState().draftGroup).toBe("g1");
+     expect(box().value).toBe("Keep this task");
+   });
+@@ -146,21 +146,35 @@ describe("NewSession", () => {
+     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we work on?");
+   });
+ 
+-  it("switches between Chat only and Folder", async () => {
++  it("switches between Chat only and folders in the location menu", async () => {
++    useStore.setState({ sessions: [ses("a", "/Users/me/Apiva", 30)] });
+     await mount();
+     expect(subtitle()).toBe("Chat only: no folder; Claude Code works in a private scratch folder.");
+-    expect(screen.queryByTestId("folder-chip")).toBeNull();
+-    await act(async () => { fireEvent.change(select("Location"), { target: { value: "folder" } }); });
+-    expect(pickFolder).toHaveBeenCalled(); // no folder yet: the folder picker opens
++    expect(optionValues("Location")).toEqual(["chat", "/Users/me/Apiva", "choose"]);
++    expect(screen.queryByTestId("modes-button")).toBeNull(); // modes: folder sessions only
++    await act(async () => { fireEvent.change(select("Location"), { target: { value: "choose" } }); });
++    expect(pickFolder).toHaveBeenCalled(); // Choose a folder… opens the folder picker
+     expect(subtitle()).toBe("The project stays in Forklift. Claude Code reads, edits and runs commands there.");
+-    expect(screen.getByTestId("folder-chip").textContent).toBe("Forklift");
+-    // The chip opens the picker again.
+-    pickFolder.mockResolvedValueOnce("/Users/me/Games/Apiva");
+-    await act(async () => { fireEvent.click(screen.getByTestId("folder-chip")); });
+-    expect(screen.getByTestId("folder-chip").textContent).toBe("Apiva");
++    expect(select("Location").selectedOptions[0].textContent).toBe("Forklift");
++    expect(optionValues("Location")).toEqual(["chat", expect.stringContaining("Forklift"), "/Users/me/Apiva", "choose"]);
++    await act(async () => { fireEvent.change(select("Location"), { target: { value: "/Users/me/Apiva" } }); });
++    expect(subtitle()).toContain("The project stays in Apiva.");
+     await act(async () => { fireEvent.change(select("Location"), { target: { value: "chat" } }); });
+     expect(subtitle()).toContain("Chat only");
+-    expect(screen.queryByTestId("folder-chip")).toBeNull();
++  });
++
++  it("turns on Skipper and Central doc from the Modes menu", async () => {
++    useStore.setState({ sessions: [ses("a", "/Users/me/Apiva", 30)] });
++    await mount();
++    await act(async () => { fireEvent.change(select("Location"), { target: { value: "/Users/me/Apiva" } }); });
++    await act(async () => { fireEvent.click(screen.getByTestId("modes-button")); });
++    const items = screen.getAllByRole("menuitemcheckbox");
++    expect(items.map((i) => i.getAttribute("aria-checked"))).toEqual(["false", "false"]);
++    await act(async () => { fireEvent.click(items[0]); fireEvent.click(items[1]); });
++    expect(screen.getAllByRole("menuitemcheckbox").map((i) => i.getAttribute("aria-checked"))).toEqual(["true", "true"]);
++    await act(async () => { fireEvent.change(box(), { target: { value: "Ship it" } }); });
++    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Send" })); });
++    expect(post).toHaveBeenNthCalledWith(1, "/sessions", expect.objectContaining({ folder: "/Users/me/Apiva", skipper: true, central_doc: true }));
+   });
+ 
+   it("lists recent folders as chips; clicking one selects it", async () => {
+@@ -172,7 +186,7 @@ describe("NewSession", () => {
+     expect(chips[1].getAttribute("aria-pressed")).toBe("false");
+     await act(async () => { fireEvent.click(chips[1]); });
+     expect(chips[1].getAttribute("aria-pressed")).toBe("true");
+-    expect(select("Location").value).toBe("folder");
++    expect(select("Location").value).toBe("/Users/me/Apiva");
+     expect(subtitle()).toContain("The project stays in Apiva.");
+     expect(screen.getByTestId("new-session-subtitle").querySelector("[title]")?.getAttribute("title")).toBe("~/Apiva");
+     expect(pickFolder).not.toHaveBeenCalled();
+diff --git a/frontend/src/components/NewSession.tsx b/frontend/src/components/NewSession.tsx
+index 6aa6b95..7c48afd 100644
+--- a/frontend/src/components/NewSession.tsx
++++ b/frontend/src/components/NewSession.tsx
+@@ -2,8 +2,11 @@
+ // a composer card with the session's settings, and recent folders. Every new session runs Claude
+ // Code on the user's own Claude subscription (harness claude_code). Chat only = no folder: Claude
+ // Code works in a private scratch folder; Folder = it works in that project folder. The session is
+-// created when the first message is sent.
+-import { Folder } from "lucide-react";
++// created when the first message is sent. Modes (folder sessions only): Skipper continues the work in
++// a fresh Claude Code conversation after each turn, from a handoff saved under <folder>/.gdw/sessions/<id>/;
++// Central doc keeps one summary doc there that Claude Code updates after each turn (with Skipper on, the
++// doc is the handoff).
++import { Check, ChevronDown } from "lucide-react";
+ import { useEffect, useMemo, useState } from "react";
+ import { get } from "../lib/api";
+ import { pickFolder } from "../lib/native";
+@@ -20,9 +23,19 @@ export type Location = "chat" | "folder";
+ export const PLACEHOLDER = "Describe a task, or type / for commands and skills, /task for a Kanban card…";
+ const PREFS_KEY = "newSession.prefs";
+ const RECENT_MAX = 6;
++const CHOOSE = "choose";
+ 
+-type Prefs = { location: Location; folder: string | null; model: string | null; effort: string | null; mode: string | null };
+-const NO_PREFS: Prefs = { location: "chat", folder: null, model: null, effort: null, mode: null };
++type Prefs = {
++  location: Location; folder: string | null; model: string | null; effort: string | null; mode: string | null;
++  skipper: boolean; centralDoc: boolean;
++};
++const NO_PREFS: Prefs = { location: "chat", folder: null, model: null, effort: null, mode: null, skipper: false, centralDoc: false };
++
++/** The Modes menu's entries: [prefs key, label, what it does]. */
++export const SESSION_MODES: [key: "skipper" | "centralDoc", label: string, about: string][] = [
++  ["skipper", "Skipper", "After each turn, Claude Code writes a handoff and the work goes on in a fresh conversation that starts from it."],
++  ["centralDoc", "Central doc", "One summary doc for the session that Claude Code updates after each turn. With Skipper on, it is the handoff."],
++];
+ 
+ /** The last choices on this screen (this window's browser storage; a convenience only). */
+ function loadPrefs(): Prefs {
+@@ -73,6 +86,9 @@ export function NewSession() {
+   const location: Location = prefs.location === "folder" ? "folder" : "chat";
+   const folder = location === "folder" ? prefs.folder : null;
+   const recents = useMemo(() => recentFolders(sessions), [sessions]);
++  const folders = folder && !recents.includes(folder) ? [folder, ...recents] : recents;
++  const skipper = !!folder && !!prefs.skipper;
++  const centralDoc = !!folder && !!prefs.centralDoc;
+ 
+   const choose = async () => {
+     const f = await pickFolder(prefs.folder ?? undefined);
+@@ -80,8 +96,11 @@ export function NewSession() {
+     if (f) setPrefs({ location: "folder", folder: f });
+     else setPrefs({ location: "chat" }); // the browser prompt left empty: chat only
+   };
++  /** The location menu: Chat only, a recent folder, or Choose a folder…. */
+   const setLocation = (v: string) => {
+-    if (v !== "folder") return setPrefs({ location: "chat" });
++    if (v === "chat") return setPrefs({ location: "chat" });
++    if (v === CHOOSE) return void choose();
++    if (v !== "folder") return setPrefs({ location: "folder", folder: v });
+     const known = prefs.folder ?? recents[0] ?? null;
+     if (known) setPrefs({ location: "folder", folder: known });
+     else void choose();
+@@ -101,23 +120,21 @@ export function NewSession() {
+       setPrefs({ ...(m ? { model: m } : {}), ...(b.effort ? { effort: b.effort } : {}), ...(b.mode ? { mode: b.mode } : {}) });
+     },
+     start: async (text, skill, attachments) => {
+-      const started = await sessionActions.start({ text, skill, attachments, folder, model, effort, mode });
++      const started = await sessionActions.start(
++        { text, skill, attachments, folder, model, effort, mode, ...(skipper ? { skipper } : {}), ...(centralDoc ? { central_doc: centralDoc } : {}) },
++      );
+       if (!started) setPrefsState(loadPrefs()); // a missing folder resets saved preferences to Chat only
+       return started;
+     },
+     rows: [
+       <>
+-        <TextSelect label="Location" value={location} onChange={setLocation}
+-          title={location === "folder" ? "Claude Code works in a project folder" : "No folder: Claude Code works in a private scratch folder"}>
++        <TextSelect label="Location" value={folder ?? "chat"} onChange={setLocation}
++          title={folder ? `${tilde(folder)}: Claude Code works in this project folder` : "No folder: Claude Code works in a private scratch folder"}>
+           <option value="chat">Chat only</option>
+-          <option value="folder">Folder</option>
++          {folders.map((f) => <option key={f} value={f} title={f}>{folderName(f)}</option>)}
++          <option value={CHOOSE}>Choose a folder…</option>
+         </TextSelect>
+-        {location === "folder" && (
+-          <button className="btn btn-ghost gap-1.5 px-2 text-[14px] min-w-0" onClick={choose} title={folder ? `${folder} (choose another folder)` : "Choose a folder"}
+-            aria-label={folder ? `Folder ${folderName(folder)}` : "Choose a folder"} data-testid="folder-chip">
+-            <Folder size={15} className="shrink-0" aria-hidden /><span className="truncate max-w-[220px]">{folder ? folderName(folder) : "Choose a folder…"}</span>
+-          </button>
+-        )}
++        {folder && <ModesMenu skipper={skipper} centralDoc={centralDoc} onChange={(k, on) => setPrefs({ [k]: on })} />}
+         <ModelSelect value={model} onChange={(v) => setPrefs({ model: v })} />
+       </>,
+       <>
+@@ -161,3 +178,32 @@ export function NewSession() {
+     </div>
+   );
+ }
++
++/** The Modes menu (folder sessions): Skipper and Central doc, each on or off. */
++function ModesMenu({ skipper, centralDoc, onChange }: {
++  skipper: boolean; centralDoc: boolean; onChange: (key: "skipper" | "centralDoc", on: boolean) => void;
++}) {
++  const [open, setOpen] = useState(false);
++  const on = { skipper, centralDoc };
++  const count = (skipper ? 1 : 0) + (centralDoc ? 1 : 0);
++  return (
++    <span className="relative inline-flex" onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}>
++      <button className="btn btn-ghost gap-1 px-2 text-[14px]" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}
++        title="Modes for this folder session" data-testid="modes-button">
++        {count ? `Modes · ${SESSION_MODES.filter(([k]) => on[k]).map(([, l]) => l).join(", ")}` : "Modes"}
++        <ChevronDown size={15} className="text-muted" aria-hidden />
++      </button>
++      {open && (
++        <div role="menu" aria-label="Modes" className="absolute z-20 bottom-full mb-1 left-0 w-[300px] rounded-lg border border-line surface-raised p-1 shadow-lg">
++          {SESSION_MODES.map(([k, label, about]) => (
++            <button key={k} role="menuitemcheckbox" aria-checked={on[k]} onClick={() => onChange(k, !on[k])}
++              className="w-full text-left flex gap-2 rounded-md px-2 py-1.5 hover:bg-sunken">
++              <span className="w-4 shrink-0 pt-0.5">{on[k] && <Check size={14} aria-hidden />}</span>
++              <span><span className="block text-[14px] text-text">{label}</span><span className="block text-[12px] text-muted">{about}</span></span>
++            </button>
++          ))}
++        </div>
++      )}
++    </span>
++  );
++}
+diff --git a/frontend/src/components/Sidebar.tsx b/frontend/src/components/Sidebar.tsx
+index 87ba059..cecfb79 100644
+--- a/frontend/src/components/Sidebar.tsx
++++ b/frontend/src/components/Sidebar.tsx
+@@ -507,7 +507,11 @@ export function Sidebar() {
+       <div className="px-3 pt-3 pb-2 flex items-center gap-1" data-tauri-drag-region>
+         <span className="font-semibold tracking-tight mr-auto">GameDevWorkstation</span>
+         <button className="btn btn-ghost px-1.5" onClick={(e) => openMenu(e.currentTarget, headerItems())} title="New group, group by, sort, archived and trash" aria-label="Session list options" aria-haspopup="menu"><ListFilter size={15} /></button>
+-        <button className="btn btn-ghost px-1.5" onClick={newSession} title="New session (⌘N)" aria-label="New session"><Plus size={16} /></button>
++      </div>
++      <div className="px-3 pb-2">
++        <button className="btn btn-ghost w-full justify-start gap-1.5 px-2 py-1 text-[13px]" onClick={newSession} title="New session (⌘N)">
++          <Plus size={15} aria-hidden />New session
++        </button>
+       </div>
+       <div className="px-3 pb-2">
+         <label className="relative block">
+diff --git a/frontend/src/lib/sessions.ts b/frontend/src/lib/sessions.ts
+index 10addc6..8b0d289 100644
+--- a/frontend/src/lib/sessions.ts
++++ b/frontend/src/lib/sessions.ts
+@@ -182,6 +182,8 @@ let starting: Promise<boolean> | null = null;
+  *  subscription (harness claude_code). No folder = chat only (a private scratch folder). */
+ export type NewSessionRequest = {
+   text: string; skill?: string | null; attachments?: NewSessionAttachment[]; folder: string | null; model: string; effort: string; mode: string;
++  /** Modes of a folder session: Skipper (fresh conversations from handoffs) and Central doc. */
++  skipper?: boolean; central_doc?: boolean;
+ };
+ /** A file uploaded on the new-session screen (POST /uploads before the session exists). */
+ type NewSessionAttachment = { path: string; name: string; mime: string; item_id?: string; text?: string };
+@@ -205,6 +207,7 @@ export const sessionActions = {
+       try {
+         s = await post<Session>("/sessions", {
+           harness: "claude_code", folder: r.folder || null, model: r.model, effort: r.effort, mode: r.mode, ...(group_id ? { group_id } : {}),
++          ...(r.folder && r.skipper ? { skipper: true } : {}), ...(r.folder && r.central_doc ? { central_doc: true } : {}),
+         });
+       } catch (e: any) {
+         if (e?.status === 400 && e.message.startsWith("Folder not found")) {
+diff --git a/scripts/build_mac.sh b/scripts/build_mac.sh
+index b6a3f69..f5f8c2c 100755
+--- a/scripts/build_mac.sh
++++ b/scripts/build_mac.sh
+@@ -1,5 +1,6 @@
+ #!/usr/bin/env bash
+-# Builds dist/GameDevWorkstation.app and dist/GameDevWorkstation.dmg for Apple Silicon, ad-hoc signed.
++# Builds dist/GameDevWorkstation.app and dist/GameDevWorkstation.dmg for Apple Silicon, signed with a stable
++# local identity (scripts/signing_identity.sh; ad-hoc only with GDW_ALLOW_ADHOC=1).
+ set -euo pipefail
+ cd "$(dirname "$0")/.."
+ ROOT="$(pwd)"
+@@ -42,6 +43,21 @@ if command -v rustup >/dev/null 2>&1 && ! rustup target list --installed | grep
+ fi
+ command -v codex >/dev/null 2>&1 && echo "    Codex CLI: found" || echo "    Codex CLI: not installed (optional; the Codex CLI harness will show as unavailable)"
+ [[ "$(uname -m)" == "arm64" ]] || echo "    note: building on $(uname -m); the app targets $TARGET"
++# A stable signature (scripts/signing_identity.sh) so macOS keeps the app's permissions across builds.
++# Ad-hoc only when asked for.
++SIGN_ID="$(scripts/signing_identity.sh 2>/dev/null || true)"
++if [[ -z "$SIGN_ID" ]]; then
++  if [[ "${GDW_ALLOW_ADHOC:-}" == "1" ]]; then
++    echo "    signing: ad-hoc (GDW_ALLOW_ADHOC=1)"
++  else
++    echo "No code-signing identity: an ad-hoc signature makes macOS forget the app's permissions on every build."
++    echo "  Set one up once:  scripts/signing_identity.sh --create"
++    echo "  Or build ad-hoc:  GDW_ALLOW_ADHOC=1 $0"
++    exit 1
++  fi
++else
++  echo "    signing: $SIGN_ID"
++fi
+ 
+ echo "==> Frontend"
+ # npm ci deletes node_modules first; Finder/Spotlight writing into it can make that fail once (ENOTEMPTY).
+@@ -65,9 +81,14 @@ rm_tree "$DIST/GameDevWorkstation.app" "$DIST/GameDevWorkstation.dmg"
+ mkdir -p "$DIST"
+ cp -R "$BUNDLE/macos/GameDevWorkstation.app" "$DIST/GameDevWorkstation.app"
+ 
+-echo "==> Signing (ad-hoc)"
+ xattr -cr "$DIST/GameDevWorkstation.app"
+-codesign --force --deep --sign - "$DIST/GameDevWorkstation.app"
++if [[ -n "$SIGN_ID" ]]; then
++  echo "==> Signing ($SIGN_ID)"
++  codesign --force --deep --sign "$SIGN_ID" "$DIST/GameDevWorkstation.app"
++else
++  echo "==> Signing (ad-hoc, GDW_ALLOW_ADHOC=1: macOS asks for the app's permissions again after each build)"
++  codesign --force --deep --sign - "$DIST/GameDevWorkstation.app"
++fi
+ codesign --verify --deep --strict "$DIST/GameDevWorkstation.app" && echo "    signature OK"
+ 
+ if [[ -n "${GDW_SKIP_DMG:-}" ]]; then echo; echo "Built: $DIST/GameDevWorkstation.app"; exit 0; fi
+diff --git a/scripts/signing_identity.sh b/scripts/signing_identity.sh
+new file mode 100755
+index 0000000..eb66728
+--- /dev/null
++++ b/scripts/signing_identity.sh
+@@ -0,0 +1,55 @@
++#!/usr/bin/env bash
++# A stable code-signing identity for local builds. An ad-hoc signature changes with every build, so
++# macOS forgets the app's permissions (Files and Folders, Accessibility, keychain access) each time;
++# a build signed with the same certificate keeps them.
++#
++#   scripts/signing_identity.sh           print the identity build_mac.sh will use (exit 1 if none)
++#   scripts/signing_identity.sh --create  make a self-signed "GameDevWorkstation Local" code-signing
++#                                         certificate in the login keychain (once per Mac)
++#
++# GDW_SIGN_IDENTITY overrides the lookup (a Developer ID, or another certificate's name or SHA-1).
++set -euo pipefail
++NAME="${GDW_LOCAL_CERT_NAME:-GameDevWorkstation Local}"
++KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
++
++find_identity() {
++  if [[ -n "${GDW_SIGN_IDENTITY:-}" ]]; then echo "$GDW_SIGN_IDENTITY"; return 0; fi
++  # A Developer ID first, then the local certificate. Self-signed certificates aren't "valid" for
++  # policy checks (-v), but codesign signs with them.
++  local line
++  line="$(security find-identity -v -p codesigning 2>/dev/null | grep -m1 'Developer ID Application' || true)"
++  [[ -z "$line" ]] && line="$(security find-identity -p codesigning 2>/dev/null | grep -m1 "\"$NAME\"" || true)"
++  [[ -n "$line" ]] || return 1
++  awk '{print $2}' <<<"$line"
++}
++
++create() {
++  if find_identity >/dev/null; then echo "Already set up: $(find_identity)"; return 0; fi
++  local tmp; tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' RETURN
++  cat >"$tmp/cert.cnf" <<EOF
++[req]
++distinguished_name = dn
++x509_extensions = ext
++prompt = no
++[dn]
++CN = $NAME
++[ext]
++basicConstraints = critical,CA:false
++keyUsage = critical,digitalSignature
++extendedKeyUsage = critical,codeSigning
++EOF
++  openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -config "$tmp/cert.cnf" \
++    -keyout "$tmp/key.pem" -out "$tmp/cert.pem" >/dev/null 2>&1
++  local pass; pass="$(openssl rand -hex 16)"
++  openssl pkcs12 -export -legacy -inkey "$tmp/key.pem" -in "$tmp/cert.pem" -name "$NAME" \
++    -passout "pass:$pass" -out "$tmp/id.p12" 2>/dev/null \
++    || openssl pkcs12 -export -inkey "$tmp/key.pem" -in "$tmp/cert.pem" -name "$NAME" -passout "pass:$pass" -out "$tmp/id.p12"
++  security import "$tmp/id.p12" -k "$KEYCHAIN" -P "$pass" -T /usr/bin/codesign >/dev/null
++  echo "Created \"$NAME\" in the login keychain: $(find_identity)"
++}
++
++case "${1:-}" in
++  --create) create ;;
++  "") find_identity || { echo "No code-signing identity. Run: scripts/signing_identity.sh --create" >&2; exit 1; } ;;
++  *) echo "usage: $0 [--create]" >&2; exit 2 ;;
++esac
+diff --git a/tests/test_new_session.py b/tests/test_new_session.py
+index a1f4f9d..ec47db3 100644
+--- a/tests/test_new_session.py
++++ b/tests/test_new_session.py
+@@ -117,3 +117,22 @@ def test_account_full_name_is_cached_for_repeated_greetings(client, monkeypatch)
+     for _ in range(3):
+         assert client.get("/api/greeting", headers=H).json() == {"name": "Arshia J."}
+     assert calls == [["/usr/bin/id", "-F"]]
++
++
++@pytest.mark.shipped_harness_default
++def test_modes_need_a_claude_code_folder_session(client, tmp_path):
++    from gamedevworkstation.features import claude_code as cc
++    assert client.post("/api/sessions", json={"skipper": True}, headers=H).status_code == 400
++    r = client.post("/api/sessions", json={"folder": str(tmp_path), "skipper": True, "central_doc": True}, headers=H)
++    assert r.status_code == 200, r.text
++    s = r.json()
++    assert s["settings"]["skipper"] is True and s["settings"]["central_doc"] is True
++    assert cc.session_modes(s) == (True, True)
++    d = cc.session_doc_dir(s)
++    assert d == tmp_path.resolve() / ".gdw" / "sessions" / s["id"]
++    assert cc.read_doc(None) == "" and cc.read_doc(d / "missing.md") == ""
++    d.mkdir(parents=True)
++    (d / cc.DOC_NAME).write_text("abcdef", encoding="utf-8")
++    assert cc.read_doc(d / cc.DOC_NAME, limit=3) == "def"
++    assert "STATUS: done" in cc.doc_prompt(True, False, "") and "<doc>\nold\n</doc>" in cc.doc_prompt(False, True, "old")
++    assert cc.SKIPPER_DONE.search("STATUS: done\nall shipped") and not cc.SKIPPER_DONE.search("Next: finish STATUS: done")

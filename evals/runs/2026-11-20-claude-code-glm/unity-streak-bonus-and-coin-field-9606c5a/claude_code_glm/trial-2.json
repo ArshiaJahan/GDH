@@ -1,0 +1,52 @@
+{
+ "task": "unity-streak-bonus-and-coin-field-9606c5a",
+ "agent": "claude_code_glm",
+ "trial": 2,
+ "passed": true,
+ "blame": "",
+ "reason": "passed",
+ "wall_s": 52.1,
+ "cost_usd": 0.3242,
+ "tool_calls": 6,
+ "input_tokens": 272889,
+ "output_tokens": 3009,
+ "agent_error": "",
+ "timed_out": false,
+ "tampered": [
+  "examples/unity-sample/Assets/Tests/Editor/ScoreBoardTests.cs"
+ ],
+ "failed_steps": [],
+ "diff_lines": 44,
+ "started_at": "2026-11-21T00:08:12Z",
+ "helper_calls": 0,
+ "model": "claude-opus-5-5",
+ "grade": {
+  "passed": true,
+  "tampered": [
+   "examples/unity-sample/Assets/Tests/Editor/ScoreBoardTests.cs"
+  ],
+  "environment_failure": false,
+  "steps": [
+   {
+    "name": "tests",
+    "kind": "command",
+    "passed": true,
+    "exit": 0,
+    "duration_s": 14.348297917284071,
+    "output": "",
+    "environment": false,
+    "detail": {}
+   },
+   {
+    "name": "asset examples/unity-sample/Assets/Scenes/Main.unity",
+    "kind": "unity",
+    "passed": true,
+    "exit": null,
+    "duration_s": 0.0,
+    "output": "",
+    "environment": false,
+    "detail": {}
+   }
+  ]
+ }
+}

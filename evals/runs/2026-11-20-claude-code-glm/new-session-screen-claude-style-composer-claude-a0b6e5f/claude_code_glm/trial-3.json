@@ -1,0 +1,54 @@
+{
+ "task": "new-session-screen-claude-style-composer-claude-a0b6e5f",
+ "agent": "claude_code_glm",
+ "trial": 3,
+ "passed": false,
+ "blame": "agent",
+ "reason": "failed command 'tests' (its own versions of frontend/src/components/ClaudeCode.test.tsx, frontend/src/components/Composer.test.tsx, frontend/src/lib/mdlite.test.tsx, tests/conftest.py, tests/test_campaigns.py, tests/test_claude_code.py were replaced by the hidden tests)",
+ "wall_s": 311.2,
+ "cost_usd": 1.7958,
+ "tool_calls": 42,
+ "input_tokens": 2808096,
+ "output_tokens": 26919,
+ "agent_error": "",
+ "timed_out": false,
+ "tampered": [
+  "frontend/src/components/ClaudeCode.test.tsx",
+  "frontend/src/components/Composer.test.tsx",
+  "frontend/src/lib/mdlite.test.tsx",
+  "tests/conftest.py",
+  "tests/test_campaigns.py",
+  "tests/test_claude_code.py"
+ ],
+ "failed_steps": [
+  "tests"
+ ],
+ "diff_lines": 450,
+ "started_at": "2026-11-20T23:27:26Z",
+ "helper_calls": 0,
+ "model": "claude-opus-5-5",
+ "grade": {
+  "passed": false,
+  "tampered": [
+   "frontend/src/components/ClaudeCode.test.tsx",
+   "frontend/src/components/Composer.test.tsx",
+   "frontend/src/lib/mdlite.test.tsx",
+   "tests/conftest.py",
+   "tests/test_campaigns.py",
+   "tests/test_claude_code.py"
+  ],
+  "environment_failure": false,
+  "steps": [
+   {
+    "name": "tests",
+    "kind": "command",
+    "passed": false,
+    "exit": 2,
+    "duration_s": 0.7747443751432002,
+    "output": "\n==================================== ERRORS ====================================\n__________________ ERROR collecting tests/test_new_session.py __________________\nImportError while importing test module '/private/var/folders/07/xyyrk2p92jnblsq7j428mt5h0000gn/T/gdw-eval-193bt5m6/tree/tests/test_new_session.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/Users/arshiajahan/anaconda3/lib/python3.13/importlib/__init__.py:88: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_new_session.py:9: in <module>\n    from gamedevworkstation.server import create_app, new_session_harness\nE   ImportError: cannot import name 'new_session_harness' from 'gamedevworkstation.server' (/private/var/folders/07/xyyrk2p92jnblsq7j428mt5h0000gn/T/gdw-eval-193bt5m6/tree/backend/gamedevworkstation/server.py)\n=========================== short test summary info ============================\nERROR tests/test_new_session.py\n!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!\n1 error in 0.38s\n",
+    "environment": false,
+    "detail": {}
+   }
+  ]
+ }
+}

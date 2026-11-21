@@ -1,0 +1,1208 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 7bd010d..e8cb92e 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -77,7 +77,7 @@ jobs:
+         run: |
+           uv sync --frozen --all-extras
+           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+-          uv run --frozen pytest -q -p no:cacheprovider tests/test_procs.py tests/test_release_feed.py tests/test_claude_cli_windows.py
++          uv run --frozen pytest -q -p no:cacheprovider tests/test_procs.py tests/test_release_feed.py tests/test_claude_cli_windows.py tests/test_text_encoding.py
+       - name: Build the installer
+         shell: pwsh
+         run: ./scripts/build_windows.ps1
+@@ -100,6 +100,20 @@ jobs:
+           $h = @{ Authorization = "Bearer ci" }
+           Invoke-RestMethod -Headers $h http://127.0.0.1:8765/api/sessions | Out-Null
+           $s = Invoke-RestMethod -Headers $h -Method Post -ContentType "application/json" -Body "{}" http://127.0.0.1:8765/api/sessions
++          # Every bundled skill must read as UTF-8 (cp1252 chokes on curly quotes and the like).
++          $skills = (Invoke-RestMethod -Headers $h http://127.0.0.1:8765/api/skills).skills
++          if ($skills.Count -eq 0) { Get-Content $log, $err; throw "The frozen backend listed no skills" }
++          foreach ($sk in $skills) {
++            $name = [uri]::EscapeDataString($sk.name)
++            $full = Invoke-RestMethod -Headers $h "http://127.0.0.1:8765/api/skills/$name"
++            if (-not $full.content) { throw "Skill $($sk.name) came back empty" }
++            $files = (Invoke-RestMethod -Headers $h "http://127.0.0.1:8765/api/skills/$name/files").files
++            foreach ($f in $files) {
++              $fp = [uri]::EscapeDataString($f.path)
++              Invoke-RestMethod -Headers $h "http://127.0.0.1:8765/api/skills/$name/file?path=$fp" | Out-Null
++            }
++          }
++          Write-Host "Read $($skills.Count) bundled skills"
+           Write-Host "Created session $($s.id); backend version $((Invoke-RestMethod http://127.0.0.1:8765/health).version)"
+           Stop-Process -Id $p.Id -Force
+       - uses: actions/upload-artifact@v4
+diff --git a/backend/gamedevworkstation/agent/builtin_tools.py b/backend/gamedevworkstation/agent/builtin_tools.py
+index f008bf8..71e7dfa 100644
+--- a/backend/gamedevworkstation/agent/builtin_tools.py
++++ b/backend/gamedevworkstation/agent/builtin_tools.py
+@@ -189,7 +189,7 @@ def register_builtin(reg: ToolRegistry) -> None:
+         await ctx.approve("edit", str(p), {"action": "write", "path": str(p), "bytes": len(a["content"])})
+         ctx.app.changes.snapshot(ctx.session_id, p)
+         p.parent.mkdir(parents=True, exist_ok=True)
+-        p.write_text(a["content"])
++        p.write_text(a["content"], encoding="utf-8")
+         ctx.app.changes.notify(ctx.session_id, p, ctx.provider, ctx.model)
+         return ToolOutput(f"Wrote {len(a['content'])} chars to {a['path']}")
+ 
+@@ -198,7 +198,7 @@ def register_builtin(reg: ToolRegistry) -> None:
+                   "replace_all": {"type": "boolean"}}, ["path", "old", "new"]))
+     async def edit_file(ctx: ToolContext, a: dict) -> ToolOutput:
+         p = ctx.resolve_path(a["path"], write=True)
+-        text = p.read_text()
++        text = p.read_text(encoding="utf-8")
+         n = text.count(a["old"])
+         if n == 0:
+             return ToolOutput("old string not found", is_error=True)
+@@ -207,7 +207,7 @@ def register_builtin(reg: ToolRegistry) -> None:
+         await ctx.approve("edit", str(p), {"action": "edit", "path": str(p), "old": a["old"][:500],
+                                            "new": a["new"][:500]})
+         ctx.app.changes.snapshot(ctx.session_id, p)
+-        p.write_text(text.replace(a["old"], a["new"]) if a.get("replace_all") else text.replace(a["old"], a["new"], 1))
++        p.write_text(text.replace(a["old"], a["new"]) if a.get("replace_all") else text.replace(a["old"], a["new"], 1), encoding="utf-8")
+         ctx.app.changes.notify(ctx.session_id, p, ctx.provider, ctx.model)
+         return ToolOutput(f"Edited {a['path']} ({n if a.get('replace_all') else 1} replacement)")
+ 
+diff --git a/backend/gamedevworkstation/buildinfo.py b/backend/gamedevworkstation/buildinfo.py
+index c56f61e..d98c95f 100644
+--- a/backend/gamedevworkstation/buildinfo.py
++++ b/backend/gamedevworkstation/buildinfo.py
+@@ -27,7 +27,7 @@ def version_info() -> dict:
+                   "frozen": frozen()}
+     if frozen():
+         try:
+-            data = json.loads(BUILD_INFO.read_text())
++            data = json.loads(BUILD_INFO.read_text(encoding="utf-8"))
+             info.update({k: data.get(k) for k in ("git_commit", "git_dirty", "built_at")})
+             if data.get("channel"):  # set by CI release builds (scripts/version.py build-info)
+                 info.update(channel=data["channel"], repo=data.get("repo"))
+@@ -39,11 +39,11 @@ def version_info() -> dict:
+     repo = Path(__file__).resolve().parents[2]
+     try:
+         out = subprocess.run(["git", *GIT_SAFE, "rev-parse", "--short", "HEAD"], cwd=repo, capture_output=True,
+-                             text=True, timeout=3)
++                             text=True, timeout=3, encoding="utf-8", errors="replace")
+         if out.returncode == 0:
+             info["git_commit"] = out.stdout.strip() or None
+             dirty = subprocess.run(["git", *GIT_SAFE, "status", "--porcelain", "--untracked-files=no"], cwd=repo,
+-                                   capture_output=True, text=True, timeout=3)
++                                   capture_output=True, text=True, timeout=3, encoding="utf-8", errors="replace")
+             info["git_dirty"] = bool(dirty.stdout.strip())
+     except (OSError, subprocess.SubprocessError):
+         pass
+diff --git a/backend/gamedevworkstation/children.py b/backend/gamedevworkstation/children.py
+index 5e1361d..abb4c5e 100644
+--- a/backend/gamedevworkstation/children.py
++++ b/backend/gamedevworkstation/children.py
+@@ -41,7 +41,7 @@ def process_table() -> dict[int, tuple[int, int, str]]:
+     """pid → (ppid, pgid, stat) for every process on the machine (`ps`, macOS and Linux)."""
+     try:
+         p = subprocess.Popen(["ps", "-A", "-o", "pid=,ppid=,pgid=,stat="], stdout=subprocess.PIPE,
+-                             stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, text=True)
++                             stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace")
+         out, _ = p.communicate(timeout=5)
+     except (OSError, subprocess.SubprocessError):
+         return {}
+@@ -86,9 +86,9 @@ def _darwin_start(pid: int) -> float | None:
+ 
+ def _linux_start(pid: int) -> float | None:
+     try:
+-        stat = open(f"/proc/{pid}/stat").read()
++        stat = open(f"/proc/{pid}/stat", encoding="utf-8").read()
+         ticks = int(stat[stat.rindex(")") + 2:].split()[19])  # field 22, starttime
+-        btime = next(int(ln.split()[1]) for ln in open("/proc/stat") if ln.startswith("btime "))
++        btime = next(int(ln.split()[1]) for ln in open("/proc/stat", encoding="utf-8") if ln.startswith("btime "))
+         return btime + ticks / os.sysconf("SC_CLK_TCK")
+     except (OSError, ValueError, IndexError, StopIteration):
+         return None
+@@ -97,7 +97,7 @@ def _linux_start(pid: int) -> float | None:
+ def _ps_start(pid: int) -> float | None:
+     try:
+         out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=5,
+-                             stdin=subprocess.DEVNULL, env={**os.environ, "LC_ALL": "C"}).stdout.strip()
++                             stdin=subprocess.DEVNULL, env={**os.environ, "LC_ALL": "C"}, encoding="utf-8", errors="replace").stdout.strip()
+         return time.mktime(time.strptime(out, "%a %b %d %H:%M:%S %Y")) if out else None
+     except (OSError, subprocess.SubprocessError, ValueError):
+         return None
+diff --git a/backend/gamedevworkstation/config.py b/backend/gamedevworkstation/config.py
+index 799b367..8386d5c 100644
+--- a/backend/gamedevworkstation/config.py
++++ b/backend/gamedevworkstation/config.py
+@@ -446,7 +446,7 @@ def _set_aside(path: Path, err: Exception) -> None:
+ 
+ 
+ def _defaults() -> dict:
+-    return tomllib.loads(DEFAULT_CONFIG_PATH.read_text())
++    return tomllib.loads(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
+ 
+ 
+ def _read_user(path: Path, defaults: dict) -> tuple[dict, bool]:
+@@ -546,7 +546,7 @@ def _dev_keys() -> dict[str, str]:
+     <data_dir>/dev-keys.json (mode 0600, plain text) so dev runs and tests never touch the real
+     Keychain yet a saved key still sticks. Never used when the Keychain is enabled."""
+     try:
+-        d = json.loads(_dev_keys_path().read_text())
++        d = json.loads(_dev_keys_path().read_text(encoding="utf-8"))
+         return {str(k): str(v) for k, v in d.items()} if isinstance(d, dict) else {}
+     except (OSError, ValueError):
+         return {}
+@@ -557,7 +557,7 @@ def _write_dev_keys(keys: dict[str, str]) -> None:
+     p.parent.mkdir(parents=True, exist_ok=True)
+     tmp = p.with_name(p.name + ".tmp")
+     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+-    with os.fdopen(fd, "w") as f:
++    with os.fdopen(fd, "w", encoding="utf-8") as f:
+         json.dump(keys, f)
+     os.chmod(tmp, 0o600)
+     os.replace(tmp, p)
+diff --git a/backend/gamedevworkstation/core/media.py b/backend/gamedevworkstation/core/media.py
+index ffbeb7f..ee87f9c 100644
+--- a/backend/gamedevworkstation/core/media.py
++++ b/backend/gamedevworkstation/core/media.py
+@@ -85,7 +85,7 @@ def _longest_side(sips: str, p: Path) -> int | None:
+         return max(dims)
+     try:
+         out = subprocess.run([sips, "-g", "pixelWidth", "-g", "pixelHeight", str(p)], capture_output=True,
+-                             text=True, timeout=30).stdout
++                             text=True, timeout=30, encoding="utf-8", errors="replace").stdout
+         sides = [int(ln.split(":")[1]) for ln in out.splitlines() if ln.strip().startswith("pixel")]
+         return max(sides) if sides else None
+     except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+diff --git a/backend/gamedevworkstation/features/ci_triage.py b/backend/gamedevworkstation/features/ci_triage.py
+index c9464ce..94e897d 100644
+--- a/backend/gamedevworkstation/features/ci_triage.py
++++ b/backend/gamedevworkstation/features/ci_triage.py
+@@ -203,10 +203,10 @@ def cli(argv: list[str]) -> int:
+         # --create-if-none, or one that reports no comment to edit, gets a plain new comment.
+         try:
+             r = subprocess.run(base + ["--edit-last", "--create-if-none"] + tail, input=body,
+-                               capture_output=True, text=True, timeout=60)
++                               capture_output=True, text=True, timeout=60, encoding="utf-8", errors="replace")
+             if r.returncode != 0 and re.search(r"unknown flag|no comments? found|no comment to edit",
+                                                r.stderr or "", re.I):
+-                r = subprocess.run(base + tail, input=body, capture_output=True, text=True, timeout=60)
++                r = subprocess.run(base + tail, input=body, capture_output=True, text=True, timeout=60, encoding="utf-8", errors="replace")
+         except (OSError, subprocess.SubprocessError) as e:
+             print(f"gdw triage: gh failed: {e}", file=sys.stderr)
+             return 2
+diff --git a/backend/gamedevworkstation/features/claude_code.py b/backend/gamedevworkstation/features/claude_code.py
+index db7522e..7758d46 100644
+--- a/backend/gamedevworkstation/features/claude_code.py
++++ b/backend/gamedevworkstation/features/claude_code.py
+@@ -1326,7 +1326,7 @@ class ClaudeCode:
+             d.mkdir(parents=True, exist_ok=True)
+             os.chmod(d, 0o700)
+             fd = os.open(mcp_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+-            with os.fdopen(fd, "w") as f:
++            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                 os.fchmod(f.fileno(), 0o600)
+                 json.dump(self.mcp.config_json(token), f)
+             wt = app.worktrees_root(sid)
+diff --git a/backend/gamedevworkstation/features/elevenlabs_feature.py b/backend/gamedevworkstation/features/elevenlabs_feature.py
+index 0296ecf..46f7ee6 100644
+--- a/backend/gamedevworkstation/features/elevenlabs_feature.py
++++ b/backend/gamedevworkstation/features/elevenlabs_feature.py
+@@ -394,7 +394,7 @@ class ElevenLabsService:
+             d.mkdir(parents=True, exist_ok=True)
+             tpath = d / f"{time.strftime('%Y%m%d-%H%M%S')}-transcript-{new_id()[:6]}.json"
+             tpath.write_text(json.dumps({"source": str(audio), "text": text, "labelled": labelled,
+-                                         "language_code": r.get("language_code"), "words": words}, indent=1))
++                                         "language_code": r.get("language_code"), "words": words}, indent=1), encoding="utf-8")
+             secs = r.get("audio_duration_secs") or (words[-1]["end"] if words else 0) or _audio_seconds(audio) or 0
+             credits, estimated = stt_credits(headers, secs)
+             iid = self.app.items.add(kind="file", subtype="transcript", source="tool" if source == "agent" else source,
+@@ -645,4 +645,4 @@ def register(app_: FastAPI, api: APIRouter, S: "AppState") -> None:
+         it = S.items.get(item_id)
+         if not it:
+             raise HTTPException(404)
+-        return json.loads(Path(it["path"]).read_text())
++        return json.loads(Path(it["path"]).read_text(encoding="utf-8"))
+diff --git a/backend/gamedevworkstation/features/harnesses.py b/backend/gamedevworkstation/features/harnesses.py
+index 62ed74e..0e64230 100644
+--- a/backend/gamedevworkstation/features/harnesses.py
++++ b/backend/gamedevworkstation/features/harnesses.py
+@@ -69,7 +69,7 @@ def _project_instructions(cwd: Path) -> str | None:
+         f = cwd / rel
+         try:
+             if f.is_file() and root in f.resolve().parents:  # not a symlink out of the folder
+-                parts.append(f"Contents of {f} (project instructions):\n\n{f.read_text(errors='replace')}")
++                parts.append(f"Contents of {f} (project instructions):\n\n{f.read_text(errors='replace', encoding="utf-8")}")
+         except OSError:
+             continue
+     return "\n\n".join(parts)[:PROJECT_INSTRUCTIONS_MAX_CHARS] or None
+diff --git a/backend/gamedevworkstation/features/items_routes.py b/backend/gamedevworkstation/features/items_routes.py
+index 48c87f6..609e5ab 100644
+--- a/backend/gamedevworkstation/features/items_routes.py
++++ b/backend/gamedevworkstation/features/items_routes.py
+@@ -51,7 +51,7 @@ def _finished_card(S: "AppState", sub_id: str) -> dict | None:
+     if not f.is_file():
+         return None
+     try:
+-        card = json.loads(f.read_text())["card"]
++        card = json.loads(f.read_text(encoding="utf-8"))["card"]
+     except (ValueError, KeyError):
+         return None
+     row = S.db.one("SELECT session_id FROM jobs WHERE kind IN ('subagent','codex_cli') "
+diff --git a/backend/gamedevworkstation/features/ladder.py b/backend/gamedevworkstation/features/ladder.py
+index c150a6f..6f53a2e 100644
+--- a/backend/gamedevworkstation/features/ladder.py
++++ b/backend/gamedevworkstation/features/ladder.py
+@@ -1914,7 +1914,7 @@ def _git_stat(folder: Path) -> str:
+         return ""
+     try:
+         r = subprocess.run(["git", "diff", "--stat", "--", "Assets"], cwd=folder, capture_output=True, text=True,
+-                           timeout=10)
++                           timeout=10, encoding="utf-8", errors="replace")
+     except (OSError, subprocess.SubprocessError):
+         return ""
+     return r.stdout[-3000:] if r.returncode == 0 else ""
+diff --git a/backend/gamedevworkstation/features/pi_research.py b/backend/gamedevworkstation/features/pi_research.py
+index 1c05f47..2f8589e 100644
+--- a/backend/gamedevworkstation/features/pi_research.py
++++ b/backend/gamedevworkstation/features/pi_research.py
+@@ -321,7 +321,7 @@ def _git(root: Path) -> list[Fact]:
+     def run(*args: str) -> str | None:
+         try:
+             r = subprocess.run(["git", *GIT_SAFE, *args], cwd=str(root), capture_output=True, text=True, timeout=GIT_TIMEOUT,
+-                               stdin=subprocess.DEVNULL, env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
++                               stdin=subprocess.DEVNULL, env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"}, encoding="utf-8", errors="replace")
+         except (OSError, subprocess.SubprocessError):
+             return None
+         return r.stdout if r.returncode == 0 else None
+diff --git a/backend/gamedevworkstation/features/release_feed.py b/backend/gamedevworkstation/features/release_feed.py
+index 33b6f4f..c3f9757 100644
+--- a/backend/gamedevworkstation/features/release_feed.py
++++ b/backend/gamedevworkstation/features/release_feed.py
+@@ -84,7 +84,7 @@ def unpack_app(zip_path: Path, into: Path) -> Path:
+     """Extract a zipped GameDevWorkstation.app (made with `ditto -c -k --keepParent`)."""
+     into.mkdir(parents=True, exist_ok=True)
+     if shutil.which("ditto"):  # keeps symlinks and the code signature intact
+-        r = subprocess.run(["ditto", "-x", "-k", str(zip_path), str(into)], capture_output=True, text=True, timeout=600)
++        r = subprocess.run(["ditto", "-x", "-k", str(zip_path), str(into)], capture_output=True, text=True, timeout=600, encoding="utf-8", errors="replace")
+         if r.returncode != 0:
+             raise ValueError(f"couldn't unzip {zip_path.name}: {r.stderr.strip()[:300]}")
+     else:
+diff --git a/backend/gamedevworkstation/features/replay.py b/backend/gamedevworkstation/features/replay.py
+index 9ef8f23..f9c78b7 100644
+--- a/backend/gamedevworkstation/features/replay.py
++++ b/backend/gamedevworkstation/features/replay.py
+@@ -388,7 +388,7 @@ def _local_cpu_model() -> str | None:
+     try:
+         if platform.system() == "Darwin":
+             out = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"], capture_output=True,
+-                                 text=True, timeout=2)
++                                 text=True, timeout=2, encoding="utf-8", errors="replace")
+             model = out.stdout.strip()
+             return model or None
+     except (OSError, subprocess.SubprocessError):
+@@ -402,7 +402,7 @@ def _sha256_bytes(data: bytes) -> str:
+ 
+ def _project_unity_version(root: Path) -> str | None:
+     try:
+-        text = (root / "ProjectSettings" / "ProjectVersion.txt").read_text(errors="replace")
++        text = (root / "ProjectSettings" / "ProjectVersion.txt").read_text(errors="replace", encoding="utf-8")
+     except OSError:
+         return None
+     m = re.search(r"^m_EditorVersion:\s*(\S+)", text, re.M)
+@@ -411,7 +411,7 @@ def _project_unity_version(root: Path) -> str | None:
+ 
+ def _manifest_dependencies(root: Path) -> dict[str, str] | None:
+     try:
+-        data = json.loads((root / "Packages" / "manifest.json").read_text(errors="replace"))
++        data = json.loads((root / "Packages" / "manifest.json").read_text(errors="replace", encoding="utf-8"))
+     except (OSError, ValueError):
+         return None
+     deps = data.get("dependencies") if isinstance(data, dict) else None
+@@ -420,7 +420,7 @@ def _manifest_dependencies(root: Path) -> dict[str, str] | None:
+ 
+ def _project_identifier(root: Path) -> str | None:
+     try:
+-        text = (root / "ProjectSettings" / "ProjectSettings.asset").read_text(errors="replace")
++        text = (root / "ProjectSettings" / "ProjectSettings.asset").read_text(errors="replace", encoding="utf-8")
+     except OSError:
+         return None
+     m = re.search(r"^\s*applicationIdentifier:\s*\n\s+[A-Za-z]+:\s*(\S+)", text, re.M)
+@@ -433,7 +433,7 @@ def _scene_guid(root: Path, scene_path: str | None) -> str | None:
+     if not scene_path:
+         return None
+     try:
+-        text = (root / f"{scene_path}.meta").read_text(errors="replace")
++        text = (root / f"{scene_path}.meta").read_text(errors="replace", encoding="utf-8")
+     except OSError:
+         return None
+     m = re.search(r"^guid:\s*([0-9a-fA-F]{32})\s*$", text, re.M)
+@@ -587,7 +587,7 @@ def _utc(epoch: float | None) -> str:
+ def _read_existing_report(path: Path) -> dict | None:
+     """A report someone else (the Unity package) already wrote is never replaced."""
+     try:
+-        data = json.loads(path.read_text(errors="replace"))
++        data = json.loads(path.read_text(errors="replace", encoding="utf-8"))
+     except (OSError, ValueError):
+         return None
+     return data if isinstance(data, dict) and data.get("schema") == "gdw.replay.report/1" else None
+@@ -909,7 +909,7 @@ async def _op_status(app: "AppState", session: dict, root: Path, run_id: str, br
+     report_path = out_dir / "report.json"
+     if report_path.is_file():
+         try:
+-            report = json.loads(report_path.read_text(errors="replace"))
++            report = json.loads(report_path.read_text(errors="replace", encoding="utf-8"))
+             parts.append(f"report: {report.get('status', 'unknown')}")
+             if report.get("environment") == "differs":
+                 parts.append("environment: differs (" + ", ".join(report.get("environment_diff") or []) + ")")
+@@ -1160,7 +1160,7 @@ def register(app_: "FastAPI", api: "APIRouter", S: "AppState") -> None:
+         report_path = out_dir / "report.json"
+         if report_path.is_file():
+             try:
+-                loaded = json.loads(report_path.read_text(errors="replace"))
++                loaded = json.loads(report_path.read_text(errors="replace", encoding="utf-8"))
+                 report = loaded if isinstance(loaded, dict) else {}
+             except (OSError, ValueError):
+                 report = {}
+diff --git a/backend/gamedevworkstation/features/replay_install.py b/backend/gamedevworkstation/features/replay_install.py
+index f84e9e1..c3e5da7 100644
+--- a/backend/gamedevworkstation/features/replay_install.py
++++ b/backend/gamedevworkstation/features/replay_install.py
+@@ -151,7 +151,7 @@ def replay_package_status(project: str | Path) -> dict:
+ 
+ def _read_version(pkg_json: Path) -> str | None:
+     try:
+-        data = json.loads(pkg_json.read_text(errors="replace"))
++        data = json.loads(pkg_json.read_text(errors="replace", encoding="utf-8"))
+         return str(data.get("version", "")) or None
+     except (OSError, ValueError):
+         return None
+@@ -159,7 +159,7 @@ def _read_version(pkg_json: Path) -> str | None:
+ 
+ def _manifest_dependencies(root: Path) -> dict[str, str]:
+     try:
+-        manifest = json.loads((root / "Packages" / "manifest.json").read_text(errors="replace"))
++        manifest = json.loads((root / "Packages" / "manifest.json").read_text(errors="replace", encoding="utf-8"))
+     except (OSError, ValueError):
+         return {}
+     deps = manifest.get("dependencies") if isinstance(manifest, dict) else None
+@@ -171,7 +171,7 @@ def _ensure_manifest(root: Path, *, write: bool) -> dict:
+     preserving every existing pin, and make com.gdw.replay testable. Never suffixes versions."""
+     manifest_path = root / "Packages" / "manifest.json"
+     try:
+-        manifest = json.loads(manifest_path.read_text(errors="replace"))
++        manifest = json.loads(manifest_path.read_text(errors="replace", encoding="utf-8"))
+     except (OSError, ValueError) as e:
+         return {"ok": False, "message": f"cannot read manifest.json: {e}", "added": []}
+     if not isinstance(manifest, dict):
+diff --git a/backend/gamedevworkstation/features/replay_media.py b/backend/gamedevworkstation/features/replay_media.py
+index 64c132a..14c247a 100644
+--- a/backend/gamedevworkstation/features/replay_media.py
++++ b/backend/gamedevworkstation/features/replay_media.py
+@@ -404,7 +404,7 @@ def execute_steps(
+         try:
+             r = subprocess.run(
+                 argv,
+-                capture_output=True, text=True, timeout=600,
++                capture_output=True, text=True, timeout=600, encoding="utf-8", errors="replace",
+             )
+             if r.returncode != 0:
+                 error = r.stderr.strip() or f"ffmpeg exit code {r.returncode}"
+diff --git a/backend/gamedevworkstation/features/session_routes.py b/backend/gamedevworkstation/features/session_routes.py
+index 601ff7f..5e505ed 100644
+--- a/backend/gamedevworkstation/features/session_routes.py
++++ b/backend/gamedevworkstation/features/session_routes.py
+@@ -117,7 +117,7 @@ def account_full_name() -> str:
+     Only the local account: never the Claude login or any email address."""
+     if sys.platform == "darwin":
+         try:
+-            r = subprocess.run(["/usr/bin/id", "-F"], capture_output=True, text=True, timeout=3)
++            r = subprocess.run(["/usr/bin/id", "-F"], capture_output=True, text=True, timeout=3, encoding="utf-8", errors="replace")
+             if r.returncode == 0 and r.stdout.strip():
+                 return r.stdout.strip()
+         except (OSError, subprocess.SubprocessError):
+diff --git a/backend/gamedevworkstation/features/skill_assistant.py b/backend/gamedevworkstation/features/skill_assistant.py
+index e6124bf..f3ad6fa 100644
+--- a/backend/gamedevworkstation/features/skill_assistant.py
++++ b/backend/gamedevworkstation/features/skill_assistant.py
+@@ -415,7 +415,7 @@ class SkillAssistant:
+         d.mkdir(exist_ok=True)
+         doc = {"card": run.card(), "history": [m.model_dump() for m in run.history]}
+         doc = _redact(doc, run.secrets, run.redact_calls)  # refused secrets never reach the disk
+-        (d / f"{run.id}.json").write_text(json.dumps(doc, default=str))
++        (d / f"{run.id}.json").write_text(json.dumps(doc, default=str), encoding="utf-8")
+ 
+     def get(self, run_id: str) -> dict | None:
+         if run := self.runs.get(run_id):
+@@ -423,7 +423,7 @@ class SkillAssistant:
+         if not re.fullmatch(r"asst_[A-Za-z0-9_-]+", run_id):
+             return None
+         f = data_dir() / "assistant" / f"{run_id}.json"
+-        return json.loads(f.read_text())["card"] if f.exists() else None
++        return json.loads(f.read_text(encoding="utf-8"))["card"] if f.exists() else None
+ 
+     async def cancel(self, run_id: str) -> bool:
+         run = self.runs.get(run_id)
+@@ -636,7 +636,7 @@ class SkillAssistant:
+             root = (user_skills_dir() / name).resolve()
+             skill_md = root / "SKILL.md"
+             existed = root.exists()
+-            before: dict[Path, str | None] = {skill_md: skill_md.read_text() if skill_md.is_file() else None}
++            before: dict[Path, str | None] = {skill_md: skill_md.read_text(encoding="utf-8") if skill_md.is_file() else None}
+             try:
+                 s = save_skill(name, final)
+             except ValueError as e:
+@@ -653,9 +653,9 @@ class SkillAssistant:
+                     skipped.append(f"{rel} (same file as SKILL.md)")
+                     continue
+                 try:
+-                    before.setdefault(dest, dest.read_text(errors="replace") if dest.is_file() else None)
++                    before.setdefault(dest, dest.read_text(errors="replace", encoding="utf-8") if dest.is_file() else None)
+                     dest.parent.mkdir(parents=True, exist_ok=True)
+-                    dest.write_text(text)
++                    dest.write_text(text, encoding="utf-8")
+                 except OSError as e:
+                     extra.pop(rel)
+                     skipped.append(f"{rel} ({e})")
+@@ -663,9 +663,9 @@ class SkillAssistant:
+                 if os.path.samefile(dest, skill_md):  # an alias nobody foresaw: put SKILL.md back
+                     extra.pop(rel)
+                     skipped.append(f"{rel} (same file as SKILL.md)")
+-                    skill_md.write_text(final)
++                    skill_md.write_text(final, encoding="utf-8")
+             # The file on disk is what agents load: it must still parse to the folder's name.
+-            saved = parse_skill(skill_md.read_text())[0].get("name") if skill_md.is_file() else None
++            saved = parse_skill(skill_md.read_text(encoding="utf-8"))[0].get("name") if skill_md.is_file() else None
+             if saved != name:
+                 _rollback(root, existed, before)
+                 return ToolOutput(f"Couldn't install from {src}: the saved SKILL.md's name ({saved!r}) doesn't match "
+@@ -798,7 +798,7 @@ def _rollback(root: Path, existed: bool, before: dict[Path, str | None]) -> None
+             if old is None:
+                 p.unlink(missing_ok=True)
+             else:
+-                p.write_text(old)
++                p.write_text(old, encoding="utf-8")
+         except OSError:
+             pass
+ 
+diff --git a/backend/gamedevworkstation/features/subagents.py b/backend/gamedevworkstation/features/subagents.py
+index 303e815..2e8b3b7 100644
+--- a/backend/gamedevworkstation/features/subagents.py
++++ b/backend/gamedevworkstation/features/subagents.py
+@@ -154,7 +154,7 @@ class SubagentManager:
+         if sub := self.subs.get(sub_id):
+             return sub
+         try:
+-            d = json.loads(self._transcript(sub_id).read_text())
++            d = json.loads(self._transcript(sub_id).read_text(encoding="utf-8"))
+             c = d["card"]
+             if not d.get("session_id"):
+                 return None
+@@ -180,7 +180,7 @@ class SubagentManager:
+         """Bring a finished subagent's history back from its transcript (before resuming it)."""
+         if not sub.history_on_disk:
+             return
+-        d = json.loads(self._transcript(sub.id).read_text())
++        d = json.loads(self._transcript(sub.id).read_text(encoding="utf-8"))
+         sub.history = [Message.model_validate(m) for m in d["history"]]
+         sub.history_on_disk = False
+ 
+@@ -480,7 +480,7 @@ class SubagentManager:
+         (d / f"{sub.id}.json").write_text(json.dumps({
+             "card": sub.card(), "result": sub.result, "session_id": sub.session_id, "tools": sub.tools,
+             "instructions": sub.instructions, "max_turns": sub.max_turns,
+-            "history": [m.model_dump() for m in sub.history]}, default=str))
++            "history": [m.model_dump() for m in sub.history]}, default=str), encoding="utf-8")
+ 
+     def compact_result(self, sub: Subagent) -> str:
+         wall = (sub.ended or time.time()) - sub.started
+@@ -722,7 +722,7 @@ def register(app_: FastAPI, api: APIRouter, S: "AppState") -> None:
+                 sid_ = json.loads(job["meta"]).get("subagent")
+                 f = d / f"{sid_}.json"
+                 if sid_ and sid_ not in cards and f.exists():
+-                    cards[sid_] = json.loads(f.read_text())["card"]
++                    cards[sid_] = json.loads(f.read_text(encoding="utf-8"))["card"]
+         return list(cards.values())
+ 
+     @api.get("/subagents/{sub_id}")
+@@ -732,7 +732,7 @@ def register(app_: FastAPI, api: APIRouter, S: "AppState") -> None:
+             return {**s.card(), "result": s.result}
+         f = data_dir() / "subagents" / f"{sub_id}.json"
+         if f.exists():
+-            d = json.loads(f.read_text())
++            d = json.loads(f.read_text(encoding="utf-8"))
+             return {**d["card"], "result": d["result"]}
+         raise HTTPException(404)
+ 
+diff --git a/backend/gamedevworkstation/features/unity_cli.py b/backend/gamedevworkstation/features/unity_cli.py
+index 7b9d029..cfc9204 100644
+--- a/backend/gamedevworkstation/features/unity_cli.py
++++ b/backend/gamedevworkstation/features/unity_cli.py
+@@ -188,11 +188,11 @@ def probe_cli(path: Path) -> UnityCliInfo | None:
+     info = None
+     try:
+         out = subprocess.run([str(path), "--version"], capture_output=True, text=True, timeout=5,
+-                             stdin=subprocess.DEVNULL, env=cli_env())
++                             stdin=subprocess.DEVNULL, env=cli_env(), encoding="utf-8", errors="replace")
+         m = re.search(r"\b(\d+\.\d+\.\d+(?:-[0-9A-Za-z.\-]+)?)\b", out.stdout or "")
+         if out.returncode == 0 and m:
+             cat = subprocess.run([str(path), "commands", "--format", "json"], capture_output=True, text=True,
+-                                 timeout=20, stdin=subprocess.DEVNULL, env=cli_env())
++                                 timeout=20, stdin=subprocess.DEVNULL, env=cli_env(), encoding="utf-8", errors="replace")
+             env = parse_envelope(cat.stdout)
+             opts: dict[str, list] = {}
+             cmds = ((env or {}).get("data") or {}).get("commands") if isinstance((env or {}).get("data"), dict) else None
+@@ -250,7 +250,7 @@ def find_unity_cli(cfg: dict) -> CliStatus:
+ 
+ def project_editor_version(project: Path) -> str | None:
+     try:
+-        text = (project / "ProjectSettings" / "ProjectVersion.txt").read_text(errors="replace")
++        text = (project / "ProjectSettings" / "ProjectVersion.txt").read_text(errors="replace", encoding="utf-8")
+     except OSError:
+         return None
+     m = re.search(r"^m_EditorVersion:\s*(\S+)", text, re.M)
+@@ -259,7 +259,7 @@ def project_editor_version(project: Path) -> str | None:
+ 
+ def _manifest(project: Path) -> dict:
+     try:
+-        d = json.loads((project / "Packages" / "manifest.json").read_text(errors="replace"))
++        d = json.loads((project / "Packages" / "manifest.json").read_text(errors="replace", encoding="utf-8"))
+         return d.get("dependencies") or {} if isinstance(d, dict) else {}
+     except (OSError, ValueError):
+         return {}
+@@ -563,7 +563,7 @@ class CliRun:
+         if self.log_path:
+             try:
+                 if self.log_path.is_file() and self.log_path.stat().st_size <= cap:
+-                    return self.log_path.read_text(errors="replace")
++                    return self.log_path.read_text(errors="replace", encoding="utf-8")
+                 if self.log_path.is_file():
+                     with self.log_path.open("rb") as f:
+                         f.seek(-cap, 2)
+@@ -590,7 +590,7 @@ def batch_editor_pids(project: Path) -> list[int]:
+     esc = re.escape(str(project))
+     pat = rf"Unity\.app/Contents/MacOS/Unity.*-batchmode.*-projectPath[= ]+{esc}/?( |$)"
+     try:
+-        out = subprocess.run(["pgrep", "-fi", pat], capture_output=True, text=True, timeout=5, stdin=subprocess.DEVNULL)
++        out = subprocess.run(["pgrep", "-fi", pat], capture_output=True, text=True, timeout=5, stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace")
+     except (OSError, subprocess.SubprocessError):
+         return []
+     pids = [int(x) for x in out.stdout.split() if x.isdigit()]
+@@ -600,7 +600,7 @@ def batch_editor_pids(project: Path) -> list[int]:
+         if pid == os.getpid():
+             continue
+         try:
+-            cmd = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, timeout=5).stdout
++            cmd = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, timeout=5, encoding="utf-8", errors="replace").stdout
+         except (OSError, subprocess.SubprocessError):
+             continue
+         # A GUI Editor's import workers are batch-mode Unity processes too: never touch them.
+@@ -611,7 +611,7 @@ def batch_editor_pids(project: Path) -> list[int]:
+ 
+ def _started_after(pid: int, since: float) -> bool:
+     try:
+-        et = subprocess.run(["ps", "-o", "etime=", "-p", str(pid)], capture_output=True, text=True, timeout=5).stdout
++        et = subprocess.run(["ps", "-o", "etime=", "-p", str(pid)], capture_output=True, text=True, timeout=5, encoding="utf-8", errors="replace").stdout
+     except (OSError, subprocess.SubprocessError):
+         return False
+     e = _elapsed_s(et)
+diff --git a/backend/gamedevworkstation/features/unity_clone.py b/backend/gamedevworkstation/features/unity_clone.py
+index 4894538..5a41305 100644
+--- a/backend/gamedevworkstation/features/unity_clone.py
++++ b/backend/gamedevworkstation/features/unity_clone.py
+@@ -115,7 +115,7 @@ async def sync_clone(project: Path | str, *, timeout_s: float = 1800) -> dict:
+     cmds: list[list[str]] = []
+     await asyncio.to_thread(_check_symlinks, src, dst)
+     try:
+-        marker = json.loads((dst / MARKER).read_text())
++        marker = json.loads((dst / MARKER).read_text(encoding="utf-8"))
+     except (OSError, ValueError):
+         marker = None
+     first = not isinstance(marker, dict)
+@@ -149,7 +149,7 @@ async def sync_clone(project: Path | str, *, timeout_s: float = 1800) -> dict:
+                                  f"{out.strip()[-300:]}")
+     try:
+         meta = {"source": str(src), "created": time.time() if first else marker.get("created"), "synced": time.time()}
+-        (dst / MARKER).write_text(json.dumps(meta))
++        (dst / MARKER).write_text(json.dumps(meta), encoding="utf-8")
+     except (OSError, ValueError) as e:
+         raise CloneError(f"couldn't write {MARKER}: {e}") from e
+     return {"clone": str(dst), "first": first, "commands": cmds}
+diff --git a/backend/gamedevworkstation/features/unity_harness.py b/backend/gamedevworkstation/features/unity_harness.py
+index 5254c02..40d5d2b 100644
+--- a/backend/gamedevworkstation/features/unity_harness.py
++++ b/backend/gamedevworkstation/features/unity_harness.py
+@@ -174,7 +174,7 @@ def install_problem(project: Path, st: dict) -> str | None:
+ 
+ def _install_marker(root: Path) -> dict:
+     try:
+-        data = json.loads((root / MARKER).read_text())
++        data = json.loads((root / MARKER).read_text(encoding="utf-8"))
+         return data if isinstance(data, dict) else {}
+     except (OSError, ValueError):
+         return {}
+@@ -289,7 +289,7 @@ def uninstall_harness(project: Path | str) -> dict:
+ def _git(root: Path, *args: str) -> str | None:
+     try:
+         r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=15,
+-                           stdin=subprocess.DEVNULL)
++                           stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace")
+     except (OSError, subprocess.TimeoutExpired):
+         return None
+     return r.stdout.strip() if r.returncode == 0 else None
+diff --git a/backend/gamedevworkstation/features/unity_scene.py b/backend/gamedevworkstation/features/unity_scene.py
+index 2b4da1b..39a4176 100644
+--- a/backend/gamedevworkstation/features/unity_scene.py
++++ b/backend/gamedevworkstation/features/unity_scene.py
+@@ -97,7 +97,7 @@ def build_scenes(root: Path) -> list[dict]:
+     """[{path, enabled}] from ProjectSettings/EditorBuildSettings.asset, in build order."""
+     f = root / "ProjectSettings" / "EditorBuildSettings.asset"
+     try:
+-        text = f.read_text(errors="replace")[:2_000_000]
++        text = f.read_text(errors="replace", encoding="utf-8")[:2_000_000]
+     except OSError:
+         return []
+     out: list[dict] = []
+@@ -194,7 +194,7 @@ def _guid_paths(root: Path, guids: set[str]) -> dict[str, str]:
+             if n > MAX_META_SCAN:
+                 return found
+             try:
+-                with open(os.path.join(dirpath, f), "r", errors="replace") as fh:
++                with open(os.path.join(dirpath, f), "r", errors="replace", encoding="utf-8") as fh:
+                     head = fh.read(400)
+             except OSError:
+                 continue
+@@ -214,7 +214,7 @@ def read_scene(root: Path | str, scene: str, *, query: str | None = None, limit:
+     size = p.stat().st_size
+     if size > MAX_SCENE_BYTES:
+         raise ValueError(f"{scene} is {size // 1_000_000} MB; too big to read here")
+-    text = p.read_text(errors="replace")
++    text = p.read_text(errors="replace", encoding="utf-8")
+     if not text.startswith("%YAML"):
+         raise ValueError(f"{scene} isn't a text scene (Asset Serialization must be Force Text)")
+     gos: dict[str, dict] = {}
+diff --git a/backend/gamedevworkstation/features/updates.py b/backend/gamedevworkstation/features/updates.py
+index 1a3c764..14691e6 100644
+--- a/backend/gamedevworkstation/features/updates.py
++++ b/backend/gamedevworkstation/features/updates.py
+@@ -89,7 +89,7 @@ def updates_dir(cfg: Any = None) -> Path:
+ 
+ def read_json(p: Path) -> dict | None:
+     try:
+-        data = json.loads(p.read_text())
++        data = json.loads(p.read_text(encoding="utf-8"))
+     except (OSError, ValueError):
+         return None
+     return data if isinstance(data, dict) else None
+@@ -100,7 +100,7 @@ def write_json_atomic(p: Path, data: dict) -> None:
+     p.parent.mkdir(parents=True, exist_ok=True)
+     fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=f".{p.name}.", suffix=".tmp")
+     try:
+-        with os.fdopen(fd, "w") as f:
++        with os.fdopen(fd, "w", encoding="utf-8") as f:
+             json.dump(data, f, indent=2)
+             f.write("\n")
+             f.flush()
+@@ -353,7 +353,7 @@ def verify_bundle(app: Path, expect_version: str | None) -> dict:
+         raise ValueError(f"{app} says it's version {info.get('version')}, expected {expect_version}.")
+     if shutil.which("codesign"):
+         r = subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], capture_output=True, text=True,
+-                           timeout=180)
++                           timeout=180, encoding="utf-8", errors="replace")
+         if r.returncode != 0:
+             raise ValueError(f"The signature of {app} doesn't verify: {(r.stderr or r.stdout).strip()[:300]}")
+     return info
+@@ -368,7 +368,7 @@ def copy_bundle(src: Path, dst: Path) -> None:
+     if dst.exists():
+         shutil.rmtree(dst)
+     if shutil.which("ditto"):  # keeps symlinks, xattrs and the code signature intact
+-        r = subprocess.run(["ditto", str(src), str(dst)], capture_output=True, text=True, timeout=600)
++        r = subprocess.run(["ditto", str(src), str(dst)], capture_output=True, text=True, timeout=600, encoding="utf-8", errors="replace")
+         if r.returncode != 0:
+             shutil.rmtree(dst, ignore_errors=True)
+             raise OSError(f"ditto failed: {r.stderr.strip()[:300]}")
+@@ -553,7 +553,7 @@ def launch_windows_helper(script: str, log_path: Path) -> int:
+     path.write_text(script, encoding="utf-8-sig")
+     log_path.parent.mkdir(parents=True, exist_ok=True)
+     flags = 0x00000008 | 0x00000200 | 0x08000000  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+-    with log_path.open("a") as out:
++    with log_path.open("a", encoding="utf-8") as out:
+         p = subprocess.Popen(["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                               "-File", str(path)], stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
+                              creationflags=flags, close_fds=True, env=_clean_env())
+@@ -572,10 +572,10 @@ def launch_helper(script: str, log_path: Path) -> int:
+     d = data_dir() / "updates-tmp"
+     d.mkdir(parents=True, exist_ok=True)
+     path = d / f"install-{int(time.time())}.sh"
+-    path.write_text(script)
++    path.write_text(script, encoding="utf-8")
+     path.chmod(0o700)
+     log_path.parent.mkdir(parents=True, exist_ok=True)
+-    with log_path.open("a") as out:
++    with log_path.open("a", encoding="utf-8") as out:
+         p = subprocess.Popen(["/bin/bash", str(path)], stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
+                              start_new_session=True, close_fds=True, env=_clean_env(), cwd="/")
+     return p.pid
+diff --git a/backend/gamedevworkstation/items.py b/backend/gamedevworkstation/items.py
+index 732ffb8..08c2170 100644
+--- a/backend/gamedevworkstation/items.py
++++ b/backend/gamedevworkstation/items.py
+@@ -166,7 +166,7 @@ def extract_text(path: str | Path, mime: str | None = None, limit: int = 200_000
+             r = PdfReader(str(p))
+             return "\n".join((pg.extract_text() or "") for pg in r.pages[:200])[:limit]
+         if p.suffix.lower() in TEXT_EXT or (mime or "").startswith("text/"):
+-            t = p.read_text(errors="replace")[:limit]
++            t = p.read_text(errors="replace", encoding="utf-8")[:limit]
+             if p.suffix.lower() in (".html", ".htm"):
+                 m = re.search(r"<title>(.*?)</title>", t, re.S | re.I)
+                 body = re.sub(r"<[^>]+>", " ", t)
+diff --git a/backend/gamedevworkstation/legacy.py b/backend/gamedevworkstation/legacy.py
+index 5b78807..b35df65 100644
+--- a/backend/gamedevworkstation/legacy.py
++++ b/backend/gamedevworkstation/legacy.py
+@@ -223,7 +223,7 @@ def migrate_data_dir(old: Path, new: Path) -> bool:
+         _rewrite_db(tmp, old, new)
+         os.replace(tmp, new / DB_NAME)
+     record = {"from": str(old), "at": time.time(), "worktrees_left_in": str(old / "worktrees")}
+-    (new / MIGRATION_RECORD).write_text(json.dumps(record, indent=2) + "\n")
++    (new / MIGRATION_RECORD).write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+     log.info("migration: data copied from %s in %.1fs", old, time.monotonic() - started)
+     return True
+ 
+@@ -233,7 +233,7 @@ def migrate_data_dir(old: Path, new: Path) -> bool:
+ 
+ def _keychain_record(path: Path) -> set[str]:
+     try:
+-        data = json.loads(path.read_text())
++        data = json.loads(path.read_text(encoding="utf-8"))
+         return {str(a) for a in data.get("accounts", [])} if isinstance(data, dict) else set()
+     except (OSError, ValueError):
+         return set()
+@@ -246,7 +246,7 @@ def keychain_mark(record: Path, account: str) -> None:
+         return
+     record.parent.mkdir(parents=True, exist_ok=True)
+     tmp = record.with_name(record.name + ".tmp")
+-    tmp.write_text(json.dumps({"accounts": sorted(done | {account})}, indent=2) + "\n")
++    tmp.write_text(json.dumps({"accounts": sorted(done | {account})}, indent=2) + "\n", encoding="utf-8")
+     os.chmod(tmp, 0o600)
+     os.replace(tmp, record)
+ 
+diff --git a/backend/gamedevworkstation/services.py b/backend/gamedevworkstation/services.py
+index c6176ee..8357ec5 100644
+--- a/backend/gamedevworkstation/services.py
++++ b/backend/gamedevworkstation/services.py
+@@ -34,7 +34,7 @@ def login_shell_path() -> str | None:
+     shell = default_shell()
+     try:
+         out = subprocess.run([shell, "-lic", 'echo "__PATH__=$PATH"'], capture_output=True, text=True,
+-                             timeout=10, stdin=subprocess.DEVNULL)
++                             timeout=10, stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace")
+         for line in out.stdout.splitlines():
+             if line.startswith("__PATH__="):
+                 return line.split("=", 1)[1].strip()
+diff --git a/backend/gamedevworkstation/skills.py b/backend/gamedevworkstation/skills.py
+index 86cf2ce..07fba4b 100644
+--- a/backend/gamedevworkstation/skills.py
++++ b/backend/gamedevworkstation/skills.py
+@@ -142,7 +142,7 @@ def list_skills() -> list[dict]:
+         if not root.exists():
+             continue
+         for f in sorted(root.glob("*/SKILL.md")):
+-            meta, _ = parse_skill(f.read_text())
++            meta, _ = parse_skill(f.read_text(encoding="utf-8"))
+             name = meta.get("name") or f.parent.name
+             if src == "user" and name != f.parent.name:
+                 # A user skill is known by its folder: a file whose frontmatter claims another name
+@@ -161,7 +161,7 @@ def list_skills() -> list[dict]:
+ def get_skill(name: str) -> dict | None:
+     for s in list_skills():
+         if s["name"] == name:
+-            return {**s, "content": Path(s["path"]).read_text()}
++            return {**s, "content": Path(s["path"]).read_text(encoding="utf-8")}
+     return None
+ 
+ 
+@@ -194,7 +194,7 @@ def save_skill(name: str, content: str) -> dict:
+     _copy_builtin(name)  # a first override of a built-in keeps the files its SKILL.md refers to
+     d = user_skills_dir() / name
+     d.mkdir(parents=True, exist_ok=True)
+-    (d / "SKILL.md").write_text(content)
++    (d / "SKILL.md").write_text(content, encoding="utf-8")
+     return get_skill(name)  # type: ignore[return-value]
+ 
+ 
+@@ -260,7 +260,7 @@ def write_skill_file(name: str, path: str, content: str) -> dict:
+     cur = skill_file(name, path)
+     if cur["binary"] or cur["truncated"]:
+         raise ValueError(f"{path} isn't a text file that can be edited here")
+-    p.write_text(content)
++    p.write_text(content, encoding="utf-8")
+     return skill_file(name, path)
+ 
+ 
+@@ -277,7 +277,7 @@ def read_skill_file(name: str, path: str = "") -> str:
+     p = (root / path).resolve()
+     if root not in p.parents or not p.is_file():
+         raise FileNotFoundError(f"{path} is not a file in the {name} skill")
+-    return p.read_text(errors="replace")[:MAX_SKILL_FILE]
++    return p.read_text(errors="replace", encoding="utf-8")[:MAX_SKILL_FILE]
+ 
+ 
+ def skill_invocation(name: str) -> str:
+diff --git a/packaging/gamedevworkstation.spec b/packaging/gamedevworkstation.spec
+index 20471f1..4697696 100644
+--- a/packaging/gamedevworkstation.spec
++++ b/packaging/gamedevworkstation.spec
+@@ -36,7 +36,8 @@ pyz = PYZ(a.pure)
+ exe = EXE(
+     pyz,
+     a.scripts,
+-    [],
++    # UTF-8 mode, so text I/O that doesn't name an encoding still isn't decoded as cp1252 on Windows.
++    [("X utf8_mode=1", None, "OPTION")],
+     exclude_binaries=True,
+     name="gamedevworkstation-backend",
+     console=True,
+diff --git a/scripts/app_test.py b/scripts/app_test.py
+index 1910995..4ee37c9 100644
+--- a/scripts/app_test.py
++++ b/scripts/app_test.py
+@@ -35,13 +35,13 @@ def call(rt: dict, path: str, body: dict | None = None, method: str | None = Non
+ 
+ 
+ def backend_pids() -> list[str]:
+-    out = subprocess.run(["pgrep", "-f", BACKEND_MARK], capture_output=True, text=True).stdout
++    out = subprocess.run(["pgrep", "-f", BACKEND_MARK], capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
+     return [p for p in out.split() if p]
+ 
+ 
+ def process_rows() -> dict[int, tuple[int, int, str, str]]:
+     """pid → (ppid, pgid, stat, command) for every process."""
+-    out = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,pgid=,stat=,command="], capture_output=True, text=True).stdout
++    out = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,pgid=,stat=,command="], capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
+     rows = {}
+     for line in out.splitlines():
+         parts = line.split(None, 4)
+@@ -91,7 +91,7 @@ def main() -> int:
+     while time.time() - t0 < 90:
+         if RUNTIME.exists():
+             try:
+-                rt = json.loads(RUNTIME.read_text())
++                rt = json.loads(RUNTIME.read_text(encoding="utf-8"))
+                 break
+             except json.JSONDecodeError:
+                 pass
+diff --git a/scripts/eval_prompt_improver.py b/scripts/eval_prompt_improver.py
+index 9599753..1e10e64 100644
+--- a/scripts/eval_prompt_improver.py
++++ b/scripts/eval_prompt_improver.py
+@@ -227,7 +227,7 @@ class Recorder:
+ def make_project(base: Path) -> Path:
+     unity = base / "unity"
+     (unity / "ProjectSettings").mkdir(parents=True)
+-    (unity / "ProjectSettings" / "ProjectVersion.txt").write_text("m_EditorVersion: 6000.0.23f1\n")
++    (unity / "ProjectSettings" / "ProjectVersion.txt").write_text("m_EditorVersion: 6000.0.23f1\n", encoding="utf-8")
+     return unity
+ 
+ 
+@@ -428,7 +428,7 @@ def markdown(summary: dict, mode: str) -> str:
+ 
+ 
+ def load_corpus(path: Path = CORPUS) -> dict:
+-    return json.loads(path.read_text())
++    return json.loads(path.read_text(encoding="utf-8"))
+ 
+ 
+ def run_fake(corpus: dict | None = None) -> dict:
+@@ -494,7 +494,7 @@ def main(argv: list[str] | None = None) -> int:
+         report = run_fake(corpus)
+     if a.out:
+         a.out.parent.mkdir(parents=True, exist_ok=True)
+-        a.out.write_text(json.dumps(report, indent=2))
++        a.out.write_text(json.dumps(report, indent=2), encoding="utf-8")
+     print(markdown(report["summary"], report["mode"]))
+     return 0
+ 
+diff --git a/scripts/release_tool.py b/scripts/release_tool.py
+index 987c474..cb887a7 100755
+--- a/scripts/release_tool.py
++++ b/scripts/release_tool.py
+@@ -54,7 +54,7 @@ def cmd_publish(a: argparse.Namespace, d: Path) -> int:
+         shutil.rmtree(partial)
+     partial.mkdir()
+     subprocess.run(["ditto", str(app), str(partial / APP_NAME)], check=True)
+-    notes = Path(a.notes_file).read_text().strip() if a.notes_file else ""
++    notes = Path(a.notes_file).read_text(encoding="utf-8").strip() if a.notes_file else ""
+     rel = {"version": v, "built_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(),
+            "git_commit": a.commit or None, "notes": notes}
+     write_json_atomic(partial / "release.json", rel)
+diff --git a/scripts/version.py b/scripts/version.py
+index b7e6e18..9d53d7a 100755
+--- a/scripts/version.py
++++ b/scripts/version.py
+@@ -147,23 +147,23 @@ def current(root: Path) -> str:
+     f = root / "VERSION"
+     if not f.exists():
+         raise SystemExit(f"version.py: {f} is missing")
+-    return f.read_text().strip()
++    return f.read_text(encoding="utf-8").strip()
+ 
+ 
+ def set_version(root: Path, v: str) -> list[str]:
+     parse(v)
+     changed = []
+-    (root / "VERSION").write_text(v + "\n")
++    (root / "VERSION").write_text(v + "\n", encoding="utf-8")
+     for rel, required, upd, _ in TARGETS:
+         p = root / rel
+         if not p.exists():
+             if required:
+                 raise SystemExit(f"version.py: {rel} is missing")
+             continue
+-        old = p.read_text()
++        old = p.read_text(encoding="utf-8")
+         new = upd(old, v)
+         if new != old:
+-            p.write_text(new)
++            p.write_text(new, encoding="utf-8")
+             changed.append(rel)
+     return changed
+ 
+@@ -173,14 +173,14 @@ def check(root: Path) -> list[str]:
+     bad = []
+     for rel, _required, _, read in TARGETS:
+         p = root / rel
+-        if p.exists() and (found := read(p.read_text())) != v:
++        if p.exists() and (found := read(p.read_text(encoding="utf-8"))) != v:
+             bad.append(f"{rel}: {found}")
+     return bad
+ 
+ 
+ def _git(root: Path, *args: str) -> str:
+     try:
+-        return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, timeout=5).stdout.strip()
++        return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, timeout=5, encoding="utf-8", errors="replace").stdout.strip()
+     except (OSError, subprocess.SubprocessError):
+         return ""
+ 
+@@ -198,7 +198,7 @@ def build_info(root: Path) -> dict:
+         info["channel"] = channel
+         info["repo"] = os.environ.get("GDW_UPDATE_REPO", "").strip() or "ArshiaJahan/GDH"
+     out = root / "backend" / "gamedevworkstation" / "_build_info.json"
+-    out.write_text(json.dumps(info, indent=2) + "\n")
++    out.write_text(json.dumps(info, indent=2) + "\n", encoding="utf-8")
+     return info
+ 
+ 
+diff --git a/skills/build-ship/scripts/changelog.py b/skills/build-ship/scripts/changelog.py
+index 70ff010..cfd7d60 100755
+--- a/skills/build-ship/scripts/changelog.py
++++ b/skills/build-ship/scripts/changelog.py
+@@ -54,7 +54,7 @@ SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?
+ 
+ 
+ def git(repo, *args):
+-    return subprocess.run(["git", "-C", repo] + list(args), check=True, capture_output=True, text=True).stdout
++    return subprocess.run(["git", "-C", repo] + list(args), check=True, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
+ 
+ 
+ def last_tag(repo):
+diff --git a/skills/trailer-maker/scripts/_trailer_common.py b/skills/trailer-maker/scripts/_trailer_common.py
+index 3f92ad3..3d3372c 100644
+--- a/skills/trailer-maker/scripts/_trailer_common.py
++++ b/skills/trailer-maker/scripts/_trailer_common.py
+@@ -89,7 +89,7 @@ def ffmpeg_caps(ffmpeg):
+     def out(*args):
+         try:
+             return subprocess.run([ffmpeg, "-hide_banner"] + list(args), capture_output=True, text=True,
+-                                  timeout=30).stdout
++                                  timeout=30, encoding="utf-8", errors="replace").stdout
+         except (OSError, subprocess.SubprocessError):
+             return ""
+     ver = out("-version").splitlines()
+@@ -104,7 +104,7 @@ def probe(ffprobe, path):
+         return None
+     try:
+         r = subprocess.run([ffprobe, "-v", "error", "-print_format", "json", "-show_format", "-show_streams", path],
+-                           capture_output=True, text=True, timeout=60)
++                           capture_output=True, text=True, timeout=60, encoding="utf-8", errors="replace")
+     except (OSError, subprocess.SubprocessError):
+         return None
+     if r.returncode != 0:
+@@ -140,7 +140,7 @@ def probe_ffmpeg(ffmpeg, path):
+     if not ffmpeg:
+         return None
+     try:
+-        r = subprocess.run([ffmpeg, "-hide_banner", "-i", path], capture_output=True, text=True, timeout=60)
++        r = subprocess.run([ffmpeg, "-hide_banner", "-i", path], capture_output=True, text=True, timeout=60, encoding="utf-8", errors="replace")
+     except (OSError, subprocess.SubprocessError):
+         return None
+     return parse_ffmpeg_info(r.stderr)
+diff --git a/skills/trailer-maker/scripts/trailer_edl.py b/skills/trailer-maker/scripts/trailer_edl.py
+index 527c258..22dc0a1 100644
+--- a/skills/trailer-maker/scripts/trailer_edl.py
++++ b/skills/trailer-maker/scripts/trailer_edl.py
+@@ -1273,7 +1273,7 @@ def run_steps(e, steps, ffmpeg, jobs=1, quiet=False):
+         out0 = resolve(root, st["outputs"][0]) if st.get("outputs") else None
+         if key and out0 and os.path.isfile(out0):
+             try:
+-                with open(out0 + ".key") as f:
++                with open(out0 + ".key", encoding="utf-8") as f:
+                     if f.read().strip() == key:
+                         return True, "cached"
+             except OSError:
+@@ -1284,12 +1284,12 @@ def run_steps(e, steps, ffmpeg, jobs=1, quiet=False):
+                 os.remove(out0 + ".key")
+             except FileNotFoundError:
+                 pass
+-        r = subprocess.run(argv_of(st), cwd=root, capture_output=True, text=True)
++        r = subprocess.run(argv_of(st), cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace")
+         if r.returncode != 0:
+             tail = "\n".join((r.stderr or "").strip().splitlines()[-12:])
+             return False, "%s failed (exit %d):\n%s" % (st["name"], r.returncode, tail)
+         if key and out0:
+-            with open(out0 + ".key", "w") as f:
++            with open(out0 + ".key", "w", encoding="utf-8") as f:
+                 f.write(key + "\n")
+         st["_stderr"] = r.stderr
+         return True, ""
+@@ -1542,7 +1542,7 @@ def _mp4_faststart(path):
+ 
+ def _ff_run(ff, args):
+     """(stdout, stderr) of an ffmpeg run."""
+-    r = subprocess.run([ff, "-hide_banner", "-nostats"] + args, capture_output=True, text=True)
++    r = subprocess.run([ff, "-hide_banner", "-nostats"] + args, capture_output=True, text=True, encoding="utf-8", errors="replace")
+     return r.stdout or "", r.stderr or ""
+ 
+ 
+@@ -1744,7 +1744,7 @@ def cmd_sheet(a):
+     if a.first5:
+         dst = os.path.join(out, "first5.png")
+         r = subprocess.run([ff, "-hide_banner", "-y", "-t", "5", "-i", a.video, "-vf",
+-                            "fps=2,scale=480:-2,tile=5x2", "-frames:v", "1", dst], capture_output=True, text=True)
++                            "fps=2,scale=480:-2,tile=5x2", "-frames:v", "1", dst], capture_output=True, text=True, encoding="utf-8", errors="replace")
+         if r.returncode != 0:
+             return result(False, "first5 sheet failed: " + (r.stderr or "").strip().splitlines()[-1:][0])
+         written.append(dst)
+@@ -1757,7 +1757,7 @@ def cmd_sheet(a):
+         r = subprocess.run([ff, "-hide_banner", "-y", "-i", a.video, "-vf",
+                             "fps=%s,scale=%d:-2,tile=%dx%d" % (num(a.fps), a.width, a.cols, a.rows),
+                             "-start_number", "1", os.path.join(out, prefix + "-%02d.png")],
+-                           capture_output=True, text=True)
++                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+         if r.returncode != 0:
+             return result(False, "sheet failed: " + (r.stderr or "").strip().splitlines()[-1:][0])
+         written += [os.path.join(out, "%s-%02d.png" % (prefix, k)) for k in range(1, n + 1)
+diff --git a/tests/test_text_encoding.py b/tests/test_text_encoding.py
+new file mode 100644
+index 0000000..0bf0fa6
+--- /dev/null
++++ b/tests/test_text_encoding.py
+@@ -0,0 +1,113 @@
++"""Text I/O must name its encoding.
++
++Windows decodes text with the ANSI code page (cp1252) unless told otherwise, so a UTF-8 SKILL.md
++with a curly quote once stopped sessions from starting. This walks the backend and scripts so a new
++read_text/write_text/open/fdopen or text-mode subprocess call without encoding= fails on every platform.
++"""
++import ast
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parent.parent
++SOURCES = ["backend", "scripts", "packaging", "skills"]
++SUBPROCESS = {"run", "Popen", "check_output", "check_call", "call"}
++TEMPFILES = {"NamedTemporaryFile", "TemporaryFile", "SpooledTemporaryFile"}
++
++
++def _kw(call: ast.Call, name: str) -> ast.expr | None:
++    return next((k.value for k in call.keywords if k.arg == name), None)
++
++
++def _str(node: ast.expr | None) -> str | None:
++    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
++
++
++def _true(node: ast.expr | None) -> bool:
++    return isinstance(node, ast.Constant) and node.value is True
++
++
++def _text_mode(call: ast.Call, index: int, default: str = "r") -> bool | None:
++    """True for a text mode, False for binary, None when the mode isn't a literal."""
++    node = _kw(call, "mode") or (call.args[index] if len(call.args) > index else None)
++    mode = default if node is None else _str(node)
++    return None if mode is None else "b" not in mode
++
++
++def missing_encoding(source: str) -> list[tuple[int, str]]:
++    """(line, call) for every text I/O call in source that doesn't pass encoding=."""
++    found = []
++    for call in ast.walk(ast.parse(source)):
++        if not isinstance(call, ast.Call) or any(k.arg is None for k in call.keywords):
++            continue  # **kwargs may carry the encoding
++        if _kw(call, "encoding") is not None:
++            continue
++        f = call.func
++        name = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else ""
++        owner = f.value.id if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) else None
++        bad = False
++        if name in ("read_text", "write_text"):
++            bad = True
++        elif name == "open" and (isinstance(f, ast.Name) or owner in ("io", "builtins", "codecs")):
++            bad = _text_mode(call, 1) is not False
++        elif name == "open" and owner != "os":
++            # Path.open(mode); other .open(x) calls (zipfile, tarfile, wave, ...) take a non-literal first.
++            if not call.args or _str(call.args[0]) is not None:
++                bad = _text_mode(call, 0) is not False
++        elif name == "fdopen":
++            bad = _text_mode(call, 1) is not False
++        elif name in SUBPROCESS and owner == "subprocess":
++            bad = _true(_kw(call, "text")) or _true(_kw(call, "universal_newlines"))
++        elif name in TEMPFILES:
++            bad = _text_mode(call, 0, default="w+b") is True
++        if bad:
++            found.append((call.lineno, ast.unparse(call.func)))
++    return found
++
++
++def _python_files() -> list[Path]:
++    return sorted(p for d in SOURCES for p in (ROOT / d).rglob("*.py") if ".venv" not in p.parts
++                  and "node_modules" not in p.parts)
++
++
++def test_every_text_io_call_names_its_encoding():
++    files = _python_files()
++    assert any(p.name == "skills.py" for p in files)
++    problems = [f"{p.relative_to(ROOT)}:{line}: {call}() without encoding="
++                for p in files for line, call in missing_encoding(p.read_text(encoding="utf-8-sig"))]
++    assert not problems, "\n".join(problems)
++
++
++def test_checker_flags_and_allows_the_right_calls():
++    bad = """
++import os, subprocess
++from pathlib import Path
++Path("a").read_text()
++Path("a").write_text("x")
++open("a")
++open("a", "w")
++Path("a").open("a")
++os.fdopen(3, "w")
++subprocess.run(["x"], text=True)
++subprocess.check_output(["x"], universal_newlines=True)
++"""
++    assert len(missing_encoding(bad)) == 8
++    ok = """
++import os, subprocess, zipfile
++from pathlib import Path
++Path("a").read_text(encoding="utf-8")
++Path("a").read_bytes()
++open("a", "rb")
++open("a", "w", encoding="utf-8")
++Path("a").open("rb")
++os.fdopen(3, "wb")
++os.open("a", os.O_RDONLY)
++subprocess.run(["x"], capture_output=True)
++subprocess.run(["x"], text=True, encoding="utf-8", errors="replace")
++zipfile.ZipFile("a").open(info)
++"""
++    assert missing_encoding(ok) == []
++
++
++def test_frozen_backend_runs_in_utf8_mode():
++    spec = (ROOT / "packaging" / "gamedevworkstation.spec").read_text(encoding="utf-8")
++    assert '("X utf8_mode=1", None, "OPTION")' in spec
++

@@ -1,0 +1,528 @@
+diff --git a/backend/gamedevworkstation/features/replay_install.py b/backend/gamedevworkstation/features/replay_install.py
+index aca4615..5af7553 100644
+--- a/backend/gamedevworkstation/features/replay_install.py
++++ b/backend/gamedevworkstation/features/replay_install.py
+@@ -18,7 +18,7 @@ from pathlib import Path
+ from typing import Any
+ 
+ PACKAGE_NAME = "com.gdw.replay"
+-PACKAGE_VERSION = "0.1.0"
++PACKAGE_VERSION = "0.1.1"
+ PACKAGE_DIR = "Packages/com.gdw.replay"
+ VERSION_FILE = "package.json"
+ MARKER = f"{PACKAGE_DIR}/.gdw-installed.json"
+diff --git a/docs/plans/record-replay-contracts.md b/docs/plans/record-replay-contracts.md
+index 7c071bd..a35994f 100644
+--- a/docs/plans/record-replay-contracts.md
++++ b/docs/plans/record-replay-contracts.md
+@@ -153,7 +153,7 @@ Codes: `bad_request`, `forbidden`, `not_found`, `conflict`, `unsupported`, `inst
+ `features/replay_install.py`
+ 
+ ```python
+-PACKAGE_NAME="com.gdw.replay"; PACKAGE_VERSION="0.1.0"; PACKAGE_DIR="Packages/com.gdw.replay"
++PACKAGE_NAME="com.gdw.replay"; PACKAGE_VERSION="0.1.1"; PACKAGE_DIR="Packages/com.gdw.replay"
+ def install_replay_package(project: str | Path, *, allow_upgrade: bool = False,
+                            dry_run: bool = False) -> dict: ...
+ def replay_package_status(project: str | Path) -> dict: ...
+diff --git a/skills/replay/SKILL.md b/skills/replay/SKILL.md
+index ec3e12f..acd2abd 100644
+--- a/skills/replay/SKILL.md
++++ b/skills/replay/SKILL.md
+@@ -40,7 +40,7 @@ Pinned: Unity 6000.3.21f1, Input System 1.20.1, Test Framework 1.6.0.
+ ## One-time setup
+ 
+ 1. `unity op=replay_install` installs the `com.gdw.replay` package
+-   (`Packages/com.gdw.replay`, version `0.1.0`). It needs setup consent. It
++   (`Packages/com.gdw.replay`, version `0.1.1`). It needs setup consent. It
+    refuses to install when a shipped file was edited in the project. An older
+    package is updated in place. It adds any missing `com.unity.test-framework`,
+    `com.unity.inputsystem` and physics module entries to
+@@ -77,7 +77,9 @@ Pinned: Unity 6000.3.21f1, Input System 1.20.1, Test Framework 1.6.0.
+    [subjects=["game.hp","game.inventory"]]`. The session resets to the build
+    scene, seeds RNG, loads the scene, and records input + checkpoint hashes at
+    every frame. Recording is live-Editor only and needs change permission (the
+-   code is shown first). The call returns once recording has started. Stop it
++   code is shown first). The Editor opens the scene, enters Play Mode and
++   begins recording once Play Mode is running; until then `replay_status`
++   shows `starting`, then `recording`. Stop it
+    with `unity op=replay_stop run_id=...`; it also stops by itself after
+    `[unity.replay] max_seconds` (default 600). Output: `<project>/Logs/harness/
+    replay/<run_id>/run.gdwreplay`.
+diff --git a/skills/replay/templates/com.gdw.replay/Editor/ReplayCommands.cs b/skills/replay/templates/com.gdw.replay/Editor/ReplayCommands.cs
+index 0ddfa36..5a230a5 100644
+--- a/skills/replay/templates/com.gdw.replay/Editor/ReplayCommands.cs
++++ b/skills/replay/templates/com.gdw.replay/Editor/ReplayCommands.cs
+@@ -10,19 +10,87 @@ namespace Gdw.Replay.Editor
+     /// <summary>
+     /// Editor commands for the record/replay lifecycle. Start/Status/Cancel persist job identity
+     /// across domain reload via EditorPrefs, emit [HARNESS] REPLAY {json} lines per contracts §5,
+-    /// and read the -gdwReplayRequest CLI argument.
++    /// and read the -gdwReplayRequest CLI argument. An Editor record enters Play Mode first and
++    /// begins once it is running; the pending request survives the domain reload in SessionState.
+     /// </summary>
++    [InitializeOnLoad]
+     public static class ReplayCommands
+     {
+         const string JobIdPrefKey = "Gdw.Replay.Editor.JobId";
+         const string RunIdPrefKey = "Gdw.Replay.Editor.RunId";
+         const string RequestPathPrefKey = "Gdw.Replay.Editor.RequestPath";
+         const string CliArg = "-gdwReplayRequest";
++        const string PendingRecordKey = "Gdw.Replay.Editor.PendingRecord";
+ 
+         static string _jobId;
+         static string _runId;
+         static string _requestPath;
+ 
++        static ReplayCommands()
++        {
++            EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
++        }
++
++        /// <summary>Request path of a record waiting for Play Mode, or null.</summary>
++        static string PendingRecord
++        {
++            get
++            {
++                string path = SessionState.GetString(PendingRecordKey, "");
++                return string.IsNullOrEmpty(path) ? null : path;
++            }
++            set
++            {
++                if (string.IsNullOrEmpty(value)) SessionState.EraseString(PendingRecordKey);
++                else SessionState.SetString(PendingRecordKey, value);
++            }
++        }
++
++        static void OnPlayModeStateChanged(PlayModeStateChange change)
++        {
++            string requestPath = PendingRecord;
++            if (requestPath == null) return;
++
++            if (change == PlayModeStateChange.EnteredEditMode)
++            {
++                // Play Mode was left (or never reached) before the record could begin.
++                PendingRecord = null;
++                return;
++            }
++            if (change != PlayModeStateChange.EnteredPlayMode) return;
++
++            PendingRecord = null;
++            try
++            {
++                var request = ReplayContracts.ReadRequest(requestPath);
++                BeginRecord(request);
++            }
++            catch (Exception e)
++            {
++                EmitHarnessLine(new
++                {
++                    v = 1,
++                    run_id = RunId ?? "",
++                    @event = "error",
++                    status = "error",
++                    message = e.Message,
++                });
++            }
++        }
++
++        static void BeginRecord(ReplayRequest request)
++        {
++            var options = new ReplayOptions
++            {
++                Seed = request.Seed,
++                FixedDeltaTime = request.FixedDt != null ? request.FixedDt.Value : 1f / 60f,
++                ScenePath = request.Scene,
++                RunId = RunId,
++                Strict = true,
++            };
++            ReplaySession.BeginRecord(options).Finished += OnSessionFinished;
++        }
++
+         /// <summary>Job identity: persists across domain reload via EditorPrefs.</summary>
+         public static string JobId
+         {
+@@ -123,26 +191,31 @@ namespace Gdw.Replay.Editor
+                     v = 1,
+                     run_id = RunId,
+                     @event = "start",
+-                    status = request.Op == "record" ? "recording" : "replaying",
++                    status = request.Op != "record" ? "replaying"
++                        : EditorApplication.isPlaying || Application.isBatchMode ? "recording" : "starting",
+                     job_id = JobId,
+                     legacy_input = legacyReport.HasLegacyGameplay ? legacyReport.Message : "",
+                 });
+ 
+                 if (request.Op == "record")
+                 {
+-                    var options = new ReplayOptions
++                    if (!EditorApplication.isPlaying && !Application.isBatchMode)
+                     {
+-                        Seed = request.Seed,
+-                        FixedDeltaTime = request.FixedDt != null ? request.FixedDt.Value : 1f / 60f,
+-                        ScenePath = request.Scene,
+-                        RunId = RunId,
+-                        Strict = true,
+-                    };
+-                    if (!string.IsNullOrEmpty(request.Scene))
++                        // A session begun in Edit Mode is lost when entering Play Mode reloads the
++                        // domain: open the scene, enter Play Mode and begin from OnPlayModeStateChanged.
++                        if (PendingRecord != null)
++                            throw new InvalidOperationException("a recording is already starting");
++                        if (!string.IsNullOrEmpty(request.Scene))
++                            UnityEditor.SceneManagement.EditorSceneManager.OpenScene(request.Scene);
++                        PendingRecord = requestPath;
++                        EditorApplication.EnterPlaymode();
++                    }
++                    else
+                     {
+-                        UnityEditor.SceneManagement.EditorSceneManager.OpenScene(request.Scene);
++                        if (!string.IsNullOrEmpty(request.Scene) && !EditorApplication.isPlaying)
++                            UnityEditor.SceneManagement.EditorSceneManager.OpenScene(request.Scene);
++                        BeginRecord(request);
+                     }
+-                    ReplaySession.BeginRecord(options);
+                 }
+                 else
+                 {
+@@ -153,7 +226,7 @@ namespace Gdw.Replay.Editor
+                     {
+                         UnityEditor.SceneManagement.EditorSceneManager.OpenScene(request.Scene);
+                     }
+-                    ReplaySession.BeginReplay(replayPath);
++                    ReplaySession.BeginReplay(replayPath).Finished += OnSessionFinished;
+                 }
+ 
+                 return JsonSerialize(new { ok = true, job_id = JobId, run_id = RunId });
+@@ -202,7 +275,7 @@ namespace Gdw.Replay.Editor
+             try
+             {
+                 var session = ReplaySession.Current;
+-                string state = session != null ? session.State : "idle";
++                string state = session != null ? session.State : (PendingRecord != null ? "starting" : "idle");
+                 int frame = -1;
+                 long tick = 0;
+ 
+@@ -248,6 +321,7 @@ namespace Gdw.Replay.Editor
+                 }
+ 
+                 // Clear persistent state
++                PendingRecord = null;
+                 JobId = null;
+                 RunId = null;
+                 RequestPath = null;
+@@ -311,12 +385,8 @@ namespace Gdw.Replay.Editor
+                 var result = Start(requestPath);
+                 Debug.Log("[HARNESS] REPLAY " + result);
+ 
+-                // Subscribe to session finish for batch-mode exit
+-                if (ReplaySession.Current != null)
+-                {
+-                    ReplaySession.Current.Finished += OnSessionFinished;
+-                }
+-                else
++                // Start subscribed OnSessionFinished, which exits batch mode when the session ends
++                if (ReplaySession.Current == null && PendingRecord == null)
+                 {
+                     // Session already finished synchronously — emit report
+                     EmitDone();
+@@ -331,8 +401,6 @@ namespace Gdw.Replay.Editor
+ 
+         static void OnSessionFinished(ReplayResult result)
+         {
+-            ReplaySession.Current.Finished -= OnSessionFinished;
+-
+             string status = result.Status;
+             string eventType = status == "pass" || status == "diverged" || status == "error" || status == "cancelled"
+                 ? "done" : "progress";
+diff --git a/skills/replay/templates/com.gdw.replay/Runtime/ReplayRegistry.cs b/skills/replay/templates/com.gdw.replay/Runtime/ReplayRegistry.cs
+index 1e37170..473f916 100644
+--- a/skills/replay/templates/com.gdw.replay/Runtime/ReplayRegistry.cs
++++ b/skills/replay/templates/com.gdw.replay/Runtime/ReplayRegistry.cs
+@@ -29,6 +29,9 @@ namespace Gdw.Replay
+ 
+         readonly Dictionary<string, IReplayStateProvider> _providers = new Dictionary<string, IReplayStateProvider>(StringComparer.Ordinal);
+         readonly Dictionary<string, IReplaySnapshot> _snapshots = new Dictionary<string, IReplaySnapshot>(StringComparer.Ordinal);
++        // Last schema seen per provider id; kept after Unregister so a header written once a
++        // provider has gone (the input adapter unregisters on dispose) still describes its frames.
++        readonly Dictionary<string, string> _schemas = new Dictionary<string, string>(StringComparer.Ordinal);
+ 
+         internal ReplayRegistry() { }
+ 
+@@ -56,6 +59,23 @@ namespace Gdw.Replay
+             return Digest.Sha256Hex(BuildBlock(id, provider));
+         }
+ 
++        /// <summary>
++        /// SHA-256 of the provider's field names and tags in canonical order (no values). Uses the
++        /// schema recorded at the last hash when the provider is no longer registered.
++        /// </summary>
++        public string SchemaSha256(string id)
++        {
++            if (id == null) throw new ArgumentNullException(nameof(id));
++            if (_providers.TryGetValue(id, out var provider))
++            {
++                var writer = new StateWriter();
++                provider.WriteState(writer);
++                return _schemas[id] = Digest.Sha256Hex(writer.SchemaBytes());
++            }
++            if (_schemas.TryGetValue(id, out var schema)) return schema;
++            throw new ReplayStateException("unknown provider: " + id);
++        }
++
+         public ReplayHashes ComputeAll()
+         {
+             var ids = _providers.Keys.OrderBy(x => x, StringComparer.Ordinal).ToList();
+@@ -63,7 +83,8 @@ namespace Gdw.Replay
+             var blocks = new List<byte[]>(ids.Count);
+             for (int i = 0; i < ids.Count; i++)
+             {
+-                byte[] block = BuildBlock(ids[i], _providers[ids[i]]);
++                byte[] block = BuildBlock(ids[i], _providers[ids[i]], out string schema);
++                _schemas[ids[i]] = schema;
+                 blocks.Add(block);
+                 providers[ids[i]] = Digest.Sha256Hex(block);
+             }
+@@ -77,11 +98,14 @@ namespace Gdw.Replay
+             return new ReplayHashes(Digest.Sha256Hex(canonical.ToArray()), providers);
+         }
+ 
+-        static byte[] BuildBlock(string id, IReplayStateProvider provider)
++        static byte[] BuildBlock(string id, IReplayStateProvider provider) => BuildBlock(id, provider, out _);
++
++        static byte[] BuildBlock(string id, IReplayStateProvider provider, out string schemaSha256)
+         {
+             var writer = new StateWriter();
+             provider.WriteState(writer);
+             byte[] payload = writer.ToBytes();
++            schemaSha256 = Digest.Sha256Hex(writer.SchemaBytes());
+             byte[] idBytes = Encoding.UTF8.GetBytes(id);
+             return Digest.Concat(Digest.U32((uint)idBytes.Length), idBytes, Digest.U32((uint)payload.Length), payload);
+         }
+diff --git a/skills/replay/templates/com.gdw.replay/Runtime/ReplaySession.cs b/skills/replay/templates/com.gdw.replay/Runtime/ReplaySession.cs
+index 7d84d37..ef63cd9 100644
+--- a/skills/replay/templates/com.gdw.replay/Runtime/ReplaySession.cs
++++ b/skills/replay/templates/com.gdw.replay/Runtime/ReplaySession.cs
+@@ -1,4 +1,5 @@
+ using System;
++using System.Collections.Generic;
+ using System.Globalization;
+ using System.IO;
+ using UnityEngine;
+@@ -210,7 +211,7 @@ namespace Gdw.Replay
+ 
+         void WriteArchive(ReplayLoopResult result)
+         {
+-            var header = BuildHeader(_initialHash);
++            var header = BuildHeader(_initialHash, result.Frames.Count > 0 ? result.Frames[0].Providers.Keys : null);
+             string finalHash = result.Frames.Count > 0 ? result.Frames[result.Frames.Count - 1].Hash : "";
+             var manifest = BuildManifest(result, finalHash);
+ 
+@@ -220,8 +221,23 @@ namespace Gdw.Replay
+             ReplayArchive.Write(OutputPath, header, result.Frames, result.Markers, traceBytes, manifest);
+         }
+ 
+-        ReplayHeader BuildHeader(string initialHash)
++        /// <summary>Package version written as header/manifest tool_version.</summary>
++        internal const string ToolVersion = "0.1.1";
++
++        // SHA-256 of zero bytes: the input digests until the adapter hashes the real settings/actions/layouts.
++        internal const string EmptySha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
++
++        /// <summary>
++        /// Header for this run. <paramref name="providerIds"/> are the providers the frames hold; they
++        /// are listed even if a provider has unregistered since (the input adapter does on dispose).
++        /// </summary>
++        ReplayHeader BuildHeader(string initialHash, IEnumerable<string> providerIds)
+         {
++            string projectRoot = Path.GetDirectoryName(Application.dataPath);
++            string scenePath = _options.ScenePath;
++            if (string.IsNullOrEmpty(scenePath)) scenePath = UnityEngine.SceneManagement.SceneManager.GetActiveScene().path;
++            scenePath = (scenePath ?? "").Replace('\\', '/');
++
+             var header = new ReplayHeader
+             {
+                 Format = "gdwreplay",
+@@ -229,7 +245,7 @@ namespace Gdw.Replay
+                 Minor = 0,
+                 RunId = _options.RunId ?? DefaultRunId(),
+                 CreatedUtc = UtcNow(),
+-                ToolVersion = "0.1.0",
++                ToolVersion = ToolVersion,
+                 Seed = _options.Seed,
+                 FixedDt = Rational.FromFloat(_options.FixedDeltaTime),
+                 RenderDt = new Rational(1, 60),
+@@ -244,28 +260,108 @@ namespace Gdw.Replay
+             header.Cpu.Cores = SystemInfo.processorCount;
+             header.Project.Id = Application.identifier;
+             header.Project.Name = Application.productName;
+-            header.Project.ContentSha256 = "";
++            header.Project.ContentSha256 = ProjectContentSha256(projectRoot);
+             header.Project.Dirty = false;
+-            header.Scene.Guid = "";
+-            header.Scene.Path = _options.ScenePath ?? "";
+-            header.Scene.ContentSha256 = "";
++            header.Scene.Guid = SceneGuid(projectRoot, scenePath);
++            header.Scene.Path = scenePath;
++            header.Scene.ContentSha256 = FileSha256(projectRoot, scenePath);
++            header.Packages.LockSha256 = FileSha256(projectRoot, "Packages/packages-lock.json");
++            header.Input.SettingsSha256 = EmptySha256;
++            header.Input.ActionsSha256 = EmptySha256;
++            header.Input.LayoutsSha256 = EmptySha256;
+             header.Input.SystemVersion = "1.20.1";
++            header.Coverage.Notes = "input settings/actions/layouts digests are the empty-input SHA-256; they are not hashed yet";
+             header.ResetAdapter.Id = "scene-reset";
+             header.ResetAdapter.InitialStateSha256 = initialHash ?? "";
+             header.StateHash.Algorithm = "sha256";
+             header.StateHash.Encoding = "gdw-replay-state/1";
+-            foreach (var id in ReplayRegistry.Instance.Ids)
++            var ids = new List<string>(providerIds ?? ReplayRegistry.Instance.Ids);
++            ids.Sort(StringComparer.Ordinal);
++            foreach (var id in ids)
+             {
+                 header.Providers.Add(new ReplayProviderInfo
+                 {
+                     Id = id,
+-                    SchemaSha256 = "",
++                    SchemaSha256 = ReplayRegistry.Instance.SchemaSha256(id),
+                     Gameplay = !id.StartsWith("unity.", StringComparison.Ordinal),
+                 });
+             }
+             return header;
+         }
+ 
++        /// <summary>SHA-256 of a project-relative file's bytes, or of zero bytes when it is missing.</summary>
++        static string FileSha256(string projectRoot, string relativePath)
++        {
++            try
++            {
++                if (!string.IsNullOrEmpty(relativePath))
++                {
++                    string full = Path.Combine(projectRoot, relativePath);
++                    if (File.Exists(full)) return Digest.Sha256Hex(File.ReadAllBytes(full));
++                }
++            }
++            catch (Exception e)
++            {
++                Debug.LogWarning("[Gdw.Replay] could not hash " + relativePath + ": " + e.Message);
++            }
++            return EmptySha256;
++        }
++
++        /// <summary>
++        /// SHA-256 over Packages/manifest.json and ProjectSettings/*.asset in ordinal path order,
++        /// each as PATH_LEN:u32 + UTF-8 path + LEN:u32 + bytes.
++        /// </summary>
++        static string ProjectContentSha256(string projectRoot)
++        {
++            var paths = new List<string> { "Packages/manifest.json" };
++            try
++            {
++                string settings = Path.Combine(projectRoot, "ProjectSettings");
++                if (Directory.Exists(settings))
++                    foreach (var file in Directory.GetFiles(settings, "*.asset"))
++                        paths.Add("ProjectSettings/" + Path.GetFileName(file));
++            }
++            catch (Exception e)
++            {
++                Debug.LogWarning("[Gdw.Replay] could not list ProjectSettings: " + e.Message);
++            }
++            paths.Sort(StringComparer.Ordinal);
++
++            var parts = new List<byte[]>();
++            foreach (var rel in paths)
++            {
++                string full = Path.Combine(projectRoot, rel);
++                byte[] bytes;
++                try { bytes = File.Exists(full) ? File.ReadAllBytes(full) : null; }
++                catch (Exception) { bytes = null; }
++                if (bytes == null) continue;
++                byte[] name = Digest.Utf8(rel);
++                parts.Add(Digest.Concat(Digest.U32((uint)name.Length), name, Digest.U32((uint)bytes.Length), bytes));
++            }
++            return Digest.Sha256Hex(Digest.Concat(parts.ToArray()));
++        }
++
++        /// <summary>The scene asset's GUID from its .meta file, or "" when it can't be read.</summary>
++        static string SceneGuid(string projectRoot, string scenePath)
++        {
++            if (string.IsNullOrEmpty(scenePath)) return "";
++            try
++            {
++                string meta = Path.Combine(projectRoot, scenePath + ".meta");
++                if (!File.Exists(meta)) return "";
++                foreach (var line in File.ReadAllLines(meta))
++                {
++                    if (line.StartsWith("guid:", StringComparison.Ordinal))
++                        return line.Substring(5).Trim().ToLowerInvariant();
++                }
++            }
++            catch (Exception e)
++            {
++                Debug.LogWarning("[Gdw.Replay] could not read scene guid: " + e.Message);
++            }
++            return "";
++        }
++
+         static ReplayManifest BuildManifest(ReplayLoopResult result, string finalHash)
+         {
+             return new ReplayManifest
+@@ -278,7 +374,7 @@ namespace Gdw.Replay
+                 Events = 0,
+                 FinalFrameHash = finalHash ?? "",
+                 CreatedUtc = UtcNow(),
+-                ToolVersion = "0.1.0",
++                ToolVersion = ToolVersion,
+                 Console = new ReplayConsoleCounts(),
+             };
+         }
+diff --git a/skills/replay/templates/com.gdw.replay/Runtime/StateWriter.cs b/skills/replay/templates/com.gdw.replay/Runtime/StateWriter.cs
+index 58dfab7..cdfa178 100644
+--- a/skills/replay/templates/com.gdw.replay/Runtime/StateWriter.cs
++++ b/skills/replay/templates/com.gdw.replay/Runtime/StateWriter.cs
+@@ -108,19 +108,28 @@ namespace Gdw.Replay
+                 Digest.U32(unchecked((uint)new FloatBits { Value = value.w }.Bits))));
+         }
+ 
+-        public byte[] ToBytes()
++        public byte[] ToBytes() => Encode(true);
++
++        /// <summary>
++        /// The payload's shape without its values: FIELD_COUNT:u32, then per field (sorted by name)
++        /// NAME_LEN:u16 + UTF-8 name + TAG:u8. Its SHA-256 is the provider's schema_sha256.
++        /// </summary>
++        public byte[] SchemaBytes() => Encode(false);
++
++        byte[] Encode(bool withValues)
+         {
+-            _entries.Sort((a, b) => StringComparer.Ordinal.Compare(a.Name, b.Name));
++            var sorted = new List<Entry>(_entries);
++            sorted.Sort((a, b) => StringComparer.Ordinal.Compare(a.Name, b.Name));
+             var result = new List<byte>();
+-            result.AddRange(Digest.U32((uint)_entries.Count));
+-            for (int i = 0; i < _entries.Count; i++)
++            result.AddRange(Digest.U32((uint)sorted.Count));
++            for (int i = 0; i < sorted.Count; i++)
+             {
+-                var entry = _entries[i];
++                var entry = sorted[i];
+                 byte[] name = Encoding.UTF8.GetBytes(entry.Name);
+                 result.AddRange(Digest.U16((ushort)name.Length));
+                 result.AddRange(name);
+                 result.Add(entry.Tag);
+-                result.AddRange(entry.Value);
++                if (withValues) result.AddRange(entry.Value);
+             }
+             return result.ToArray();
+         }
+diff --git a/skills/replay/templates/com.gdw.replay/package.json b/skills/replay/templates/com.gdw.replay/package.json
+index 5754d22..a02f871 100644
+--- a/skills/replay/templates/com.gdw.replay/package.json
++++ b/skills/replay/templates/com.gdw.replay/package.json
+@@ -1,6 +1,6 @@
+ {
+     "name": "com.gdw.replay",
+-    "version": "0.1.0",
++    "version": "0.1.1",
+     "displayName": "GDW Replay",
+     "description": "Deterministic record/replay runtime for GameDevWorkstation. Runtime core (no Input System dependency here).",
+     "unity": "6000.3",

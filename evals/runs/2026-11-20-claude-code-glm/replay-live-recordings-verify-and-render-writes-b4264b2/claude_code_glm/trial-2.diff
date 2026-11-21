@@ -1,0 +1,566 @@
+diff --git a/backend/gamedevworkstation/features/replay.py b/backend/gamedevworkstation/features/replay.py
+index fafa277..0dd5575 100644
+--- a/backend/gamedevworkstation/features/replay.py
++++ b/backend/gamedevworkstation/features/replay.py
+@@ -584,13 +584,31 @@ def _utc(epoch: float | None) -> str:
+     return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+ 
+ 
+-def _read_existing_report(path: Path) -> dict | None:
+-    """A report someone else (the Unity package) already wrote is never replaced."""
++_OWN_REPORT_MARK = ".report.gdw.sha256"
++
++
++def _read_existing_report(path: Path, *, since: float | None = None) -> dict | None:
++    """A report the Unity package wrote, or one written during this op (at or after `since`), is kept.
++
++    A report this backend wrote for an earlier op (its digest is in the sidecar mark) is stale: a render
++    must not hand back the previous verify's result.
++    """
+     try:
+-        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
++        raw = path.read_bytes()
++        data = json.loads(raw.decode("utf-8", errors="replace"))
+     except (OSError, ValueError):
+         return None
+-    return data if isinstance(data, dict) and data.get("schema") == "gdw.replay.report/1" else None
++    if not (isinstance(data, dict) and data.get("schema") == "gdw.replay.report/1"):
++        return None
++    if since is not None:
++        try:
++            written_now = path.stat().st_mtime >= since
++            own = (path.parent / _OWN_REPORT_MARK).read_text(encoding="utf-8").strip() == _sha256_bytes(raw)
++        except OSError:
++            written_now, own = False, False
++        if own and not written_now:
++            return None
++    return data
+ 
+ 
+ def _artifact_paths(root: Path, out_dir: Path, request: dict, result: "BridgeResult") -> dict:
+@@ -612,17 +630,18 @@ def _artifact_paths(root: Path, out_dir: Path, request: dict, result: "BridgeRes
+ 
+ def build_replay_report(root: Path, run_id: str, op: str, request: dict, result: "BridgeResult",
+                         *, archive: Any | None = None, replay_cfg: dict | None = None,
+-                        status_override: str | None = None) -> dict | None:
++                        status_override: str | None = None, since: float | None = None) -> dict | None:
+     """Assemble ReplayReport v1 (contract §2), write it atomically, and return it.
+ 
+-    Never writes over an existing valid report (the Unity package owns that file). Returns None
+-    when the op didn't run (skipped) and there is nothing to report.
++    Never writes over a valid report the Unity package wrote, or one written during this op (at or after
++    `since`); a report left by an earlier op is replaced. Returns None when the op didn't run (skipped)
++    and there is nothing to report.
+     """
+     from . import replay_format
+ 
+     out_dir = _replay_output_dir(root, run_id)
+     report_path = out_dir / "report.json"
+-    existing = _read_existing_report(report_path)
++    existing = _read_existing_report(report_path, since=since)
+     if existing is not None:
+         return existing
+     if status_override is None and result.status == "skipped":
+@@ -788,10 +807,57 @@ def build_replay_report(root: Path, run_id: str, op: str, request: dict, result:
+         "started_utc": _utc(started_epoch),
+         "ended_utc": _utc(time.time()),
+     }
+-    _atomic_write(report_path, (json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode())
++    _write_own_report(report_path, report)
+     return report
+ 
+ 
++def _write_own_report(report_path: Path, report: dict) -> None:
++    """Write a backend-assembled report atomically and mark it as ours (see _read_existing_report)."""
++    data = (json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode()
++    _atomic_write(report_path, data)
++    try:
++        _atomic_write(report_path.parent / _OWN_REPORT_MARK, (_sha256_bytes(data) + "\n").encode())
++    except OSError:
++        log.debug("replay: couldn't write the report mark", exc_info=True)
++
++
++def _export_capture(root: Path, run_id: str, request: dict) -> dict | None:
++    """Encode a render's captured PNG frames to the requested MP4/GIF with ffmpeg.
++
++    Returns None when the request has no capture, else {ok, exports, message[, warnings]}; exports are
++    project-relative paths. The PNGs are deleted only after every export step succeeded.
++    """
++    from . import replay_media
++
++    capture = request.get("capture")
++    if not isinstance(capture, dict) or not capture.get("formats"):
++        return None
++    out_dir = _replay_output_dir(root, run_id)
++    frames_dir = out_dir / "capture" / "frames"
++    frames = sorted(frames_dir.glob("frame-*.png")) if frames_dir.is_dir() else []
++    if not frames:
++        return {"ok": False, "exports": [], "message": "no captured frames in " + _rel_posix(root, frames_dir)}
++    spec = {**capture, "run_id": run_id, "total_frames": len(frames),
++            "start_frame": 0, "end_frame_exclusive": len(frames)}
++    try:
++        plan = replay_media.build_export_steps(frames_dir, out_dir, spec,
++                                               replay_root=root / "Logs" / "harness" / "replay")
++        result = replay_media.execute_steps(plan, replay_root=root / "Logs" / "harness" / "replay")
++    except replay_media.ReplayMediaError as exc:
++        return {"ok": False, "exports": [], "message": str(exc)}
++    wanted = {f".{fmt}" for fmt in capture["formats"]}
++    exports = [_rel_posix(root, p) for p in plan.outputs if p.suffix in wanted and p.is_file()]
++    errors = [str(r.get("error")) for r in result.get("results") or [] if r.get("error")]
++    errors += [str(v["error"]) for v in result.get("verifications") or [] if v.get("error")]
++    ok = bool(result.get("ok")) and not errors and len(exports) == len(wanted)
++    message = (f"exported {', '.join(exports)} from {len(frames)} frames" if ok
++               else "export failed: " + ("; ".join(e[-300:] for e in errors) or "missing output"))
++    out: dict[str, Any] = {"ok": ok, "exports": exports, "message": message}
++    if result.get("warnings"):
++        out["warnings"] = list(result["warnings"])
++    return out
++
++
+ # --------------------------------------------------------------------------- items + evidence
+ 
+ 
+@@ -834,16 +900,23 @@ def _record_replay_evidence(app: "AppState", session: dict, request: dict, repor
+ # --------------------------------------------------------------------------- tool output
+ 
+ 
+-def _tool_output(op: str, run_id: str, result: "BridgeResult | None", report: dict | None) -> ToolOutput:
++def _tool_output(op: str, run_id: str, result: "BridgeResult | None", report: dict | None,
++                 export: dict | None = None) -> ToolOutput:
+     status = (report or {}).get("status") or (result.status if result is not None else "error")
+     summary = (report or {}).get("message") or (result.summary if result is not None else "")
+     route = (result.mode if result is not None else "") or (report or {}).get("route") or ""
++    if export is not None:
++        summary = "; ".join(x for x in (summary, export.get("message") or "") if x)
+     head: dict[str, Any] = {"op": op, "run_id": run_id, "route": route, "status": status,
+                             "summary": summary}
++    if export is not None:
++        head["exports"] = list(export.get("exports") or [])
+     if report is not None:
+         head["report"] = report
+     text = f"Replay {op}: {status}. {summary}\n" + json.dumps(head, default=str, indent=1)[:8000]
+     is_error = bool(result is not None and result.status in ("error", "skipped")) or status in ("error", "incompatible")
++    if export is not None and not export.get("ok"):
++        is_error = True
+     return ToolOutput(text, is_error=is_error)
+ 
+ 
+@@ -1013,6 +1086,7 @@ async def run_replay_op(app: "AppState", session: dict, op: str, args: dict,
+     if mode == "plan" and (op in _CHANGE_OPS or (op == "verify" and capture)):
+         return ToolOutput(f"Plan only mode: replay {op} isn't run. Describe it instead.", is_error=True)
+ 
++    op_started = time.time()
+     request_path = _freeze_request(request, root)
+     out_dir = _replay_output_dir(root, run_id)
+     consent = _gate_consent(app, session)
+@@ -1033,17 +1107,36 @@ async def run_replay_op(app: "AppState", session: dict, op: str, args: dict,
+     if precheck_status is not None:
+         synthetic = BridgeResult("error", precheck_message, "")
+         report = build_replay_report(root, run_id, op, request, synthetic, archive=archive,
+-                                     replay_cfg=replay_cfg, status_override=precheck_status)
++                                     replay_cfg=replay_cfg, status_override=precheck_status,
++                                     since=op_started)
+         _index_artifacts(app, session, [request_path, out_dir / "report.json"])
+         return _tool_output(op, run_id, synthetic, report)
+ 
+     result = await br.run_replay(session, op, {**request, "_request_path": str(request_path)},
+                                  consent=consent, cancel=cancel)
+-    report = build_replay_report(root, run_id, op, request, result, archive=archive, replay_cfg=replay_cfg)
+-    _index_artifacts(app, session, [request_path, out_dir / "report.json", root / request["replay_path"]])
++    report = build_replay_report(root, run_id, op, request, result, archive=archive, replay_cfg=replay_cfg,
++                                 since=op_started)
++    export = None
++    if op == "render" and report is not None and report.get("status") == "pass":
++        export = await asyncio.to_thread(_export_capture, root, run_id, request)
++        if export is not None:
++            artifacts = report.setdefault("artifacts", {})
++            artifacts["exports"] = sorted(set(artifacts.get("exports") or []) | set(export["exports"]))
++            capture_dir = out_dir / "capture"
++            artifacts["capture_dir"] = _rel_posix(root, capture_dir) if capture_dir.is_dir() else ""
++            try:
++                # Only a report this backend wrote gets the exports added; a Unity-written one is never replaced.
++                report_path = out_dir / "report.json"
++                mark = (out_dir / _OWN_REPORT_MARK).read_text(encoding="utf-8").strip()
++                if mark == _sha256_bytes(report_path.read_bytes()):
++                    _write_own_report(report_path, report)
++            except OSError:
++                log.warning("replay: couldn't add exports to the report", exc_info=True)
++    _index_artifacts(app, session, [request_path, out_dir / "report.json", root / request["replay_path"],
++                                    *(root / rel for rel in (export or {}).get("exports") or [])])
+     if op == "verify" and report is not None:
+         _record_replay_evidence(app, session, request, report)
+-    return _tool_output(op, run_id, result, report)
++    return _tool_output(op, run_id, result, report, export)
+ 
+ 
+ # --------------------------------------------------------------------------- REST routes
+diff --git a/backend/gamedevworkstation/features/replay_install.py b/backend/gamedevworkstation/features/replay_install.py
+index 5af7553..4908e37 100644
+--- a/backend/gamedevworkstation/features/replay_install.py
++++ b/backend/gamedevworkstation/features/replay_install.py
+@@ -18,7 +18,7 @@ from pathlib import Path
+ from typing import Any
+ 
+ PACKAGE_NAME = "com.gdw.replay"
+-PACKAGE_VERSION = "0.1.1"
++PACKAGE_VERSION = "0.1.2"
+ PACKAGE_DIR = "Packages/com.gdw.replay"
+ VERSION_FILE = "package.json"
+ MARKER = f"{PACKAGE_DIR}/.gdw-installed.json"
+diff --git a/skills/replay/SKILL.md b/skills/replay/SKILL.md
+index 439ea7e..6826a5e 100644
+--- a/skills/replay/SKILL.md
++++ b/skills/replay/SKILL.md
+@@ -40,7 +40,7 @@ Pinned: Unity 6000.3.21f1, Input System 1.20.1, Test Framework 1.6.0.
+ ## One-time setup
+ 
+ 1. `unity op=replay_install` installs the `com.gdw.replay` package
+-   (`Packages/com.gdw.replay`, version `0.1.1`). It needs setup consent. It
++   (`Packages/com.gdw.replay`, version `0.1.2`). It needs setup consent. It
+    refuses to install when a shipped file was edited in the project. An older
+    package is updated in place. It adds any missing `com.unity.test-framework`,
+    `com.unity.inputsystem` and physics module entries to
+diff --git a/skills/replay/templates/com.gdw.replay/Editor/ReplayCapture.cs b/skills/replay/templates/com.gdw.replay/Editor/ReplayCapture.cs
+index 7048fcd..4b2a9f1 100644
+--- a/skills/replay/templates/com.gdw.replay/Editor/ReplayCapture.cs
++++ b/skills/replay/templates/com.gdw.replay/Editor/ReplayCapture.cs
+@@ -7,8 +7,9 @@
+ // is requested AND com.unity.recorder is already present in the project (detected via
+ // reflection; no hard dependency).
+ //
+-// Camera RenderTexture path is used when there is no active Game View (batch / headless);
+-// the Game View is preferred when available because overlay UI is captured.
++// Frames are rendered from the main camera into a RenderTexture and read back synchronously
++// (batch and Editor alike), so screen-space overlay UI is not in the capture.
++// The static constructor installs ReplayCaptureHooks for the PlayMode verification test.
+ //
+ // Namespace: Gdw.Replay
+ // Depends on: UnityEditor, UnityEngine (no Recorder dependency)
+@@ -22,8 +23,8 @@ using UnityEngine.Rendering;
+ namespace Gdw.Replay
+ {
+     /// <summary>
+-    /// Per-frame PNG capture for replay export.  Called by ReplayLoop after each
+-    /// post-LateUpdate checkpoint when capture is active.
++    /// Per-frame PNG capture for replay export.  The PlayMode verification test calls it through
++    /// <see cref="ReplayCaptureHooks"/> once per replayed frame when the request asks for capture.
+     /// </summary>
+     [InitializeOnLoad]
+     public static class ReplayCapture
+@@ -37,6 +38,14 @@ namespace Gdw.Replay
+         static RenderTexture s_RenderTexture;
+         static Texture2D s_ReadTexture;
+ 
++        static ReplayCapture()
++        {
++            // The PlayMode test assembly can't reference Editor code; it captures through these hooks.
++            ReplayCaptureHooks.Start = Start;
++            ReplayCaptureHooks.CaptureFrame = CaptureFrame;
++            ReplayCaptureHooks.Stop = Stop;
++        }
++
+         /// <summary>Start a capture session.</summary>
+         /// <param name="outputDir">Absolute path to the capture/frames/ directory.</param>
+         /// <param name="totalFrames">Total number of frames to capture.</param>
+@@ -62,26 +71,21 @@ namespace Gdw.Replay
+             s_Fps = Mathf.Max(1, fps);
+             s_Active = true;
+ 
+-            // Set up a camera RenderTexture fallback for headless / no-Game-View.
+-            var cam = Camera.main ?? UnityEngine.Object.FindObjectOfType<Camera>();
+-            if (cam != null && !Application.isBatchMode)
+-            {
+-                // Prefer the active Game View; fall back to a dedicated camera RT.
+-                s_CaptureCamera = cam;
+-            }
+-            else if (cam != null)
+-            {
+-                s_CaptureCamera = cam;
+-                int w = Screen.width > 0 ? Screen.width : 1920;
+-                int h = Screen.height > 0 ? Screen.height : 1080;
+-                s_RenderTexture = new RenderTexture(w, h, 24, RenderTextureFormat.ARGB32);
+-                s_RenderTexture.Create();
+-                s_ReadTexture = new Texture2D(w, h, TextureFormat.RGBA32, false);
+-            }
+-            else
++            // Render the camera into a RenderTexture and read it back synchronously: the frame on disk is the
++            // frame just simulated, in batch mode as well as in the Editor (ScreenCapture writes a frame late).
++            var cam = Camera.main;
++            if (cam == null) cam = UnityEngine.Object.FindFirstObjectByType<Camera>();
++            if (cam == null)
+             {
++                s_Active = false;
+                 return "error: no camera found for capture";
+             }
++            s_CaptureCamera = cam;
++            int w = Screen.width > 0 ? Screen.width : 1920;
++            int h = Screen.height > 0 ? Screen.height : 1080;
++            s_RenderTexture = new RenderTexture(w, h, 24, RenderTextureFormat.ARGB32);
++            s_RenderTexture.Create();
++            s_ReadTexture = new Texture2D(w, h, TextureFormat.RGBA32, false);
+ 
+             Debug.LogFormat("[REPLAY] capture started: {0} frames at {1} fps -> {2}",
+                 s_TotalFrames, s_Fps, s_OutputDir);
+diff --git a/skills/replay/templates/com.gdw.replay/InputSystem/InputTraceAdapter.cs b/skills/replay/templates/com.gdw.replay/InputSystem/InputTraceAdapter.cs
+index 4cb9cbe..13412ca 100644
+--- a/skills/replay/templates/com.gdw.replay/InputSystem/InputTraceAdapter.cs
++++ b/skills/replay/templates/com.gdw.replay/InputSystem/InputTraceAdapter.cs
+@@ -63,6 +63,8 @@ namespace Gdw.Replay
+         readonly List<PlayerInputState> _playerInputs = new List<PlayerInputState>();
+         bool _pairedPlayerInputs;
+ 
++        bool _inLoopUpdate;
++
+         Action _loopInputUpdate;
+         Func<FrameInputInfo> _loopInputInfo;
+         Action _previousLoopInputUpdate;
+@@ -225,6 +227,9 @@ namespace Gdw.Replay
+                     _controller.OnEvent(RetimestampReplayEvent);
+                     _controller.OnFinished(OnReplayFinished);
+                     _controller.PlayAllFramesOneByOne();
++                    // Paused until RunLoopUpdate: Editor input updates must not advance
++                    // the replay controller, or record and replay disagree on which events land in which frame.
++                    _controller.paused = true;
+                 }
+                 else
+                 {
+@@ -258,7 +263,7 @@ namespace Gdw.Replay
+             if (_mode == Mode.Recording)
+             {
+                 long before = _trace.eventCount;
+-                InputSystem.Update();
++                RunLoopUpdate();
+                 long after = _trace.eventCount;
+                 SetFrameInfo(before, after - before);
+                 _framesProcessed++;
+@@ -271,7 +276,7 @@ namespace Gdw.Replay
+                 SuppressPhysicalDevices();
+                 EnsurePlayerInputPairing();
+                 int before = _controller != null ? _controller.position : 0;
+-                InputSystem.Update();
++                RunLoopUpdate();
+                 int after = _controller != null ? _controller.position : 0;
+                 SetFrameInfo(before, after - before);
+                 _framesProcessed++;
+@@ -281,6 +286,27 @@ namespace Gdw.Replay
+             throw new ReplayStateException("input trace adapter is not capturing or replaying");
+         }
+ 
++        /// <summary>
++        /// The replay loop's own Input System update. The Editor also runs input updates (about 16 per game
++        /// frame while it has focus); only the frame marker of this update goes into the trace, and only this
++        /// update may advance the replay controller, or record and replay disagree on which events land in
++        /// which frame.
++        /// </summary>
++        void RunLoopUpdate()
++        {
++            _inLoopUpdate = true;
++            if (_controller != null) _controller.paused = false;
++            try
++            {
++                InputSystem.Update();
++            }
++            finally
++            {
++                if (_controller != null) _controller.paused = true;
++                _inLoopUpdate = false;
++            }
++        }
++
+         /// <summary>Stops recording and atomically writes the trace file. Safe to call more than once.</summary>
+         public void StopCapture()
+         {
+@@ -444,7 +470,8 @@ namespace Gdw.Replay
+         bool FilterRecordedEvent(InputEventPtr eventPtr, InputDevice device)
+         {
+             if (!eventPtr.valid) return false;
+-            if (eventPtr.type == InputEventTrace.FrameMarkerEvent) return true;
++            // Editor input updates write frame markers too; keep only the replay loop's own update marker.
++            if (eventPtr.type == InputEventTrace.FrameMarkerEvent) return _inLoopUpdate;
+             if (device == null || !device.added) return false;
+             // Keep only state transitions; text/IME and other event kinds are outside the v1 replay contract.
+             int eventType = (int)eventPtr.type;
+diff --git a/skills/replay/templates/com.gdw.replay/Runtime/ReplayCaptureHooks.cs b/skills/replay/templates/com.gdw.replay/Runtime/ReplayCaptureHooks.cs
+new file mode 100644
+index 0000000..5e57b8d
+--- /dev/null
++++ b/skills/replay/templates/com.gdw.replay/Runtime/ReplayCaptureHooks.cs
+@@ -0,0 +1,22 @@
++using System;
++
++namespace Gdw.Replay
++{
++    /// <summary>
++    /// Frame capture entry points for the PlayMode verification test. The capture itself is Editor code
++    /// (Gdw.Replay.Editor's ReplayCapture installs these when it loads); unset hooks mean no capture.
++    /// </summary>
++    public static class ReplayCaptureHooks
++    {
++        /// <summary>Start(outputDir, totalFrames, fps): "ok" or "error: ...".</summary>
++        public static Func<string, int, int, string> Start;
++
++        /// <summary>Capture the current frame: "ok", "done" or "error: ...".</summary>
++        public static Func<string> CaptureFrame;
++
++        /// <summary>Stop capture and release its resources.</summary>
++        public static Action Stop;
++
++        public static bool Installed => Start != null && CaptureFrame != null && Stop != null;
++    }
++}
+diff --git a/skills/replay/templates/com.gdw.replay/Runtime/ReplayCaptureHooks.cs.meta b/skills/replay/templates/com.gdw.replay/Runtime/ReplayCaptureHooks.cs.meta
+new file mode 100644
+index 0000000..0ea6f59
+--- /dev/null
++++ b/skills/replay/templates/com.gdw.replay/Runtime/ReplayCaptureHooks.cs.meta
+@@ -0,0 +1,11 @@
++fileFormatVersion: 2
++guid: 3b0baaaa0f6040af8009ed5c4b57c518
++MonoImporter:
++  externalObjects: {}
++  serializedVersion: 2
++  defaultReferences: []
++  executionOrder: 0
++  icon: {instanceID: 0}
++  userData: 
++  assetBundleName: 
++  assetBundleVariant: 
+diff --git a/skills/replay/templates/com.gdw.replay/Runtime/ReplayLoop.cs b/skills/replay/templates/com.gdw.replay/Runtime/ReplayLoop.cs
+index 96b6e0a..31d15ac 100644
+--- a/skills/replay/templates/com.gdw.replay/Runtime/ReplayLoop.cs
++++ b/skills/replay/templates/com.gdw.replay/Runtime/ReplayLoop.cs
+@@ -44,6 +44,9 @@ namespace Gdw.Replay
+         /// <summary>Called at each checkpoint to fill input_update / event_start / event_count.</summary>
+         internal static Func<FrameInputInfo> InputInfo;
+ 
++        /// <summary>Called after each replayed frame's checkpoint (frame number); the PlayMode test captures here.</summary>
++        internal static Action<long> Checkpointed;
++
+         static Mode _mode = Mode.None;
+         static ReplaySession _session;
+         static PlayerLoopSystem _originalLoop;
+@@ -283,6 +286,7 @@ namespace Gdw.Replay
+ 
+                 CompareFrame(frame, _replayFrames, _replayFrameIndex);
+                 _replayFrameIndex++;
++                Checkpointed?.Invoke(_frame);
+                 if (_replayFrameIndex >= _replayFrames.Count)
+                 {
+                     Finish();
+diff --git a/skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs b/skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs
+index 81018b0..a959e2c 100644
+--- a/skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs
++++ b/skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs
+@@ -99,6 +99,30 @@ namespace Gdw.Replay.Tests
+                 yield return null;
+             }
+ 
++            // --- Capture (render) ---
++            // One PNG per replayed frame when the request asks for capture; GameDevWorkstation encodes them.
++            string captureError = null;
++            bool capturing = false;
++            var capture = request.Capture;
++            if (capture != null && capture.Formats.Count > 0)
++            {
++                if (!ReplayCaptureHooks.Installed)
++                    Assert.Fail("capture requested but the Gdw.Replay.Editor capture hooks aren't installed");
++                int replayed = Math.Max(1, archive.Frames.Count - 1); // the first checkpoint is the initial state
++                int start = Math.Max(0, capture.StartFrame);
++                int end = capture.EndFrameExclusive > start ? Math.Min(capture.EndFrameExclusive, replayed) : replayed;
++                string framesDir = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(requestPath)), "capture", "frames");
++                string started = ReplayCaptureHooks.Start(framesDir, Math.Max(1, end - start), capture.Fps);
++                if (started != "ok") Assert.Fail("capture start failed: " + started);
++                capturing = true;
++                ReplayLoop.Checkpointed = frame =>
++                {
++                    if (captureError != null || frame < start || frame >= end) return;
++                    string r = ReplayCaptureHooks.CaptureFrame();
++                    if (r.StartsWith("error", StringComparison.Ordinal)) captureError = r;
++                };
++            }
++
+             // --- Begin replay ---
+             ReplaySession session = null;
+             try
+@@ -116,7 +140,7 @@ namespace Gdw.Replay.Tests
+             ReplayResult result = null;
+             session.Finished += r => result = r;
+ 
+-            float timeout = 120f;
++            float timeout = capturing ? 1800f : 120f;
+             float elapsed = 0f;
+             while (result == null && elapsed < timeout)
+             {
+@@ -124,6 +148,12 @@ namespace Gdw.Replay.Tests
+                 elapsed += 0.1f;
+             }
+ 
++            if (capturing)
++            {
++                ReplayLoop.Checkpointed = null;
++                ReplayCaptureHooks.Stop();
++            }
++
+             // --- Assert results ---
+             Assert.IsNotNull(result, "Replay did not finish within timeout");
+ 
+@@ -138,6 +168,7 @@ namespace Gdw.Replay.Tests
+             Assert.Greater(result.Frames, 0, "Should have replayed frames");
+             Assert.AreEqual(-1, result.FirstDivergentFrame,
+                 "Should have no divergent frame. Got: " + result.FirstDivergentFrame);
++            Assert.IsNull(captureError, "Frame capture failed: " + captureError);
+ 
+             // --- Assert zero unexpected console errors ---
+             // (Unity's test framework captures logs; LogAssert is used per-test)
+diff --git a/skills/replay/templates/com.gdw.replay/package.json b/skills/replay/templates/com.gdw.replay/package.json
+index a02f871..9c6d9cc 100644
+--- a/skills/replay/templates/com.gdw.replay/package.json
++++ b/skills/replay/templates/com.gdw.replay/package.json
+@@ -1,6 +1,6 @@
+ {
+     "name": "com.gdw.replay",
+-    "version": "0.1.1",
++    "version": "0.1.2",
+     "displayName": "GDW Replay",
+     "description": "Deterministic record/replay runtime for GameDevWorkstation. Runtime core (no Input System dependency here).",
+     "unity": "6000.3",
+diff --git a/tests/test_replay_routes.py b/tests/test_replay_routes.py
+index 6847fd9..cf25afd 100644
+--- a/tests/test_replay_routes.py
++++ b/tests/test_replay_routes.py
+@@ -170,7 +170,10 @@ class TestVerifyRoute:
+ 
+ 
+ class TestRenderRoute:
+-    def test_render_returns_202(self, client, appstate):
++    def test_render_returns_202(self, client, appstate, monkeypatch):
++        from gamedevworkstation.features import replay as R
++        monkeypatch.setattr(R, "_export_capture", lambda root, run_id, request: {
++            "ok": True, "exports": [], "message": "exported"})
+         c, sid = client
+         r = c.post(f"/api/sessions/{sid}/replays/render",
+                    json={"replay_path": REL_ARCHIVE, "run_id": RUN_ID,
+diff --git a/tests/test_replay_tool.py b/tests/test_replay_tool.py
+index 46d9405..da138a2 100644
+--- a/tests/test_replay_tool.py
++++ b/tests/test_replay_tool.py
+@@ -248,13 +248,18 @@ class TestRenderOp:
+         assert "capture" in r.text.lower()
+         assert not any(c[0] == "replay:render" for c in b.calls)
+ 
+-    async def test_render_op(self, app, proj, archive):
++    async def test_render_op(self, app, proj, archive, monkeypatch):
++        from gamedevworkstation.features import replay as R
++        exported = f"Logs/harness/replay/{RUN_ID}/run.mp4"
++        monkeypatch.setattr(R, "_export_capture", lambda root, run_id, request: {
++            "ok": True, "exports": [exported], "message": "exported"})
+         s = session(app, proj)
+         b = app.extensions["unity_bridge"] = FakeUnityBridge(app)
+         r = await UT.run_op(app, s, {"op": "replay_render", "replay_path": REL_ARCHIVE, "run_id": RUN_ID,
+                                      "capture": {"formats": ["mp4"], "fps": 30}})
+         assert r.is_error is False
+         assert any(c[0] == "replay:render" for c in b.calls)
++        assert exported in r.text
+ 
+     async def test_render_refused_in_plan_mode(self, app, proj, archive):
+         """H2: render needs change permission, so Plan only mode refuses it."""

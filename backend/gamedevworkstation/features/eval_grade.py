@@ -34,7 +34,7 @@ from .eval_task import LoadedTask
 
 # Credentials never reach task code (it runs the candidate's code).
 _SECRET_ENV = re.compile(r"TOKEN|SECRET|PASSWORD|API_KEY|_KEY$|CREDENTIAL|AUTH", re.I)
-TAIL = 4000
+TAIL = 16000  # enough to see the first assertion error behind a long failure list
 
 
 class GradeError(RuntimeError):

@@ -1,0 +1,40 @@
+{
+ "task": "automatic-updates-from-github-releases-04bcf2d",
+ "agent": "claude_code_glm",
+ "trial": 2,
+ "passed": false,
+ "blame": "agent",
+ "reason": "failed command 'tests'",
+ "wall_s": 441.8,
+ "cost_usd": 1.0823,
+ "tool_calls": 15,
+ "input_tokens": 1017256,
+ "output_tokens": 18769,
+ "agent_error": "",
+ "timed_out": false,
+ "tampered": [],
+ "failed_steps": [
+  "tests"
+ ],
+ "diff_lines": 583,
+ "started_at": "2026-11-21T00:11:55Z",
+ "helper_calls": 0,
+ "model": "claude-opus-5-5",
+ "grade": {
+  "passed": false,
+  "tampered": [],
+  "environment_failure": false,
+  "steps": [
+   {
+    "name": "tests",
+    "kind": "command",
+    "passed": false,
+    "exit": 1,
+    "duration_s": 3.9157967497594655,
+    "output": "0gn/T/pytest-of-arshiajahan/pytest-1461/test_feed_is_off_for_local_bui0')\n\n    def test_feed_is_off_for_local_builds_and_on_when_configured(tmp_path):\n        s = AppState(db_path=tmp_path / \"t.db\")\n        assert U.Updater(s).feed is None  # from source: no channel\n        s.config.updates[\"github\"] = True\n        s.config.updates[\"github_repo\"] = \"me/repo\"\n        up = U.Updater(s)\n>       assert up.feed is not None and up.feed.repo == \"me/repo\" and up.feed.interval_s == 3600\nE       assert (None is not None)\nE        +  where None = <gamedevworkstation.features.updates.Updater object at 0x105f45e50>.feed\n\ntests/test_release_feed.py:130: AssertionError\n_________ test_auto_install_waits_for_idle_and_tries_each_version_once _________\n\nenv = (<gamedevworkstation.app.AppState object at 0x105f45f90>, PosixPath('/private/var/folders/07/xyyrk2p92jnblsq7j428mt5h0000gn/T/pytest-of-arshiajahan/pytest-1461/test_auto_install_waits_for_id0/updates'))\nmonkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x105f0ac60>\n\n    def test_auto_install_waits_for_idle_and_tries_each_version_once(env, monkeypatch):\n        s, _ = env\n        up = U.Updater(s)\n        _pending(monkeypatch, up)\n        calls: list = []\n    \n        async def install(version, rollback=False):\n            calls.append(version)\n            raise HTTPException(400, \"the signature doesn't verify\")\n        monkeypatch.setattr(up, \"install\", install)\n        run = lambda: asyncio.run(up.maybe_auto_install())  # noqa: E731\n        assert run() is None and calls == []  # just started\n        up.started_at = time.time() - 120\n        monkeypatch.setattr(up, \"busy\", lambda: 1)\n        assert run() is None and calls == []  # a session is running\n        monkeypatch.setattr(up, \"busy\", lambda: 0)\n>       assert run() is None and calls == [\"99.0.0\"]  # tried, failed\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE       AssertionError: assert (None is None and [] == ['99.0.0']\nE        +  where None = <function test_auto_install_waits_for_idle_and_tries_each_version_once.<locals>.<lambda> at 0x1081e7920>()\nE         \nE         Right contains one more item: '99.0.0'\nE         Use -v to get more diff)\n\ntests/test_release_feed.py:160: AssertionError\n_____________________ test_auto_install_can_be_turned_off ______________________\n\nenv = (<gamedevworkstation.app.AppState object at 0x1081b79d0>, PosixPath('/private/var/folders/07/xyyrk2p92jnblsq7j428mt5h0000gn/T/pytest-of-arshiajahan/pytest-1461/test_auto_install_can_be_turne0/updates'))\nmonkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x108365d60>\n\n    def test_auto_install_can_be_turned_off(env, monkeypatch):\n        s, _ = env\n        s.config.updates[\"auto_install\"] = False\n        up = U.Updater(s)\n        up.started_at = 0\n        _pending(monkeypatch, up)\n        monkeypatch.setattr(up, \"install\", lambda *a, **k: pytest.fail(\"installed\"))\n        assert asyncio.run(up.maybe_auto_install()) is None\n>       assert up.status()[\"auto_install\"] is False and up.status()[\"github\"] is None\n                                                        ^^^^^^^^^^^^^^^^^^^^^\nE       KeyError: 'github'\n\ntests/test_release_feed.py:173: KeyError\n=========================== short test summary info ============================\nFAILED tests/test_release_feed.py::test_latest_release_ignores_drafts_prereleases_and_errors\nFAILED tests/test_release_feed.py::test_mac_release_is_unpacked_into_the_updates_folder\nFAILED tests/test_release_feed.py::test_windows_release_is_an_installer - Typ...\nFAILED tests/test_release_feed.py::test_not_newer_or_wrong_size_downloads_nothing\nFAILED tests/test_release_feed.py::test_windows_helper_script_quotes_paths - ...\nFAILED tests/test_release_feed.py::test_feed_is_off_for_local_builds_and_on_when_configured\nFAILED tests/test_release_feed.py::test_auto_install_waits_for_idle_and_tries_each_version_once\nFAILED tests/test_release_feed.py::test_auto_install_can_be_turned_off - KeyE...\n8 failed, 1 passed in 3.14s\n",
+    "environment": false,
+    "detail": {}
+   }
+  ]
+ }
+}

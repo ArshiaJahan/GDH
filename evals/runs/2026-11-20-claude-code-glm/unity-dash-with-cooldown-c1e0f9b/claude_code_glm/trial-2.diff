@@ -1,0 +1,75 @@
+diff --git a/examples/unity-sample/Assets/Scripts/Dash.cs b/examples/unity-sample/Assets/Scripts/Dash.cs
+new file mode 100644
+index 0000000..4a8a145
+--- /dev/null
++++ b/examples/unity-sample/Assets/Scripts/Dash.cs
+@@ -0,0 +1,37 @@
++namespace CoinDash
++{
++    /// <summary>Dash timing rules, kept out of MonoBehaviours so EditMode tests can check them.</summary>
++    public sealed class Dash
++    {
++        public const float SpeedMultiplier = 3f;
++        public const float Duration = 0.2f;
++        public const float Cooldown = 1f;
++
++        // Absorbs float drift from summing many small frame deltas.
++        const float Epsilon = 1e-5f;
++
++        float _dashLeft;
++        float _cooldownLeft;
++
++        public bool IsDashing => _dashLeft > Epsilon;
++        public bool Ready => _cooldownLeft <= Epsilon;
++        public float Multiplier => IsDashing ? SpeedMultiplier : 1f;
++
++        /// <summary>Starts a dash if the player is moving and the cooldown has run out.</summary>
++        public bool TryStart(bool moving)
++        {
++            if (!moving || !Ready) return false;
++            _dashLeft = Duration;
++            _cooldownLeft = Cooldown;
++            return true;
++        }
++
++        /// <summary>Counts the dash and cooldown timers down by the frame's delta time.</summary>
++        public void Tick(float dt)
++        {
++            if (dt <= 0f) return;
++            _dashLeft = _dashLeft > dt ? _dashLeft - dt : 0f;
++            _cooldownLeft = _cooldownLeft > dt ? _cooldownLeft - dt : 0f;
++        }
++    }
++}
+diff --git a/examples/unity-sample/Assets/Scripts/Dash.cs.meta b/examples/unity-sample/Assets/Scripts/Dash.cs.meta
+new file mode 100644
+index 0000000..6d6a111
+--- /dev/null
++++ b/examples/unity-sample/Assets/Scripts/Dash.cs.meta
+@@ -0,0 +1,2 @@
++fileFormatVersion: 2
++guid: 3faecd689b02414d8a93957283fea6ba
+diff --git a/examples/unity-sample/Assets/Scripts/PlayerMover.cs b/examples/unity-sample/Assets/Scripts/PlayerMover.cs
+index 8ad9485..ed5e97e 100644
+--- a/examples/unity-sample/Assets/Scripts/PlayerMover.cs
++++ b/examples/unity-sample/Assets/Scripts/PlayerMover.cs
+@@ -10,6 +10,8 @@ namespace CoinDash
+         [SerializeField] float speed = 5f;
+         [SerializeField] float arenaHalfSize = 9f;
+ 
++        readonly Dash _dash = new Dash();
++
+         void Awake() { TransformStateProvider.Instance.Track("player", transform); }
+ 
+         void OnDestroy() { TransformStateProvider.Instance.Untrack("player"); }
+@@ -24,7 +26,9 @@ namespace CoinDash
+             if (kb.dKey.isPressed || kb.rightArrowKey.isPressed) dir.x += 1f;
+             if (kb.aKey.isPressed || kb.leftArrowKey.isPressed) dir.x -= 1f;
+             if (dir.sqrMagnitude > 1f) dir.Normalize();
+-            var p = transform.position + dir * speed * Time.deltaTime;
++            _dash.Tick(Time.deltaTime);
++            if (kb.spaceKey.wasPressedThisFrame) _dash.TryStart(dir.sqrMagnitude > 0f);
++            var p = transform.position + dir * speed * _dash.Multiplier * Time.deltaTime;
+             p.x = Mathf.Clamp(p.x, -arenaHalfSize, arenaHalfSize);
+             p.z = Mathf.Clamp(p.z, -arenaHalfSize, arenaHalfSize);
+             transform.position = p;

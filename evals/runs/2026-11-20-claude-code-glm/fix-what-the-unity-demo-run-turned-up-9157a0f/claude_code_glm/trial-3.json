@@ -1,0 +1,46 @@
+{
+ "task": "fix-what-the-unity-demo-run-turned-up-9157a0f",
+ "agent": "claude_code_glm",
+ "trial": 3,
+ "passed": false,
+ "blame": "agent",
+ "reason": "failed command 'tests' (its own versions of frontend/src/components/Chat.test.tsx, tests/test_claude_code.py were replaced by the hidden tests)",
+ "wall_s": 604.2,
+ "cost_usd": 1.5736,
+ "tool_calls": 46,
+ "input_tokens": 2858835,
+ "output_tokens": 21148,
+ "agent_error": "",
+ "timed_out": false,
+ "tampered": [
+  "frontend/src/components/Chat.test.tsx",
+  "tests/test_claude_code.py"
+ ],
+ "failed_steps": [
+  "tests"
+ ],
+ "diff_lines": 253,
+ "started_at": "2026-11-20T23:18:13Z",
+ "helper_calls": 0,
+ "model": "claude-opus-5-5",
+ "grade": {
+  "passed": false,
+  "tampered": [
+   "frontend/src/components/Chat.test.tsx",
+   "tests/test_claude_code.py"
+  ],
+  "environment_failure": false,
+  "steps": [
+   {
+    "name": "tests",
+    "kind": "command",
+    "passed": false,
+    "exit": 1,
+    "duration_s": 49.119043292012066,
+    "output": "    seen[\"extra\"] = kw.get(\"extra\")\n            seen[\"xml\"] = xml\n            raise ValueError(\"stop here\")\n    \n        monkeypatch.setattr(UB.uc, \"argv_test_batch\", fake_argv)\n        app = AppState(db_path=tmp_path / \"b.db\")\n        proj = tmp_path / \"Game\"\n        (proj / \"ProjectSettings\").mkdir(parents=True)\n        (proj / \"ProjectSettings/ProjectVersion.txt\").write_text(\"m_EditorVersion: 6000.3.21f1\\n\", encoding=\"utf-8\")\n        s = app.store.create(folder=str(proj), mode=\"ask\")\n        br = UB.UnityBridge(app)\n    \n        async def route(session, op):\n            return UB.EditorState(mode=\"cli_batch\"), proj\n    \n        async def cli_info():\n            return object()\n    \n        async def editor_arg(root, cli):\n            return None, None\n    \n        monkeypatch.setattr(br, \"_route\", route)\n        monkeypatch.setattr(br, \"_cli_info\", cli_info)\n        monkeypatch.setattr(br, \"_editor_arg\", editor_arg)\n        r = await br.run_replay(s, \"verify\", {\"_request_path\": \"/x/request.json\"})\n        assert r.status == \"error\"\n        i = seen[\"extra\"].index(\"-logFile\")\n>       assert seen[\"extra\"][i + 1] == str(seen[\"xml\"].with_suffix(\".log\"))\nE       AssertionError: assert '/private/var...72.editor.log' == '/private/var...52727-072.log'\nE         \nE         Skipping 165 identical leading characters in diff, use -v to show\nE         - 52727-072.log\nE         + 52727-072.editor.log\nE         ?           +++++++\n\ntests/test_followups_2026_11.py:179: AssertionError\n__________________ test_max_seconds_is_bounded_by_the_config ___________________\n\n    def test_max_seconds_is_bounded_by_the_config():\n        assert R._record_seconds({}, {\"max_seconds\": 600}) == 600\n        assert R._record_seconds({\"max_seconds\": 12}, {\"max_seconds\": 600}) == 12\n        for bad in (0, -1, 601):\n>           with pytest.raises(R.ReplayOpError):\n                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE           Failed: DID NOT RAISE ReplayOpError\n\ntests/test_followups_2026_11.py:227: Failed\n______________ test_rate_limit_event_shows_only_when_not_allowed _______________\n\nrig = namespace(app=<gamedevworkstation.app.AppState object at 0x1282da9c0>, cc=<gamedevworkstation.features.claude_code.Cla...r/folders/07/xyyrk2p92jnblsq7j428mt5h0000gn/T/pytest-of-arshiajahan/pytest-1370/test_rate_limit_event_shows_on0/proj'))\n\n    async def test_rate_limit_event_shows_only_when_not_allowed(rig):\n        await rig.send()\n        p = rig.cc.procs[rig.sid]\n        real = next(r[\"ev\"] for r in _stream(\"hello.jsonl\") if r[\"dir\"] == \"out\" and r[\"ev\"][\"type\"] == \"rate_limit_event\")\n        before = rig.app.db.one(\"SELECT COUNT(*) AS n FROM events WHERE session_id=? AND type='agent.status'\", [rig.sid])[\"n\"]\n        p._on_event(real)  # \"allowed\": nothing to show\n        assert rig.app.db.one(\"SELECT COUNT(*) AS n FROM events WHERE session_id=? AND type='agent.status'\", [rig.sid])[\"n\"] == before\n        p._on_event({**real, \"rate_limit_info\": {**real[\"rate_limit_info\"], \"status\": \"rejected\"}})\n        row = rig.app.db.one(\"SELECT data FROM events WHERE session_id=? AND type='agent.status' ORDER BY rowid DESC LIMIT 1\", [rig.sid])\n        data = json.loads(row[\"data\"])\n>       assert data[\"kind\"] == \"rate_limit\" and data[\"text\"].startswith(\"Claude plan limit reached (five hour)\")\nE       AssertionError: assert ('plan_limit' == 'rate_limit'\nE         \nE         - rate_limit\nE         + plan_limit)\n\ntests/test_claude_code.py:1269: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_followups_2026_11.py::test_unitys_os_name_matches_this_machine\nFAILED tests/test_followups_2026_11.py::test_an_unset_application_identifier_is_unitys_default\nFAILED tests/test_followups_2026_11.py::test_batch_replay_asks_the_editor_for_its_log\nFAILED tests/test_followups_2026_11.py::test_max_seconds_is_bounded_by_the_config\nFAILED tests/test_claude_code.py::test_rate_limit_event_shows_only_when_not_allowed\n5 failed, 154 passed in 46.95s\n",
+    "environment": false,
+    "detail": {}
+   }
+  ]
+ }
+}

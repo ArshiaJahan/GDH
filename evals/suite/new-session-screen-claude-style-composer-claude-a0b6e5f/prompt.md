@@ -17,9 +17,9 @@ Interface the tests use (declarations only; the change adds or changes these):
   - `def work_dir(sid: str) -> Path:`
   - `def session_cwd(s: dict) -> Path:`
 - `backend/gamedevworkstation/features/session_routes.py`:
-  - `def account_full_name() -> str:`
+  - `@cache def account_full_name() -> str:`
   - `def greeting_name(full: str) -> str | None:`
-  - `async def greeting() -> dict:`
+  - `@api.get("/greeting") async def greeting() -> dict:`
 - `backend/gamedevworkstation/server.py`:
   - `def new_session_harness(config: Any) -> str:`
 - `frontend/src/components/ClaudeCode.tsx`:

@@ -1,0 +1,866 @@
+diff --git a/README.md b/README.md
+index 1af63c6..2268e55 100644
+--- a/README.md
++++ b/README.md
+@@ -71,6 +71,7 @@ and whether to work through the Editor (MCP) or batchmode.
+ | [`project-memory`](skills/project-memory) | `PROJECT.md`: ADRs, conventions, gotchas, current milestone |
+ | [`architecture-patterns`](skills/architecture-patterns) | Architecture templates for Unity code |
+ | [`asset-pipeline`](skills/asset-pipeline) | Import settings and asset workflows |
++| [`trailer-maker`](skills/trailer-maker) | Game trailers: beat sheet, captures, ElevenLabs audio, ffmpeg edit-list render, pacing and technical reviews |
+ | [`perf-pass`](skills/perf-pass) | Profiling plus the static anti-pattern audit |
+ | [`game-feel-pass`](skills/game-feel-pass) | Juice and feedback tuning |
+ | [`build-ship`](skills/build-ship) | Builds and release prep |
+@@ -163,6 +164,7 @@ your own Pass/Fail); a failure costs a retry, and the last one parks the run for
+ | `new-mechanic` New mechanic | Spec → backlog story → code → compile → behaviour tests → play-verify → commit |
+ | `bugfix` Bug fix | Reproduce with a failing test → fix → repro test and suite pass → commit |
+ | `juice-pass` Juice pass | Baseline screenshots → game-feel pass → before/after evidence → design critique → commit |
++| `trailer` Trailer | Beat sheet → captures and cards → audio → edit list and render → reviews → report |
+ | `content-batch` Content batch | Plan the items → produce them (a Fleet wave, one unit per item folder) → wire → verify |
+ | `perf-pass` Performance pass | Baseline perf report → fix loop (anti-pattern gate blocking) → compare |
+ | `release` Release | Freeze → full tests → build → headless smoke → spec-audit critique → changelog and tag |
+diff --git a/backend/gamedevworkstation/features/elevenlabs_feature.py b/backend/gamedevworkstation/features/elevenlabs_feature.py
+index 20f56d9..1061d9f 100644
+--- a/backend/gamedevworkstation/features/elevenlabs_feature.py
++++ b/backend/gamedevworkstation/features/elevenlabs_feature.py
+@@ -21,13 +21,15 @@ from ..config import media_dir
+ from ..core.types import Usage, new_id
+ from ..usage import BudgetExceeded
+ from ..providers.elevenlabs_client import (SFX_CREDITS_PER_SECOND, STS_CREDITS_PER_MINUTE, STT_CREDITS_PER_MINUTE,
+-                                           ElevenLabsClient, ElevenLabsError, char_cost, ext_for)
++                                           ElevenLabsClient, ElevenLabsError, char_cost,
++                                           composition_plan_checked, ext_for)
+ 
+ if TYPE_CHECKING:
+     from ..app import AppState
+ 
+ log = logging.getLogger(__name__)
+ QUOTA_REFRESH_DELAY_S = 3.0  # coalesces a burst of generations into one subscription read
++MAX_PER_CALL = {"sfx": 4, "music": 3}  # variations one page request may generate at once
+ 
+ 
+ def stt_credits(headers: dict, audio_seconds: float) -> tuple[float, bool]:
+@@ -256,7 +258,14 @@ class ElevenLabsService:
+         return await self._run_job(session_id, f"Sound effect: {text[:40]}", go())
+ 
+     async def music(self, prompt: str, *, session_id: str | None, source: str, duration_s: float = 30,
+-                    instrumental: bool = False, message_id: str | None = None, profile: str | None = None) -> dict:
++                    instrumental: bool = False, message_id: str | None = None, profile: str | None = None,
++                    composition_plan: Any = None) -> dict:
++        """`composition_plan` (dict or JSON) sets sections, styles and lengths itself; then
++        `prompt` is only the title and `duration_s` is the plan's total."""
++        plan = composition_plan_checked(composition_plan) if composition_plan not in (None, "", {}) else None
++        if plan:
++            duration_s = sum(s["duration_ms"] for s in plan["sections"]) / 1000
++            prompt = prompt or " / ".join(s["section_name"] for s in plan["sections"])
+         c = self.client_for_session(session_id, profile)
+         if not self.features(c.profile).get("features", {}).get("music", True):
+             raise ElevenLabsError("Music needs a paid ElevenLabs plan.")
+@@ -264,11 +273,12 @@ class ElevenLabsService:
+         await self._confirm(session_id, source, "music", est, prompt, len(prompt))
+ 
+         async def go():
+-            data, headers = await c.music(prompt, int(duration_s * 1000), instrumental)
++            data, headers = await c.music(prompt, int(duration_s * 1000), instrumental, composition_plan=plan)
+             return await self._save(data=data, ext=".mp3", feature="music", model="music_v2_5", session_id=session_id,
+                                     source=source, title=f"Music: {prompt[:48]}", text=prompt,
+                                     credits=char_cost(headers, est), characters=len(prompt), voice=None,
+-                                    meta={"duration_s": duration_s, "instrumental": instrumental},
++                                    meta={"duration_s": duration_s, "instrumental": instrumental,
++                                          **({"composition_plan": plan} if plan else {})},
+                                     message_id=message_id, profile=c.profile)
+ 
+         return await self._run_job(session_id, f"Music: {prompt[:40]}", go())
+@@ -416,14 +426,19 @@ def _register_tools(S: "AppState", svc: ElevenLabsService) -> None:
+             return ToolOutput(str(e), is_error=True)
+         return summary(r)
+ 
+-    @reg.add("music", "ElevenLabs music from a prompt (paid plans). duration_s 3–600.",
++    @reg.add("music", "ElevenLabs music from a prompt (paid plans). duration_s 3–600. Or pass composition_plan "
++                      "{positive_global_styles, negative_global_styles, sections: [{section_name, "
++                      "positive_local_styles, negative_local_styles, duration_ms (3000–120000), lines}]} to set "
++                      "each section's length and style (e.g. to match a trailer's beats); prompt is then a title.",
+              obj({"prompt": {"type": "string"}, "duration_s": {"type": "number"},
+-                  "instrumental": {"type": "boolean"}}, ["prompt"]))
++                  "instrumental": {"type": "boolean"}, "composition_plan": {"type": "object"}}))
+     async def music(ctx: ToolContext, a: dict) -> ToolOutput:
++        if not a.get("prompt") and not a.get("composition_plan"):
++            return ToolOutput("music needs a prompt or a composition_plan.", is_error=True)
+         try:
+-            r = await svc.music(a["prompt"], session_id=ctx.session_id, source="agent",
++            r = await svc.music(a.get("prompt") or "", session_id=ctx.session_id, source="agent",
+                                 duration_s=float(a.get("duration_s") or 30), instrumental=bool(a.get("instrumental")),
+-                                message_id=ctx.message_id)
++                                message_id=ctx.message_id, composition_plan=a.get("composition_plan"))
+         except (ElevenLabsError, BudgetExceeded) as e:
+             return ToolOutput(str(e), is_error=True)
+         return summary(r)
+@@ -519,7 +534,7 @@ def register(app_: FastAPI, api: APIRouter, S: "AppState") -> None:
+ 
+     @api.post("/elevenlabs/sfx")
+     async def ui_sfx(body: dict = Body(...)) -> list[dict]:
+-        n = max(1, min(int(body.get("variations") or 1), 4))
++        n = max(1, min(int(body.get("variations") or 1), MAX_PER_CALL["sfx"]))
+         try:
+             return list(await asyncio.gather(*(svc.sound_effect(
+                 body["text"], session_id=body.get("session_id"), source="user", duration_s=body.get("duration_s"),
+@@ -530,12 +545,12 @@ def register(app_: FastAPI, api: APIRouter, S: "AppState") -> None:
+ 
+     @api.post("/elevenlabs/music")
+     async def ui_music(body: dict = Body(...)) -> list[dict]:
+-        n = max(1, min(int(body.get("variations") or 1), 3))
++        n = max(1, min(int(body.get("variations") or 1), MAX_PER_CALL["music"]))
+         try:
+             return list(await asyncio.gather(*(svc.music(
+-                body["prompt"], session_id=body.get("session_id"), source="user",
++                body.get("prompt") or "", session_id=body.get("session_id"), source="user",
+                 duration_s=float(body.get("duration_s") or 30), instrumental=bool(body.get("instrumental")),
+-                profile=body.get("profile")) for _ in range(n))))
++                profile=body.get("profile"), composition_plan=body.get("composition_plan")) for _ in range(n))))
+         except (ElevenLabsError, BudgetExceeded) as e:
+             raise wrap(e) from e
+ 
+diff --git a/backend/gamedevworkstation/features/media_outputs.py b/backend/gamedevworkstation/features/media_outputs.py
+new file mode 100644
+index 0000000..9601a3b
+--- /dev/null
++++ b/backend/gamedevworkstation/features/media_outputs.py
+@@ -0,0 +1,95 @@
++"""Media outputs: index the video/audio/image files a shell command produces (an ffmpeg render, a
++trailer cut, a recorded clip) under Items, so they show up like any written artifact.
++
++Files the agent writes with write_file reach Items through changes.notify; a file ffmpeg writes
++doesn't. This post_tool observer reads the run_command output for media paths, and indexes those
++that exist inside the session's roots and were written during the current turn.
++"""
++from __future__ import annotations
++
++import re
++import time
++from pathlib import Path
++from typing import TYPE_CHECKING
++
++from fastapi import APIRouter, FastAPI
++
++from .hookbus import HookEvent, HookResult
++
++if TYPE_CHECKING:
++    from ..app import AppState
++
++MEDIA_EXT = ("mp4", "mov", "webm", "mkv", "m4v", "gif", "mp3", "wav", "m4a", "aac", "ogg", "flac", "png", "jpg",
++             "jpeg", "webp")
++MAX_PER_CALL = 8  # one command indexes at most this many files (a frame dump shouldn't flood Items)
++RECENT_S = 600.0  # with no running turn, a file counts as new if written this recently
++_EXT = "|".join(MEDIA_EXT)
++_PATH_RX = re.compile(
++    rf"""(?:"([^"\n]+?\.(?:{_EXT}))"|'([^'\n]+?\.(?:{_EXT}))'|([^\s"'`<>|=,;()\[\]]+?\.(?:{_EXT})))(?![\w.\-])""",
++    re.IGNORECASE)
++
++
++def media_paths(text: str) -> list[str]:
++    """Media file paths mentioned in `text` (quoted or bare), in order of first mention, each once."""
++    seen: dict[str, None] = {}
++    for m in _PATH_RX.finditer(text or ""):
++        p = (m.group(1) or m.group(2) or m.group(3) or "").strip()
++        if p.lower().startswith(("http://", "https://")) or "://" in p:
++            continue
++        p = p.rstrip(":")
++        if p:
++            seen.setdefault(p, None)
++    return list(seen)
++
++
++class MediaOutputs:
++    """app.extensions["media_outputs"]."""
++
++    def __init__(self, app: "AppState"):
++        self.app = app
++
++    def _indexed(self, session_id: str, path: str) -> bool:
++        return bool(self.app.items.db.one("SELECT id FROM items WHERE session_id=? AND path=? AND deleted=0 LIMIT 1",
++                                          [session_id, path]))
++
++    async def observe(self, ev: HookEvent) -> HookResult | None:
++        out = ev.output
++        if out is None or out.is_error or not ev.ctx.folder:
++            return None
++        text = "\n".join(t for t in (str((ev.args or {}).get("command") or ""), out.text or "") if t)
++        since = ev.turn.started_at if ev.turn else time.time() - RECENT_S
++        added = 0
++        for raw in media_paths(text):
++            if added >= MAX_PER_CALL:
++                break
++            p = Path(raw).expanduser()
++            if not p.is_absolute():
++                p = ev.ctx.folder / p
++            try:
++                p = p.resolve()
++                if not p.is_file() or not ev.ctx.within_roots(p) or p.stat().st_mtime < since - 1:
++                    continue
++            except OSError:
++                continue
++            if self._indexed(ev.session_id, str(p)):
++                continue
++            if self.app.items.add_file(p, source="agent", session_id=ev.session_id, provider=ev.ctx.provider,
++                                       model=ev.ctx.model, message_id=ev.ctx.message_id):
++                added += 1
++        return None
++
++
++def install(app: "AppState") -> MediaOutputs:
++    """Register the observer on an app (idempotent; tests call it on a bare AppState)."""
++    mo = app.extensions.get("media_outputs")
++    if isinstance(mo, MediaOutputs):
++        return mo
++    mo = MediaOutputs(app)
++    app.extensions["media_outputs"] = mo
++    app.hooks.register("post_tool", "media_outputs.observe", mo.observe, order=70,
++                       when=lambda ev: ev.tool == "run_command")
++    return mo
++
++
++def register(app_: FastAPI, api: APIRouter, S: "AppState") -> None:
++    install(S)
+diff --git a/backend/gamedevworkstation/providers/elevenlabs_client.py b/backend/gamedevworkstation/providers/elevenlabs_client.py
+index 2d73c85..65b1076 100644
+--- a/backend/gamedevworkstation/providers/elevenlabs_client.py
++++ b/backend/gamedevworkstation/providers/elevenlabs_client.py
+@@ -159,7 +159,10 @@ class ElevenLabsClient:
+         return await self._audio(self.sdk.text_to_sound_effects.with_raw_response.convert, **kw)
+ 
+     async def music(self, prompt: str, length_ms: int, instrumental: bool = False,
+-                    output_format: str = "mp3_44100_128") -> tuple[bytes, dict]:
++                    output_format: str = "mp3_44100_128", composition_plan: dict | None = None) -> tuple[bytes, dict]:
++        if composition_plan is not None:  # the plan sets sections and lengths; prompt/length don't apply
++            kw = {"composition_plan": composition_plan, "model_id": MUSIC_MODEL, "output_format": output_format}
++            return await self._audio(self.sdk.music.with_raw_response.compose, **kw)
+         kw = {"prompt": prompt, "music_length_ms": max(3000, min(600_000, int(length_ms))), "model_id": MUSIC_MODEL,
+               "force_instrumental": instrumental, "output_format": output_format}
+         return await self._audio(self.sdk.music.with_raw_response.compose, **kw)
+@@ -243,6 +246,54 @@ def _voice(v: Any) -> dict:
+             "is_owner": d.get("is_owner")}
+ 
+ 
++SECTION_MS = (3000, 120_000)  # ElevenLabs bounds for one composition-plan section
++PLAN_MAX_MS = 600_000
++
++
++def composition_plan_checked(plan: Any) -> dict:
++    """A music composition plan (dict or JSON text) checked against the shape ElevenLabs takes:
++    {positive_global_styles, negative_global_styles, sections: [{section_name, positive_local_styles,
++    negative_local_styles, duration_ms, lines}]}. Missing style/lines lists default to []; durations
++    are ints in 3–120 s per section and at most 10 min in total. Raises ElevenLabsError."""
++    if isinstance(plan, str):
++        try:
++            plan = json.loads(plan)
++        except ValueError:
++            raise ElevenLabsError("composition_plan is not valid JSON.") from None
++    if not isinstance(plan, dict):
++        raise ElevenLabsError("composition_plan must be an object with a sections list.")
++
++    def strs(o: dict, key: str, where: str) -> list[str]:
++        v = o.get(key) or []
++        if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
++            raise ElevenLabsError(f"composition_plan {where}{key} must be a list of strings.")
++        return v
++
++    sections = plan.get("sections")
++    if not isinstance(sections, list) or not sections:
++        raise ElevenLabsError("composition_plan needs a non-empty sections list.")
++    out_sections, total = [], 0
++    for i, sec in enumerate(sections):
++        where = f"section {i + 1} "
++        if not isinstance(sec, dict):
++            raise ElevenLabsError(f"composition_plan {where}must be an object.")
++        name = sec.get("section_name")
++        if not isinstance(name, str) or not name.strip():
++            raise ElevenLabsError(f"composition_plan {where}needs a section_name.")
++        ms = sec.get("duration_ms")
++        if isinstance(ms, bool) or not isinstance(ms, (int, float)) or not SECTION_MS[0] <= ms <= SECTION_MS[1]:
++            raise ElevenLabsError(f"composition_plan {where}({name}) duration_ms must be "
++                                  f"{SECTION_MS[0]}–{SECTION_MS[1]}.")
++        total += int(ms)
++        out_sections.append({"section_name": name, "positive_local_styles": strs(sec, "positive_local_styles", where),
++                             "negative_local_styles": strs(sec, "negative_local_styles", where),
++                             "duration_ms": int(ms), "lines": strs(sec, "lines", where)})
++    if total > PLAN_MAX_MS:
++        raise ElevenLabsError(f"composition_plan is {total / 1000:g} s long; the limit is {PLAN_MAX_MS // 1000} s.")
++    return {"positive_global_styles": strs(plan, "positive_global_styles", ""),
++            "negative_global_styles": strs(plan, "negative_global_styles", ""), "sections": out_sections}
++
++
+ def char_cost(headers: dict, fallback: float) -> float:
+     for k in ("character-cost", "x-character-count"):
+         v = headers.get(k) or headers.get(k.title())
+diff --git a/backend/gamedevworkstation/routes.py b/backend/gamedevworkstation/routes.py
+index 7f81ce8..71f0846 100644
+--- a/backend/gamedevworkstation/routes.py
++++ b/backend/gamedevworkstation/routes.py
+@@ -24,6 +24,7 @@ def _feature_modules() -> list:
+         # Hooks & gates, quality ladder, campaigns, fleet: added by later work packages; a module
+         # that doesn't exist yet is skipped below.
+         "hooks", "ladder", "campaigns", "fleet",
++        "media_outputs",  # media files a shell command (ffmpeg) writes, indexed under Items
+         "unity_tool",  # the agent's `unity` tool and /api/unity (Unity backend: MCP or the Unity CLI)
+     )]
+     mods = []
+diff --git a/docs/GUIDE.md b/docs/GUIDE.md
+index 7568d65..01ea93b 100644
+--- a/docs/GUIDE.md
++++ b/docs/GUIDE.md
+@@ -439,6 +439,7 @@ Unity projects:
+ | `new-mechanic` New mechanic | chain, campaign | Spec → backlog story → code → compile → behaviour tests → play-verify → commit |
+ | `bugfix` Bug fix | chain, campaign | Reproduce with a failing test → fix → the repro test and the suite pass → commit |
+ | `juice-pass` Juice pass | chain, campaign | Baseline screenshots → game-feel pass → before/after play evidence → design critique → commit |
++| `trailer` Trailer | chain, campaign | Beat sheet → captures and cards → audio → edit list and render → pacing and technical reviews → report |
+ | `content-batch` Content batch | chain, campaign | Plan the items → produce them (Fleet-eligible: one unit per `Assets/Game/<Kind>/<Item>/`) → wire → verify |
+ | `perf-pass` Performance pass | chain, campaign | Baseline perf report → fix loop (no new anti-patterns) → compare |
+ | `release` Release | chain, campaign | Freeze → full tests → build → headless smoke → spec-audit critique → changelog and tag |
+@@ -730,7 +731,7 @@ others turn on when you invoke them.
+ | `cost-effective-claude-delegation` | Does a task at the lowest total cost, step by step |
+ | `high-performance-claude-delegation` | Runs independent units in parallel on Opus at high effort, then an Opus reviewer |
+ | `unity-router` (featured) | Unity game pack entry point: picks which Unity skills to load for a task and uses the route the harness reports (MCP, Unity CLI live or batch); see [`skills/unity-router`](../skills/unity-router/SKILL.md) |
+-| `compile-fix-loop`, `play-verify`, `headless-ops`, `scene-prefab-safety`, `gdd-to-backlog`, `project-memory`, `architecture-patterns`, `asset-pipeline`, `perf-pass`, `game-feel-pass`, `build-ship`, `vcs-hygiene` | The rest of the Unity 6 game-creation pack: compile/fix, Play Mode checks, headless builds and tests, safe scene/prefab edits, GDD to backlog, project memory, architecture templates, asset pipeline, performance, game feel, shipping and git hygiene (with scripts, templates and references) |
++| `compile-fix-loop`, `play-verify`, `headless-ops`, `scene-prefab-safety`, `gdd-to-backlog`, `project-memory`, `architecture-patterns`, `asset-pipeline`, `perf-pass`, `game-feel-pass`, `build-ship`, `vcs-hygiene`, `trailer-maker` | The rest of the Unity 6 game-creation pack: compile/fix, Play Mode checks, headless builds and tests, safe scene/prefab edits, GDD to backlog, project memory, architecture templates, asset pipeline, performance, game feel, shipping, git hygiene and trailers (with scripts, templates and references) |
+ | `unity-mcp-orchestrator` | MCP for Unity tool reference and workflows, used by the Unity pack |
+ 
+ **Unity pack setup.** The Unity skills drive the editor through the MCP for Unity server, and
+diff --git a/skills/trailer-maker/SKILL.md b/skills/trailer-maker/SKILL.md
+new file mode 100644
+index 0000000..1b29a46
+--- /dev/null
++++ b/skills/trailer-maker/SKILL.md
+@@ -0,0 +1,52 @@
++---
++name: trailer-maker
++description: Makes a game trailer for a Unity game end to end - a beat sheet from the game's hook, gameplay captures recorded in the Editor, title/end cards rendered in Unity, music/VO/SFX from ElevenLabs (or a licensed track), an edit list rendered by ffmpeg, and two independent reviews (pacing, technical) before delivery. Use when someone wants a trailer, teaser, gameplay reel, store-page video, Steam/itch capsule video, or a short clip for social media, even if they only say "make a video of my game".
++---
++
++# trailer-maker
++
++A trailer is an edit list, not a timeline you hand-tweak: plan beats, capture shots, generate audio, write `edl.json`, render it, review it, fix the list, render again.
++
++`<skill>` = this skill's folder. `T` = the trailer folder, default `Trailer/<yyyy-mm-dd>/` in the project root (outside `Assets/`, so Unity never imports it).
++
++## When to use / not to use
++- Use for: trailers, teasers, gameplay reels, store videos (Steam 16:9, vertical 9:16 for social), recut of an existing trailer.
++- Not for: in-game cutscenes (Timeline in Unity), screenshots for store pages (play-verify), builds (build-ship).
++
++## Requirements
++- ffmpeg with ffprobe. `python3 <skill>/scripts/render_trailer.py check` says what it found and what is missing. Text is drawn on cards
++in Unity (with your game's font), so the slim Homebrew formula is enough; `ffmpeg-full` adds `drawtext`/libass if
++you want burned-in subtitles. Set `TRAILER_FFMPEG` to use a specific ffmpeg binary or folder.
++- Unity Recorder (`com.unity.recorder`) for captures; ElevenLabs for generated audio (optional).
++
++## Workflow
++1. **Beat sheet** (`T/BEATS.md`): length (30/60/90 s), the hook in one line, then beats with target seconds:
++   cold open (strongest shot, 0-3 s), premise, mechanics escalating, a breather, climax, title card, call to action
++   (wishlist / release date). Show it to the user before capturing anything.
++2. **Captures** (`T/capture/`): one clip per shot with Unity Recorder (MP4, H.264, the trailer's resolution and fps,
++   1.5 s handles on both ends). Play-mode scripted or played by the user; name clips after beats (`03-boss-dash.mp4`).
++   Unity Recorder's movie output **doesn't capture its audio**: record game audio separately or rebuild it in the mix (references/audio.md).
++   Probe every clip: `python3 <skill>/scripts/render_trailer.py probe T/capture/*.mp4`.
++3. **Cards** (`T/cards/`): title, logo, release date, call to action as PNGs at the trailer resolution, rendered from
++   a Unity scene or UI canvas so they use the game's font and palette.
++4. **Audio** (`T/audio/`, details in references/audio.md): music via the `music` tool with a `composition_plan` whose
++sections match the beat sheet, VO via `tts`, SFX via `sound_effect`; copy files to `T/audio/`, record items in
++   REPORT.md. Before generating anything, show the plan, the voices and the estimated credits to the user
++for approval. Reuse items instead of regenerating; record what you used in `audio/sources.json`:
++   `{"file": "audio/music.mp3", "item_id": "itm_…", "tool": "music", "credits": 1500, "prompt_or_plan": …}`.
++A licensed track works the same way from step 3 (record the license in REPORT.md).
++5. **Edit list** (`T/edl.json`): clips with in/out points cut on the music's section boundaries, cards with durations,
++   audio tracks with start times. Format in the script's docstring. Dry run first:
++   `python3 <skill>/scripts/render_trailer.py render T/edl.json --dry-run`.
++6. **Render**: `python3 <skill>/scripts/render_trailer.py render T/edl.json`. The script checks the output's
++   duration against the edit list; `RESULT: OK` is the only proof the render worked.
++7. **Review**: spawn the two reviewers in references/reviewers.md as separate subagents, each given only the edit
++   list, the beat sheet, probe output and contact frames (`ffmpeg -i out.mp4 -vf fps=1,scale=480:-1 T/frames/%03d.png`),
++   not your opinion. Fix what they find in `edl.json` (not by hand-editing video) and render again. At most 3 rounds.
++8. **Deliver** `T/REPORT.md`: output path, length, resolution, audio sources and credits spent, review verdicts,
++   anything left open. The rendered MP4 shows up under Items.
++
++## Rules
++- Never overwrite a delivered render: version outputs (`out/trailer-v2.mp4`).
++- Every shot is real gameplay from the current build; say so in REPORT.md if any shot is staged.
++- Ask before spending more than the confirm threshold on audio, and before regenerating approved audio.
+diff --git a/skills/trailer-maker/references/audio.md b/skills/trailer-maker/references/audio.md
+new file mode 100644
+index 0000000..a252c61
+--- /dev/null
++++ b/skills/trailer-maker/references/audio.md
+@@ -0,0 +1,39 @@
++# Trailer audio
++
++The mix is built from the `audio` list in `edl.json`; clip audio is always dropped by the renderer.
++
++## Game audio
++Unity Recorder's movie output doesn't record audio reliably, so either:
++- record game audio separately (Recorder's Audio recorder, or route the output through a loopback device) and add
++  it as an `audio` entry starting at the clip's position in the trailer, or
++- rebuild it: export the SFX the shot plays (`Assets/Audio/SFX/...`) and place them in the mix at the right times.
++
++## Music (ElevenLabs `music`)
++Pass a `composition_plan` so the music's sections line up with the beat sheet, one section per beat group:
++```json
++{"positive_global_styles": ["orchestral hybrid", "pulsing synth bass", "120 bpm"],
++ "negative_global_styles": ["vocals"],
++ "sections": [
++   {"section_name": "Cold open", "positive_local_styles": ["sparse", "tension"], "negative_local_styles": [],
++    "duration_ms": 6000, "lines": []},
++   {"section_name": "Build", "positive_local_styles": ["drums enter", "rising"], "negative_local_styles": [],
++    "duration_ms": 20000, "lines": []},
++   {"section_name": "Climax", "positive_local_styles": ["full", "big hits"], "negative_local_styles": [],
++    "duration_ms": 18000, "lines": []},
++   {"section_name": "Title", "positive_local_styles": ["final hit", "ring out"], "negative_local_styles": [],
++    "duration_ms": 6000, "lines": []}]}
++```
++Each section is 3-120 s, the whole plan at most 10 minutes. The tool returns the item id and path; cut the edit
++list on the section boundaries (sum of `duration_ms`). Music needs a paid ElevenLabs plan.
++
++## Voice-over and SFX
++- `tts` for VO lines (one file per line, so lines can move independently); `list_voices` to pick a voice.
++- `sound_effect` for whooshes, hits and risers (0.5-30 s).
++
++## Bookkeeping
++Copy every file you use to `T/audio/` and record it in `T/audio/sources.json` (file, item_id, tool, credits,
++prompt or plan). For a licensed track record the source, license and attribution text in REPORT.md as well.
++
++## Levels
++Music around -14 LUFS integrated for the final mix; VO 3-6 dB above the music (lower music `volume` under VO
++entries rather than raising VO). Check: `ffmpeg -i out.mp4 -af ebur128 -f null -`.
+diff --git a/skills/trailer-maker/references/reviewers.md b/skills/trailer-maker/references/reviewers.md
+new file mode 100644
+index 0000000..56b8ce7
+--- /dev/null
++++ b/skills/trailer-maker/references/reviewers.md
+@@ -0,0 +1,23 @@
++# Trailer reviewers
++
++Run each as its own subagent. Give it `T/BEATS.md`, `T/edl.json`, the probe output of the render and the contact
++frames in `T/frames/`; nothing else (no draft verdict). Each answers with a verdict line, `SHIP` or `FIX`, then
++findings as `edl.json` changes (clip index, field, new value, why).
++
++## Pacing reviewer
++You review a game trailer's edit for pacing. Check:
++- the first 3 seconds show the strongest, most readable gameplay (no logos first);
++- shots average 1-3 s in action beats, longer in the breather; no shot overstays its idea;
++- cuts land on music section boundaries and hits (compare in/out points with the composition plan's durations);
++- mechanics escalate; the climax is the most intense section; title card and call to action are readable
++  (at least 2 s) and come last;
++- the total length matches the beat sheet's target within 2 s.
++
++## Technical reviewer
++You review a rendered game trailer for technical faults. Check:
++- the probe shows the planned resolution, fps, H.264 video and AAC audio, and the duration of the edit list;
++- frames: no black or frozen frames between clips (except intended fades), no letterboxing from wrong aspect
++  ratios, no debug UI, gizmos, cursor or Editor chrome, no placeholder art unless the user allowed it;
++- audio: every file in `audio/sources.json` exists and is used; nothing starts after the video ends; fades on
++  the first and last audio entries;
++- every source is recorded (audio sources, licensed tracks) for REPORT.md.
+diff --git a/skills/trailer-maker/scripts/render_trailer.py b/skills/trailer-maker/scripts/render_trailer.py
+new file mode 100644
+index 0000000..091ec74
+--- /dev/null
++++ b/skills/trailer-maker/scripts/render_trailer.py
+@@ -0,0 +1,354 @@
++#!/usr/bin/env python3
++"""Render a trailer from an edit list (edl.json) with ffmpeg. Standard library only.
++
++    render_trailer.py check                 ffmpeg/ffprobe found? which filters/encoders?
++    render_trailer.py probe <file>...       duration, size, fps, audio of each file (JSON)
++    render_trailer.py render <edl.json> [--dry-run]
++
++The edit list (paths relative to the edl file):
++    {"output": "out/trailer.mp4", "width": 1920, "height": 1080, "fps": 30,
++     "clips": [{"src": "capture/boss.mp4", "in": 3.2, "out": 6.0, "fade_in": 0.2, "fade_out": 0.2},
++               {"card": "cards/title.png", "duration": 2.5, "fade_in": 0.3}],
++     "audio": [{"src": "audio/music.mp3", "start": 0, "volume": 0.9, "fade_out": 1.5},
++               {"src": "audio/vo_01.mp3", "start": 4.0}]}
++Clips play in order; their own audio is dropped (the mix comes from "audio"). Text belongs on cards
++rendered in Unity, so no drawtext/libass is needed.
++
++Human lines go to stdout; JSON with --json; the last line is always `RESULT: OK|FAIL <summary>`.
++Exit codes: 0 ok, 1 render/probe failure, 2 usage or input error. ffmpeg is found via
++$TRAILER_FFMPEG, then PATH, then the Homebrew prefixes (ffmpeg-full included).
++"""
++import json
++import os
++import re
++import shutil
++import subprocess
++import sys
++from pathlib import Path
++
++ENV = "TRAILER_FFMPEG"
++BREW_BINS = ("/opt/homebrew/bin", "/usr/local/bin", "/opt/homebrew/opt/ffmpeg-full/bin",
++             "/usr/local/opt/ffmpeg-full/bin")
++WANT_FILTERS = ("scale", "pad", "fps", "trim", "concat", "fade", "afade", "amix", "adelay", "drawtext", "subtitles")
++WANT_ENCODERS = ("libx264", "h264_videotoolbox", "aac")
++AS_JSON = "--json" in sys.argv
++
++
++def out(*args):
++    """A human-readable line (silent with --json, where stdout is the JSON document)."""
++    if not AS_JSON:
++        print(*args)
++
++
++def result(ok, summary):
++    """Print the RESULT footer and return the exit code for it."""
++    print(f"RESULT: {'OK' if ok else 'FAIL'} {summary}", file=sys.stderr if AS_JSON else sys.stdout)
++    return 0 if ok else 1
++
++
++def find_ffmpeg():
++    """(ffmpeg, ffprobe) paths; either may be None. $TRAILER_FFMPEG may name ffmpeg or its folder."""
++    env = os.environ.get(ENV, "").strip()
++    cands = []
++    if env:
++        p = Path(env).expanduser()
++        cands.append(p / "ffmpeg" if p.is_dir() else p)
++    if w := shutil.which("ffmpeg"):
++        cands.append(Path(w))
++    cands += [Path(d) / "ffmpeg" for d in BREW_BINS]
++    for c in cands:
++        if c.is_file() and os.access(c, os.X_OK):
++            probe_bin = c.with_name("ffprobe")
++            return str(c), str(probe_bin) if probe_bin.is_file() else shutil.which("ffprobe")
++    return None, shutil.which("ffprobe")
++
++
++def ffmpeg_caps(ffmpeg):
++    """{"version", "filters": {name: bool}, "encoders": {name: bool}} for WANT_FILTERS / WANT_ENCODERS."""
++    def run(*a):
++        try:
++            return subprocess.run([ffmpeg, "-hide_banner", *a], capture_output=True, text=True, timeout=30).stdout
++        except (OSError, subprocess.SubprocessError):
++            return ""
++    ver = run("-version").splitlines()
++    filters = {m.group(1) for m in re.finditer(r"^\s*[TSC.]{2,3}\s+(\w+)\s", run("-filters"), re.M)}
++    encoders = {m.group(1) for m in re.finditer(r"^\s*[VAS][\w.]{5}\s+(\w+)\s", run("-encoders"), re.M)}
++    return {"version": ver[0] if ver else "", "filters": {f: f in filters for f in WANT_FILTERS},
++            "encoders": {e: e in encoders for e in WANT_ENCODERS}}
++
++
++def parse_ffmpeg_info(stderr):
++    """Parse `ffmpeg -i <file>` stderr (for when ffprobe is missing) into probe()'s shape."""
++    info = {"duration": None, "streams": []}
++    if m := re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", stderr):
++        h, mi, s = m.groups()
++        info["duration"] = int(h) * 3600 + int(mi) * 60 + float(s)
++    for m in re.finditer(r"Stream #\d+:\d+(?:\[\w+\])?(?:\(\w+\))?: (Video|Audio): (.*)", stderr):
++        kind, rest = m.group(1).lower(), m.group(2)
++        st = {"kind": kind, "codec": rest.split(",")[0].split()[0] if rest else ""}
++        if kind == "video":
++            if d := re.search(r"\b(\d{2,5})x(\d{2,5})\b", rest):
++                st["width"], st["height"] = int(d.group(1)), int(d.group(2))
++            if f := re.search(r"(\d+(?:\.\d+)?) fps", rest):
++                st["fps"] = float(f.group(1))
++        else:
++            if r := re.search(r"(\d+) Hz", rest):
++                st["sample_rate"] = int(r.group(1))
++            st["channels"] = 1 if "mono" in rest else 2 if "stereo" in rest else None
++        info["streams"].append(st)
++    return info
++
++
++def _rate(s):
++    try:
++        n, _, d = str(s).partition("/")
++        return round(float(n) / float(d or 1), 3) if float(d or 1) else None
++    except ValueError:
++        return None
++
++
++def probe(ffprobe, path, ffmpeg=None):
++    """{"duration", "streams": [{"kind", "codec", ...}]} of a media file, or None if unreadable.
++    Uses ffprobe; falls back to parsing `ffmpeg -i` when only ffmpeg is there."""
++    if ffprobe:
++        try:
++            p = subprocess.run([ffprobe, "-v", "error", "-show_format", "-show_streams", "-of", "json", str(path)],
++                               capture_output=True, text=True, timeout=60)
++            data = json.loads(p.stdout or "{}") if p.returncode == 0 else None
++        except (OSError, subprocess.SubprocessError, ValueError):
++            data = None
++        if data is not None:
++            streams = []
++            for s in data.get("streams", []):
++                kind = s.get("codec_type")
++                if kind == "video":
++                    streams.append({"kind": kind, "codec": s.get("codec_name", ""), "width": s.get("width"),
++                                    "height": s.get("height"), "fps": _rate(s.get("avg_frame_rate") or s.get("r_frame_rate"))})
++                elif kind == "audio":
++                    streams.append({"kind": kind, "codec": s.get("codec_name", ""), "channels": s.get("channels"),
++                                    "sample_rate": int(s["sample_rate"]) if s.get("sample_rate") else None})
++            dur = (data.get("format") or {}).get("duration")
++            return {"duration": float(dur) if dur not in (None, "N/A") else None, "streams": streams}
++    if ffmpeg:
++        try:
++            p = subprocess.run([ffmpeg, "-hide_banner", "-i", str(path)], capture_output=True, text=True, timeout=60)
++        except (OSError, subprocess.SubprocessError):
++            return None
++        info = parse_ffmpeg_info(p.stderr)
++        return info if info["streams"] else None
++    return None
++
++
++def stream(info, kind):
++    """The first stream of `kind` ("video" / "audio") in a probe() result, or None."""
++    return next((s for s in (info or {}).get("streams", []) if s.get("kind") == kind), None)
++
++
++# ------------------------------------------------------------------ edit list
++
++
++class EdlError(ValueError):
++    pass
++
++
++def _num(d, key, default=None, lo=0.0):
++    v = d.get(key, default)
++    if v is None:
++        return None
++    if isinstance(v, bool) or not isinstance(v, (int, float)) or v < lo:
++        raise EdlError(f"{key} must be a number >= {lo:g} (got {v!r})")
++    return float(v)
++
++
++def load_edl(path):
++    base = Path(path).resolve().parent
++    try:
++        edl = json.loads(Path(path).read_text(encoding="utf-8"))
++    except (OSError, ValueError) as e:
++        raise EdlError(f"cannot read edit list: {e}") from None
++    if not isinstance(edl, dict) or not isinstance(edl.get("clips"), list) or not edl["clips"]:
++        raise EdlError("edit list needs a non-empty clips list")
++    w, h, fps = int(edl.get("width", 1920)), int(edl.get("height", 1080)), _num(edl, "fps", 30, lo=1)
++    if w % 2 or h % 2:
++        raise EdlError("width and height must be even")
++    clips = []
++    for i, c in enumerate(edl["clips"]):
++        where = f"clips[{i}]"
++        if not isinstance(c, dict) or bool(c.get("src")) == bool(c.get("card")):
++            raise EdlError(f"{where}: give exactly one of src (video) or card (image)")
++        try:
++            src = (base / (c.get("src") or c["card"])).resolve()
++            if not src.is_file():
++                raise EdlError(f"missing file {src}")
++            if c.get("card"):
++                dur, t_in = _num(c, "duration", lo=0.04), 0.0
++                if dur is None:
++                    raise EdlError("a card needs duration")
++            else:
++                t_in, t_out = _num(c, "in", 0.0), _num(c, "out")
++                if t_out is None or t_out <= t_in:
++                    raise EdlError("a clip needs out > in")
++                dur = t_out - t_in
++            fi, fo = _num(c, "fade_in", 0.0), _num(c, "fade_out", 0.0)
++            if fi + fo > dur:
++                raise EdlError("fades are longer than the clip")
++        except EdlError as e:
++            raise EdlError(f"{where}: {e}") from None
++        clips.append({"src": src, "card": bool(c.get("card")), "in": t_in, "dur": dur, "fade_in": fi, "fade_out": fo})
++    audio = []
++    for i, a in enumerate(edl.get("audio") or []):
++        try:
++            src = (base / a["src"]).resolve()
++            if not src.is_file():
++                raise EdlError(f"missing file {src}")
++            audio.append({"src": src, "start": _num(a, "start", 0.0), "in": _num(a, "in", 0.0),
++                          "volume": _num(a, "volume", 1.0), "fade_in": _num(a, "fade_in", 0.0),
++                          "fade_out": _num(a, "fade_out", 0.0)})
++        except (EdlError, KeyError, TypeError) as e:
++            raise EdlError(f"audio[{i}]: {e}") from None
++    output = (base / edl.get("output", "out/trailer.mp4")).resolve()
++    return {"output": output, "width": w, "height": h, "fps": fps, "clips": clips, "audio": audio,
++            "duration": round(sum(c["dur"] for c in clips), 3), "crf": int(edl.get("crf", 18))}
++
++
++def build_command(ffmpeg, edl, encoder="libx264"):
++    """The ffmpeg argv that renders `edl` (load_edl's result)."""
++    w, h, fps, total = edl["width"], edl["height"], edl["fps"], edl["duration"]
++    args, parts, labels = [ffmpeg, "-hide_banner", "-y"], [], []
++    for i, c in enumerate(edl["clips"]):
++        if c["card"]:
++            args += ["-loop", "1", "-framerate", f"{fps:g}", "-t", f"{c['dur']:.3f}", "-i", str(c["src"])]
++        else:
++            args += ["-ss", f"{c['in']:.3f}", "-t", f"{c['dur']:.3f}", "-i", str(c["src"])]
++        f = (f"[{i}:v]scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,"
++             f"setsar=1,fps={fps:g},format=yuv420p,trim=duration={c['dur']:.3f},setpts=PTS-STARTPTS")
++        if c["fade_in"]:
++            f += f",fade=t=in:st=0:d={c['fade_in']:.3f}"
++        if c["fade_out"]:
++            f += f",fade=t=out:st={c['dur'] - c['fade_out']:.3f}:d={c['fade_out']:.3f}"
++        parts.append(f + f"[v{i}]")
++        labels.append(f"[v{i}]")
++    parts.append("".join(labels) + f"concat=n={len(labels)}:v=1:a=0[vout]")
++    n = len(edl["clips"])
++    amix = []
++    for j, a in enumerate(edl["audio"]):
++        args += ["-ss", f"{a['in']:.3f}", "-i", str(a["src"])]
++        f = f"[{n + j}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume={a['volume']:g}"
++        length = max(0.0, total - a["start"])
++        f += f",atrim=duration={length:.3f}"
++        if a["fade_in"]:
++            f += f",afade=t=in:st=0:d={a['fade_in']:.3f}"
++        if a["fade_out"]:
++            f += f",afade=t=out:st={max(0.0, length - a['fade_out']):.3f}:d={a['fade_out']:.3f}"
++        if a["start"]:
++            ms = int(round(a["start"] * 1000))
++            f += f",adelay={ms}|{ms}"
++        parts.append(f + f"[a{j}]")
++        amix.append(f"[a{j}]")
++    if amix:
++        parts.append("".join(amix) + f"amix=inputs={len(amix)}:normalize=0:duration=longest,"
++                     f"apad,atrim=duration={total:.3f}[aout]")
++    args += ["-filter_complex", ";".join(parts), "-map", "[vout]"]
++    if amix:
++        args += ["-map", "[aout]", "-c:a", "aac", "-b:a", "192k"]
++    vq = ["-crf", str(edl["crf"]), "-preset", "medium"] if encoder == "libx264" else ["-b:v", "12M"]
++    args += ["-c:v", encoder, *vq, "-pix_fmt", "yuv420p", "-r", f"{fps:g}", "-movflags", "+faststart",
++             "-t", f"{total:.3f}", str(edl["output"])]
++    return args
++
++
++# ------------------------------------------------------------------ commands
++
++
++def cmd_check():
++    ffmpeg, ffprobe = find_ffmpeg()
++    if not ffmpeg:
++        out("ffmpeg not found. Install it: brew install ffmpeg  (or set TRAILER_FFMPEG to its path)")
++        if AS_JSON:
++            print(json.dumps({"ffmpeg": None, "ffprobe": ffprobe}))
++        return result(False, "ffmpeg not found")
++    caps = ffmpeg_caps(ffmpeg)
++    if AS_JSON:
++        print(json.dumps({"ffmpeg": ffmpeg, "ffprobe": ffprobe, **caps}, indent=2))
++    out(f"ffmpeg: {ffmpeg}  ({caps['version']})")
++    out(f"ffprobe: {ffprobe or 'missing (falling back to ffmpeg -i)'}")
++    out("filters: " + ", ".join(f"{k}{'' if v else ' (missing)'}" for k, v in caps["filters"].items()))
++    out("encoders: " + ", ".join(f"{k}{'' if v else ' (missing)'}" for k, v in caps["encoders"].items()))
++    core = [f for f in WANT_FILTERS if f not in ("drawtext", "subtitles")]
++    missing = [f for f in core if not caps["filters"][f]]
++    if not (caps["encoders"]["libx264"] or caps["encoders"]["h264_videotoolbox"]):
++        missing.append("an H.264 encoder")
++    return result(not missing, "missing " + ", ".join(missing) if missing else "ffmpeg ready")
++
++
++def cmd_probe(paths):
++    ffmpeg, ffprobe = find_ffmpeg()
++    if not (ffmpeg or ffprobe):
++        return result(False, "ffmpeg not found")
++    report, bad = {}, 0
++    for p in paths:
++        info = probe(ffprobe, p, ffmpeg)
++        report[p] = info
++        if info is None:
++            bad += 1
++            out(f"{p}: unreadable")
++            continue
++        v, a = stream(info, "video"), stream(info, "audio")
++        dur = f"{info['duration']:.2f}s" if info["duration"] is not None else "?s"
++        vs = f"{v.get('width')}x{v.get('height')} @{v.get('fps')}fps {v.get('codec')}" if v else "no video"
++        out(f"{p}: {dur}, {vs}, {'audio ' + a.get('codec', '') if a else 'no audio'}")
++    if AS_JSON:
++        print(json.dumps(report, indent=2))
++    return result(not bad, f"{len(paths) - bad}/{len(paths)} probed")
++
++
++def cmd_render(edl_path, dry_run):
++    try:
++        edl = load_edl(edl_path)
++    except EdlError as e:
++        out(f"edit list error: {e}")
++        result(False, str(e))
++        return 2
++    ffmpeg, ffprobe = find_ffmpeg()
++    if not ffmpeg:
++        return result(False, "ffmpeg not found")
++    caps = ffmpeg_caps(ffmpeg)
++    encoder = "libx264" if caps["encoders"]["libx264"] else "h264_videotoolbox"
++    argv = build_command(ffmpeg, edl, encoder)
++    if dry_run:
++        if AS_JSON:
++            print(json.dumps({"argv": argv, "duration": edl["duration"]}, indent=2))
++        out(" ".join(argv))
++        return result(True, f"dry run, {edl['duration']:g}s, {len(edl['clips'])} clips")
++    edl["output"].parent.mkdir(parents=True, exist_ok=True)
++    p = subprocess.run(argv, capture_output=True, text=True)
++    if p.returncode != 0:
++        out(p.stderr[-4000:])
++        return result(False, f"ffmpeg exited {p.returncode}")
++    info = probe(ffprobe, edl["output"], ffmpeg)
++    got = (info or {}).get("duration")
++    ok = got is not None and abs(got - edl["duration"]) <= max(0.25, 2 / edl["fps"])
++    if AS_JSON:
++        print(json.dumps({"output": str(edl["output"]), "expected": edl["duration"], "probe": info}, indent=2))
++    out(f"wrote {edl['output']}")
++    return result(ok, f"{edl['output']} {got if got is not None else '?'}s (expected {edl['duration']:g}s)")
++
++
++def main(argv=None):
++    args = [a for a in (sys.argv[1:] if argv is None else argv) if a != "--json"]
++    if not args or args[0] in ("-h", "--help"):
++        print(__doc__)
++        return 0 if args else 2
++    cmd, rest = args[0], args[1:]
++    if cmd == "check" and not rest:
++        return cmd_check()
++    if cmd == "probe" and rest:
++        return cmd_probe(rest)
++    if cmd == "render" and rest and len([r for r in rest if r != "--dry-run"]) == 1:
++        return cmd_render(next(r for r in rest if r != "--dry-run"), "--dry-run" in rest)
++    print(__doc__, file=sys.stderr)
++    return 2
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/skills/unity-router/chains/trailer.toml b/skills/unity-router/chains/trailer.toml
+new file mode 100644
+index 0000000..3d7755b
+--- /dev/null
++++ b/skills/unity-router/chains/trailer.toml
+@@ -0,0 +1,42 @@
++# Workflow template (features/chains.py). done_when types adapted from SethGammon/Citadel (MIT).
++id = "trailer"
++title = "Trailer"
++summary = "Beat sheet → captures and cards → audio → edit list and render → pacing and technical reviews → report"
++kinds = ["chain", "campaign"]
++applies_to = "unity"
++
++[[phase]]
++name = "Beats"
++type = "research"
++skills = ["trailer-maker"]
++instructions = "Write Trailer/<date>/BEATS.md (trailer-maker step 1) and get the user's approval."
++done_when = [{ type = "file_exists", path = "Trailer/*/BEATS.md", newer_than = "phase_start" }, { type = "manual" }]
++
++[[phase]]
++name = "Capture"
++type = "build"
++skills = ["trailer-maker", "play-verify"]
++instructions = "Record one clip per shot and render the cards (trailer-maker steps 2-3)."
++done_when = [{ type = "file_exists", path = "Trailer/*/capture/*.mp4", newer_than = "phase_start" }]
++
++[[phase]]
++name = "Audio"
++type = "build"
++skills = ["trailer-maker"]
++instructions = "Music with a composition_plan matching the beats, VO and SFX (trailer-maker step 4)."
++done_when = [{ type = "file_exists", path = "Trailer/*/audio/sources.json", newer_than = "phase_start" }]
++
++[[phase]]
++name = "Render"
++type = "build"
++skills = ["trailer-maker"]
++instructions = "Write edl.json and render it (trailer-maker steps 5-6)."
++done_when = [{ type = "file_exists", path = "Trailer/*/out/*.mp4", newer_than = "phase_start" }]
++
++[[phase]]
++name = "Review"
++type = "verify"
++skills = ["trailer-maker"]
++critique = true
++instructions = "Run both reviewers from references/reviewers.md, fix edl.json, render again (trailer-maker step 7)."
++done_when = [{ type = "file_exists", path = "Trailer/*/REPORT.md", newer_than = "phase_start" }]

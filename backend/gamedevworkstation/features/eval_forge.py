@@ -135,7 +135,12 @@ def interface(patch: str, grader_files: dict[str, bytes], limit: int = 20) -> li
     tests = "\n".join(d.decode("utf-8", "replace") for d in grader_files.values())
     out: list[tuple[str, str, str]] = []
     seen: set[str] = set()
+    decorators: list[str] = []  # e.g. @functools.cache: tests may call .cache_clear(), so it's interface too
     for path, line in _added_by_file(patch):
+        if line.strip().startswith("@") and Path(path).suffix == ".py":
+            decorators.append(line.strip())
+            continue
+        pending, decorators = decorators, []
         if Path(path).suffix not in _CODE_SUFFIXES or _STATEMENT.match(line.strip()):
             continue  # `return Path(x)` or `raise Error(...)` is a call, not a declaration
         m = _DEFS.search(line)
@@ -148,7 +153,7 @@ def interface(patch: str, grader_files: dict[str, bytes], limit: int = 20) -> li
         decl = re.split(r"\s*(?:=>|\{)", line.strip(), maxsplit=1)[0].rstrip(";").strip()
         if re.match(r"^[A-Z][A-Z0-9_]{2,}\s*[:=]", decl):
             decl = decl.split("=")[0].split(":")[0].strip()  # a constant's name, not its value
-        out.append((name, decl, path))
+        out.append((name, " ".join(pending + [decl]), path))
         if len(out) >= limit:
             break
     return out

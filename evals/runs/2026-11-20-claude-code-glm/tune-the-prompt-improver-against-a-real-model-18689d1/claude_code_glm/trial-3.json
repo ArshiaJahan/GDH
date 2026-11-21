@@ -1,0 +1,46 @@
+{
+ "task": "tune-the-prompt-improver-against-a-real-model-18689d1",
+ "agent": "claude_code_glm",
+ "trial": 3,
+ "passed": false,
+ "blame": "agent",
+ "reason": "failed command 'tests' (its own versions of tests/test_pi_contracts.py, tests/test_prompt_improver.py were replaced by the hidden tests)",
+ "wall_s": 198.7,
+ "cost_usd": 1.1356,
+ "tool_calls": 23,
+ "input_tokens": 1461253,
+ "output_tokens": 10997,
+ "agent_error": "",
+ "timed_out": false,
+ "tampered": [
+  "tests/test_pi_contracts.py",
+  "tests/test_prompt_improver.py"
+ ],
+ "failed_steps": [
+  "tests"
+ ],
+ "diff_lines": 141,
+ "started_at": "2026-11-21T00:04:00Z",
+ "helper_calls": 0,
+ "model": "claude-opus-5-5",
+ "grade": {
+  "passed": false,
+  "tampered": [
+   "tests/test_pi_contracts.py",
+   "tests/test_prompt_improver.py"
+  ],
+  "environment_failure": false,
+  "steps": [
+   {
+    "name": "tests",
+    "kind": "command",
+    "passed": false,
+    "exit": 1,
+    "duration_s": 8.493075374979526,
+    "output": "....................F................................................... [ 66%]\n.....................................                                    [100%]\n=================================== FAILURES ===================================\n____________ test_object_cited_facts_become_strings_and_are_capped _____________\n\ntext = '{\"decision\": \"PROCEED\", \"questions\": [], \"task_card\": {\"goal\": \"Add double jump\"}, \"cited_facts\": [{\"source\": \"projec...f13\", \"f14\", \"f15\", \"f16\", \"f17\", \"f18\", \"f19\", \"f20\", \"f21\", \"f22\", \"f23\", \"f24\", \"f25\", \"f26\", \"f27\", \"f28\", \"f29\"]}'\n\n    def parse_eval(text: str) -> EvalResult:\n        \"\"\"Parse the evaluator's reply (one JSON object, optional code fence) or raise PiFormatError.\"\"\"\n        if not isinstance(text, str) or not text.strip():\n            raise PiFormatError(\"empty evaluator output\")\n        body = _FENCE.sub(\"\", text.strip())\n        try:\n            data: Any = json.loads(body)\n        except json.JSONDecodeError as e:\n            raise PiFormatError(f\"not JSON: {e.msg}\") from e\n        if not isinstance(data, dict):\n            raise PiFormatError(\"expected a JSON object\")\n        try:\n>           return EvalResult.model_validate(_normalize(data))\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE           pydantic_core._pydantic_core.ValidationError: 1 validation error for EvalResult\nE           cited_facts\nE             List should have at most 20 items after validation, not 33 [type=too_long, input_value=['project_facts', 'Assets...6', 'f27', 'f28', 'f29'], input_type=list]\nE               For further information visit https://errors.pydantic.dev/2.14/v/too_long\n\nbackend/gamedevworkstation/features/pi_contracts.py:258: ValidationError\n\nThe above exception was the direct cause of the following exception:\n\n    def test_object_cited_facts_become_strings_and_are_capped():\n        data = result(\"PROCEED\", [])\n        data[\"cited_facts\"] = [{\"source\": \"project_facts\", \"fact\": \"unity_version: 6000.0.23f1\"}, \"Assets/A.cs\", 7, None,\n                               {\"nested\": {\"x\": 1}}] + [f\"f{i}\" for i in range(30)]\n>       facts = parse_eval(json.dumps(data)).cited_facts\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\ntests/test_pi_contracts.py:122: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\ntext = '{\"decision\": \"PROCEED\", \"questions\": [], \"task_card\": {\"goal\": \"Add double jump\"}, \"cited_facts\": [{\"source\": \"projec...f13\", \"f14\", \"f15\", \"f16\", \"f17\", \"f18\", \"f19\", \"f20\", \"f21\", \"f22\", \"f23\", \"f24\", \"f25\", \"f26\", \"f27\", \"f28\", \"f29\"]}'\n\n    def parse_eval(text: str) -> EvalResult:\n        \"\"\"Parse the evaluator's reply (one JSON object, optional code fence) or raise PiFormatError.\"\"\"\n        if not isinstance(text, str) or not text.strip():\n            raise PiFormatError(\"empty evaluator output\")\n        body = _FENCE.sub(\"\", text.strip())\n        try:\n            data: Any = json.loads(body)\n        except json.JSONDecodeError as e:\n            raise PiFormatError(f\"not JSON: {e.msg}\") from e\n        if not isinstance(data, dict):\n            raise PiFormatError(\"expected a JSON object\")\n        try:\n            return EvalResult.model_validate(_normalize(data))\n        except ValidationError as e:\n>           raise PiFormatError(f\"schema: {e.errors()[0].get('loc')}: {e.errors()[0].get('msg')}\") from e\nE           gamedevworkstation.features.pi_contracts.PiFormatError: schema: ('cited_facts',): List should have at most 20 items after validation, not 33\n\nbackend/gamedevworkstation/features/pi_contracts.py:260: PiFormatError\n=========================== short test summary info ============================\nFAILED tests/test_pi_contracts.py::test_object_cited_facts_become_strings_and_are_capped\n1 failed, 108 passed in 7.59s\n",
+    "environment": false,
+    "detail": {}
+   }
+  ]
+ }
+}

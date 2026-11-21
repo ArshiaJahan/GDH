@@ -1,0 +1,46 @@
+{
+ "task": "skipper-mode-and-central-doc-for-folder-sessions-2447f98",
+ "agent": "claude_code_glm",
+ "trial": 1,
+ "passed": false,
+ "blame": "agent",
+ "reason": "failed command 'tests' (its own versions of frontend/src/components/NewSession.test.tsx, tests/test_claude_code.py were replaced by the hidden tests)",
+ "wall_s": 614.1,
+ "cost_usd": 1.8105,
+ "tool_calls": 43,
+ "input_tokens": 3275520,
+ "output_tokens": 23114,
+ "agent_error": "",
+ "timed_out": false,
+ "tampered": [
+  "frontend/src/components/NewSession.test.tsx",
+  "tests/test_claude_code.py"
+ ],
+ "failed_steps": [
+  "tests"
+ ],
+ "diff_lines": 286,
+ "started_at": "2026-11-20T23:43:19Z",
+ "helper_calls": 0,
+ "model": "claude-opus-5-5",
+ "grade": {
+  "passed": false,
+  "tampered": [
+   "frontend/src/components/NewSession.test.tsx",
+   "tests/test_claude_code.py"
+  ],
+  "environment_failure": false,
+  "steps": [
+   {
+    "name": "tests",
+    "kind": "command",
+    "passed": false,
+    "exit": 1,
+    "duration_s": 44.148331167176366,
+    "output": ", \"hello\")\n        live.wait_idle(sid)\n        d = _docs(folder, sid)\n>       assert (d / \"central.md\").read_text() == (d / \"handoff-001.md\").read_text() == \"Hello from fake claude (turn 2).\\n\"\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\ntests/test_claude_code.py:1560: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n/Users/arshiajahan/anaconda3/lib/python3.13/pathlib/_local.py:546: in read_text\n    return PathBase.read_text(self, encoding, errors, newline)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/Users/arshiajahan/anaconda3/lib/python3.13/pathlib/_abc.py:632: in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nself = PosixPath('/private/var/folders/07/xyyrk2p92jnblsq7j428mt5h0000gn/T/pytest-of-arshiajahan/pytest-1423/test_skipper_with_central_doc_0/proj/.gdw/sessions/ses_3a151d8f0fa74607/central.md')\nmode = 'r', buffering = -1, encoding = 'locale', errors = None, newline = None\n\n    def open(self, mode='r', buffering=-1, encoding=None,\n             errors=None, newline=None):\n        \"\"\"\n        Open the file pointed to by this path and return a file object, as\n        the built-in open() function does.\n        \"\"\"\n        if \"b\" not in mode:\n            encoding = io.text_encoding(encoding)\n>       return io.open(self, mode, buffering, encoding, errors, newline)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE       FileNotFoundError: [Errno 2] No such file or directory: '/private/var/folders/07/xyyrk2p92jnblsq7j428mt5h0000gn/T/pytest-of-arshiajahan/pytest-1423/test_skipper_with_central_doc_0/proj/.gdw/sessions/ses_3a151d8f0fa74607/central.md'\n\n/Users/arshiajahan/anaconda3/lib/python3.13/pathlib/_local.py:537: FileNotFoundError\n------------------------------ Captured log call -------------------------------\nWARNING  gamedevworkstation.features.claude_code:claude_code.py:928 after-turn doc/handoff failed\nTraceback (most recent call last):\n  File \"/private/var/folders/07/xyyrk2p92jnblsq7j428mt5h0000gn/T/gdw-eval-sd3e7ix_/tree/backend/gamedevworkstation/features/claude_code.py\", line 926, in run_turn\n    await self._after_turn(sid, proc, turn)\n  File \"/private/var/folders/07/xyyrk2p92jnblsq7j428mt5h0000gn/T/gdw-eval-sd3e7ix_/tree/backend/gamedevworkstation/features/claude_code.py\", line 955, in _after_turn\n    if not s.get(\"folder\") or not (central or skipper) or not proc.alive():\n                                                              ~~~~~~~~~~^^\nTypeError: 'bool' object is not callable\n____________ test_modes_need_claude_code_and_quiet_steps_deny_tools ____________\n\nlive = <tests.test_claude_code.Live object at 0x10b487930>\ntmp_path = PosixPath('/private/var/folders/07/xyyrk2p92jnblsq7j428mt5h0000gn/T/pytest-of-arshiajahan/pytest-1423/test_modes_need_claude_code_an0')\n\n    def test_modes_need_claude_code_and_quiet_steps_deny_tools(live, tmp_path):\n        folder = _project(tmp_path)\n        r = live.c.post(\"/api/sessions\", json={\"folder\": str(folder), \"harness\": \"builtin\", \"skipper\": True, \"central_doc\": True})\n>       assert r.status_code == 200 and \"skipper\" not in r.json()[\"settings\"] and \"central_doc\" not in r.json()[\"settings\"]\nE       assert (400 == 200)\nE        +  where 400 = <Response [400 Bad Request]>.status_code\n\ntests/test_claude_code.py:1567: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_claude_code.py::test_central_doc_is_updated_after_each_turn\nFAILED tests/test_claude_code.py::test_skipper_hands_off_to_a_fresh_conversation_after_each_turn\nFAILED tests/test_claude_code.py::test_skipper_with_central_doc_uses_the_doc_as_the_handoff\nFAILED tests/test_claude_code.py::test_modes_need_claude_code_and_quiet_steps_deny_tools\n4 failed, 118 passed in 41.19s\n",
+    "environment": false,
+    "detail": {}
+   }
+  ]
+ }
+}

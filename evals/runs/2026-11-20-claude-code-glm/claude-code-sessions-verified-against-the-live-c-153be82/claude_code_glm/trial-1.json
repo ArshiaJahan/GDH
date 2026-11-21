@@ -1,0 +1,48 @@
+{
+ "task": "claude-code-sessions-verified-against-the-live-c-153be82",
+ "agent": "claude_code_glm",
+ "trial": 1,
+ "passed": false,
+ "blame": "agent",
+ "reason": "failed command 'tests' (its own versions of tests/fixtures/fake_claude.py, tests/test_claude_code.py, tests/test_rv3_data.py were replaced by the hidden tests)",
+ "wall_s": 624.9,
+ "cost_usd": 1.4721,
+ "tool_calls": 47,
+ "input_tokens": 2679312,
+ "output_tokens": 18844,
+ "agent_error": "",
+ "timed_out": false,
+ "tampered": [
+  "tests/fixtures/fake_claude.py",
+  "tests/test_claude_code.py",
+  "tests/test_rv3_data.py"
+ ],
+ "failed_steps": [
+  "tests"
+ ],
+ "diff_lines": 242,
+ "started_at": "2026-11-20T22:52:23Z",
+ "helper_calls": 0,
+ "model": "claude-opus-5-5",
+ "grade": {
+  "passed": false,
+  "tampered": [
+   "tests/fixtures/fake_claude.py",
+   "tests/test_claude_code.py",
+   "tests/test_rv3_data.py"
+  ],
+  "environment_failure": false,
+  "steps": [
+   {
+    "name": "tests",
+    "kind": "command",
+    "passed": false,
+    "exit": 1,
+    "duration_s": 116.95583266578615,
+    "output": "FAILED tests/test_claude_code.py::test_usage_is_subscription_and_not_counted\nFAILED tests/test_claude_code.py::test_resume_after_restart_and_after_the_process_died\nFAILED tests/test_claude_code.py::test_failed_resume_starts_fresh_with_a_recap\nFAILED tests/test_claude_code.py::test_cancel_interrupts_and_keeps_the_process\nFAILED tests/test_claude_code.py::test_session_delete_kills_the_process - Key...\nFAILED tests/test_claude_code.py::test_gdw_tool_over_mcp - IndexError: list i...\nFAILED tests/test_claude_code.py::test_permission_prompt_shows_a_card_and_relays_the_decision\nFAILED tests/test_claude_code.py::test_permission_prompt_tool_without_the_hook\nFAILED tests/test_claude_code.py::test_plan_mode_plan_file_then_the_plan_card\nFAILED tests/test_claude_code.py::test_ask_user_question_card_and_answer - Ti...\nFAILED tests/test_claude_code.py::test_approve_tool_accepts_other_input_shapes\nFAILED tests/test_claude_code.py::test_plan_mode_is_respected - IndexError: l...\nFAILED tests/test_claude_code.py::test_not_logged_in_shows_the_login_card - A...\nFAILED tests/test_claude_code.py::test_login_error_during_a_turn_shows_the_card\nFAILED tests/test_claude_code.py::test_init_accepts_missing_fields_and_explicit_customization_opt_in\nFAILED tests/test_claude_code.py::test_ensure_never_reuses_a_process_without_its_hook\nFAILED tests/test_claude_code.py::test_process_eof_revokes_token_unlinks_config_and_terminates_group\nFAILED tests/test_claude_code.py::test_eof_ignores_expected_process_group_signal_errors[ProcessLookupError]\nFAILED tests/test_claude_code.py::test_eof_ignores_expected_process_group_signal_errors[PermissionError]\nFAILED tests/test_claude_code.py::test_old_process_cleanup_preserves_replacement_registration_and_token\nFAILED tests/test_claude_code.py::test_only_matching_resume_error_starts_fresh\nFAILED tests/test_claude_code.py::test_cli_diagnostics_redact_all_secret_shapes[stderr]\nFAILED tests/test_claude_code.py::test_cli_diagnostics_redact_all_secret_shapes[result]\nFAILED tests/test_claude_code.py::test_malformed_cli_events_cannot_leak_secrets_in_error_logs\nFAILED tests/test_claude_code.py::test_api_login_usage_and_spend_limit_path\nFAILED tests/test_claude_code.py::test_invalid_cli_session_ids_are_dropped_from_events_and_info[abc]\nFAILED tests/test_claude_code.py::test_invalid_cli_session_ids_are_dropped_from_events_and_info[$(echo unsafe)]\nFAILED tests/test_claude_code.py::test_invalid_cli_session_ids_are_dropped_from_events_and_info[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]\nFAILED tests/test_claude_code.py::test_invalid_cli_session_ids_are_dropped_from_events_and_info[gggggggggggggggggggggggggggggggggggg]\nFAILED tests/test_claude_code.py::test_invalid_cli_session_ids_are_dropped_from_events_and_info[123]\nFAILED tests/test_claude_code.py::test_invalid_cli_session_ids_are_dropped_from_events_and_info[bad5]\nFAILED tests/test_claude_code.py::test_usage_totals_track_the_conversation_across_resume\nFAILED tests/test_claude_code.py::test_real_stream_replays_into_gdw_messages\nFAILED tests/test_claude_code.py::test_safe_mode_init_fails_closed - KeyError...\nFAILED tests/test_claude_code.py::test_rate_limit_event_shows_only_when_not_allowed\nFAILED tests/test_claude_code.py::test_hooks_not_applied_fails_closed - Asser...\nFAILED tests/test_claude_code.py::test_model_missing_from_the_login_shows_a_notice\nFAILED tests/test_claude_code.py::test_login_text_only_matches_cli_auth_diagnostics[claude auth login-True]\nFAILED tests/test_claude_code.py::test_login_text_only_matches_cli_auth_diagnostics[Not logged in-True]\nFAILED tests/test_claude_code.py::test_login_text_only_matches_cli_auth_diagnostics[Invalid API key-True]\nFAILED tests/test_claude_code.py::test_login_text_only_matches_cli_auth_diagnostics[OAuth expired-True]\nFAILED tests/test_claude_code.py::test_claude_code_docs_describe_verification_isolation_and_billing\nFAILED tests/test_claude_code.py::test_tool_results_are_redacted_before_storage_and_events\n45 failed, 63 passed in 114.75s (0:01:54)\n",
+    "environment": false,
+    "detail": {}
+   }
+  ]
+ }
+}

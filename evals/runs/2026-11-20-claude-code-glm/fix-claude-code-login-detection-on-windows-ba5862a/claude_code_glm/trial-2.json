@@ -1,0 +1,46 @@
+{
+ "task": "fix-claude-code-login-detection-on-windows-ba5862a",
+ "agent": "claude_code_glm",
+ "trial": 2,
+ "passed": false,
+ "blame": "agent",
+ "reason": "failed command 'tests' (its own versions of tests/test_claude_cli_windows.py, tests/test_claude_code.py were replaced by the hidden tests)",
+ "wall_s": 806.7,
+ "cost_usd": 0.6601,
+ "tool_calls": 15,
+ "input_tokens": 699934,
+ "output_tokens": 10570,
+ "agent_error": "",
+ "timed_out": false,
+ "tampered": [
+  "tests/test_claude_cli_windows.py",
+  "tests/test_claude_code.py"
+ ],
+ "failed_steps": [
+  "tests"
+ ],
+ "diff_lines": 150,
+ "started_at": "2026-11-20T23:04:47Z",
+ "helper_calls": 0,
+ "model": "claude-opus-5-5",
+ "grade": {
+  "passed": false,
+  "tampered": [
+   "tests/test_claude_cli_windows.py",
+   "tests/test_claude_code.py"
+  ],
+  "environment_failure": false,
+  "steps": [
+   {
+    "name": "tests",
+    "kind": "command",
+    "passed": false,
+    "exit": 1,
+    "duration_s": 49.25647374987602,
+    "output": "ss........................F............................................. [ 49%]\n........................................................................ [ 98%]\n..                                                                       [100%]\n=================================== FAILURES ===================================\n________ test_env_allowlist_keeps_the_windows_profile_and_system_names _________\n\n    def test_env_allowlist_keeps_the_windows_profile_and_system_names():\n        # Python on Windows reports these names in whatever case Windows stores them in; `claude` needs USERPROFILE\n        # to find the login `claude auth login` saved, and Node/cmd.exe need SystemRoot, ComSpec and PATHEXT to start.\n        win = {\"Path\": r\"C:\\\\Windows\", \"USERPROFILE\": r\"C:\\\\Users\\\\a\", \"APPDATA\": r\"C:\\\\Users\\\\a\\\\AppData\\\\Roaming\",\n               \"LOCALAPPDATA\": r\"C:\\\\Users\\\\a\\\\AppData\\\\Local\", \"HOMEDRIVE\": \"C:\", \"HOMEPATH\": r\"\\\\Users\\\\a\",\n               \"SystemRoot\": r\"C:\\\\Windows\", \"ComSpec\": r\"C:\\\\Windows\\\\system32\\\\cmd.exe\", \"PATHEXT\": \".COM;.EXE;.CMD\",\n               \"TEMP\": r\"C:\\\\Temp\", \"TMP\": r\"C:\\\\Temp\", \"USERNAME\": \"a\", \"ProgramFiles\": r\"C:\\\\Program Files\",\n               \"ProgramFiles(x86)\": r\"C:\\\\Program Files (x86)\", \"windir\": r\"C:\\\\Windows\", \"NUMBER_OF_PROCESSORS\": \"8\"}\n>       assert child_env({**win, **LEAKY}) == {**win, \"MCP_TOOL_TIMEOUT\": str(24 * 3600 * 1000)}\nE       AssertionError: assert {'MCP_TOOL_TI...': '86400000'} == {'Path': 'C:\\...\\\\Local', ...}\nE         \nE         Omitting 1 identical items, use -vv to show\nE         Right contains 16 more items:\nE         {'APPDATA': 'C:\\\\\\\\Users\\\\\\\\a\\\\\\\\AppData\\\\\\\\Roaming'}\nE         {'ComSpec': 'C:\\\\\\\\Windows\\\\\\\\system32\\\\\\\\cmd.exe'}\nE         {'HOMEDRIVE': 'C:'}\nE         {'HOMEPATH': '\\\\\\\\Users\\\\\\\\a'}...\nE         \nE         ...Full output truncated, use '-vv' to show\n\ntests/test_claude_code.py:735: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_claude_code.py::test_env_allowlist_keeps_the_windows_profile_and_system_names\n1 failed, 143 passed, 2 skipped in 47.17s\n",
+    "environment": false,
+    "detail": {}
+   }
+  ]
+ }
+}

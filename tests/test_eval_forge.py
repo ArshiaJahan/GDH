@@ -192,3 +192,10 @@ async def test_a_title_alone_is_not_a_task(repo, tmp_path):
     t = eval_task.load(await eval_forge.forge(repo, "HEAD", tmp_path / "suite2", text=(
         "Clamp scores\n\nScores could go negative after a penalty; keep every update within zero and the max.")))
     assert t.prompt.startswith("Clamp scores")
+
+
+def test_decorators_are_part_of_the_declaration():
+    # 2026-11-20: hidden tests called account_full_name.cache_clear(), which only works with @functools.cache.
+    patch = "+++ b/s.py\n+@functools.cache\n+def account_full_name() -> str:\n+    return ''\n+def other_fn():\n"
+    api = eval_forge.interface(patch, {"t.py": b"account_full_name.cache_clear(); other_fn()"})
+    assert [d for _, d, _ in api] == ["@functools.cache def account_full_name() -> str:", "def other_fn():"]

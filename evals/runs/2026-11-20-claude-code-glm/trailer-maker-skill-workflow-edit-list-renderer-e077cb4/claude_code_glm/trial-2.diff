@@ -1,0 +1,789 @@
+diff --git a/backend/gamedevworkstation/features/elevenlabs_feature.py b/backend/gamedevworkstation/features/elevenlabs_feature.py
+index 20f56d9..67e7d39 100644
+--- a/backend/gamedevworkstation/features/elevenlabs_feature.py
++++ b/backend/gamedevworkstation/features/elevenlabs_feature.py
+@@ -28,6 +28,41 @@ if TYPE_CHECKING:
+ 
+ log = logging.getLogger(__name__)
+ QUOTA_REFRESH_DELAY_S = 3.0  # coalesces a burst of generations into one subscription read
++MAX_PER_CALL = 4  # variations one agent sound_effect / music call may ask for (each is billed)
++MUSIC_PLAN_MAX_MS = 600_000  # the music API's longest track, a composition plan's sections included
++
++
++def composition_plan_checked(plan: Any) -> dict:
++    """A music composition plan (a dict, or JSON text of one, as models often send it) checked
++    before it costs credits: `sections` is a non-empty list, each with a positive `duration_ms`
++    (3 s to 10 min in total). Raises ElevenLabsError naming what's wrong."""
++    if isinstance(plan, str):
++        try:
++            plan = json.loads(plan)
++        except ValueError:
++            raise ElevenLabsError("composition_plan is not valid JSON.") from None
++    if not isinstance(plan, dict):
++        raise ElevenLabsError("composition_plan must be an object with `sections`.")
++    sections = plan.get("sections")
++    if not isinstance(sections, list) or not sections:
++        raise ElevenLabsError("composition_plan needs a non-empty `sections` list.")
++    total = 0
++    for i, sec in enumerate(sections):
++        if not isinstance(sec, dict):
++            raise ElevenLabsError(f"composition_plan section {i + 1} is not an object.")
++        ms = sec.get("duration_ms")
++        if isinstance(ms, bool) or not isinstance(ms, (int, float)) or ms <= 0:
++            raise ElevenLabsError(f"composition_plan section {i + 1} needs a positive `duration_ms`.")
++        for k in ("positive_local_styles", "negative_local_styles", "lines"):
++            if k in sec and not (isinstance(sec[k], list) and all(isinstance(x, str) for x in sec[k])):
++                raise ElevenLabsError(f"composition_plan section {i + 1}: `{k}` must be a list of strings.")
++        total += ms
++    for k in ("positive_global_styles", "negative_global_styles"):
++        if k in plan and not (isinstance(plan[k], list) and all(isinstance(x, str) for x in plan[k])):
++            raise ElevenLabsError(f"composition_plan: `{k}` must be a list of strings.")
++    if not 3000 <= total <= MUSIC_PLAN_MAX_MS:
++        raise ElevenLabsError(f"composition_plan sections add up to {total / 1000:g} s; the music API takes 3–600 s.")
++    return plan
+ 
+ 
+ def stt_credits(headers: dict, audio_seconds: float) -> tuple[float, bool]:
+@@ -256,19 +291,26 @@ class ElevenLabsService:
+         return await self._run_job(session_id, f"Sound effect: {text[:40]}", go())
+ 
+     async def music(self, prompt: str, *, session_id: str | None, source: str, duration_s: float = 30,
+-                    instrumental: bool = False, message_id: str | None = None, profile: str | None = None) -> dict:
++                    instrumental: bool = False, message_id: str | None = None, profile: str | None = None,
++                    composition_plan: Any = None) -> dict:
++        plan = composition_plan_checked(composition_plan) if composition_plan else None
++        if plan:  # the plan sets the length; the prompt only labels the item
++            duration_s = sum(sec["duration_ms"] for sec in plan["sections"]) / 1000
++            prompt = prompt or ", ".join(plan.get("positive_global_styles") or []) or "composition plan"
+         c = self.client_for_session(session_id, profile)
+         if not self.features(c.profile).get("features", {}).get("music", True):
+             raise ElevenLabsError("Music needs a paid ElevenLabs plan.")
+         est = duration_s / 60 * 1500  # rough: music bills per minute; the response header gives the real cost
+-        await self._confirm(session_id, source, "music", est, prompt, len(prompt))
++        preview = json.dumps(plan)[:400] if plan else prompt
++        await self._confirm(session_id, source, "music", est, preview, len(prompt))
+ 
+         async def go():
+-            data, headers = await c.music(prompt, int(duration_s * 1000), instrumental)
++            data, headers = await c.music(prompt, int(duration_s * 1000), instrumental, composition_plan=plan)
+             return await self._save(data=data, ext=".mp3", feature="music", model="music_v2_5", session_id=session_id,
+                                     source=source, title=f"Music: {prompt[:48]}", text=prompt,
+                                     credits=char_cost(headers, est), characters=len(prompt), voice=None,
+-                                    meta={"duration_s": duration_s, "instrumental": instrumental},
++                                    meta={"duration_s": duration_s, "instrumental": instrumental,
++                                          **({"composition_plan": plan} if plan else {})},
+                                     message_id=message_id, profile=c.profile)
+ 
+         return await self._run_job(session_id, f"Music: {prompt[:40]}", go())
+@@ -368,6 +410,24 @@ def _register_tools(S: "AppState", svc: ElevenLabsService) -> None:
+         return ToolOutput(f"Saved {r['title']} as item {r['item_id']} ({r['path']}), "
+                           f"{r['credits']:.0f} credits.", items=[r["item_id"]])
+ 
++    def count(a: dict) -> int:
++        try:
++            return max(1, min(int(a.get("variations") or 1), MAX_PER_CALL))
++        except (TypeError, ValueError):
++            return 1
++
++    async def several(n: int, make) -> ToolOutput:
++        """n generations at once (variations to choose from); one summary line per saved file."""
++        if n == 1:
++            return summary(await make())
++        got = await asyncio.gather(*(make() for _ in range(n)), return_exceptions=True)
++        ok = [r for r in got if isinstance(r, dict)]
++        errs = [r for r in got if isinstance(r, BaseException)]
++        if not ok:
++            raise errs[0]
++        lines = [summary(r).text for r in ok] + [f"Variation failed: {e}" for e in errs]
++        return ToolOutput("\n".join(lines), items=[r["item_id"] for r in ok])
++
+     @reg.add("tts", "ElevenLabs text to speech. Returns an audio item id. Long texts: one call per paragraph or "
+              "scene, in parallel.",
+              obj({"text": {"type": "string"}, "voice_id": {"type": "string"}, "model_id": {"type": "string"},
+@@ -404,29 +464,37 @@ def _register_tools(S: "AppState", svc: ElevenLabsService) -> None:
+         return ToolOutput(f"Transcript item {r['item_id']} ({r['language']}, {r['duration_s']:.0f}s):\n{text}",
+                           items=[r["item_id"]])
+ 
+-    @reg.add("sound_effect", "ElevenLabs sound effect from a description (0.5–30 s).",
++    @reg.add("sound_effect", f"ElevenLabs sound effect from a description (0.5–30 s). variations 1–{MAX_PER_CALL} "
++             "makes several takes to choose from (each is billed).",
+              obj({"description": {"type": "string"}, "duration_s": {"type": "number"},
+-                  "prompt_influence": {"type": "number"}, "loop": {"type": "boolean"}}, ["description"]))
++                  "prompt_influence": {"type": "number"}, "loop": {"type": "boolean"},
++                  "variations": {"type": "integer"}}, ["description"]))
+     async def sfx(ctx: ToolContext, a: dict) -> ToolOutput:
+         try:
+-            r = await svc.sound_effect(a["description"], session_id=ctx.session_id, source="agent",
+-                                       duration_s=a.get("duration_s"), prompt_influence=a.get("prompt_influence"),
+-                                       loop=bool(a.get("loop")), message_id=ctx.message_id)
++            return await several(count(a), lambda: svc.sound_effect(
++                a["description"], session_id=ctx.session_id, source="agent", duration_s=a.get("duration_s"),
++                prompt_influence=a.get("prompt_influence"), loop=bool(a.get("loop")), message_id=ctx.message_id))
+         except (ElevenLabsError, BudgetExceeded) as e:
+             return ToolOutput(str(e), is_error=True)
+-        return summary(r)
+ 
+-    @reg.add("music", "ElevenLabs music from a prompt (paid plans). duration_s 3–600.",
++    @reg.add("music", "ElevenLabs music (paid plans) from a prompt (duration_s 3–600), or from a composition_plan "
++             "that times each section to the edit: {positive_global_styles: [..], negative_global_styles: [..], "
++             "sections: [{section_name, positive_local_styles: [..], negative_local_styles: [..], duration_ms, "
++             f"lines: [..]}}]}} (the plan sets the length). variations 1–{MAX_PER_CALL} (each is billed).",
+              obj({"prompt": {"type": "string"}, "duration_s": {"type": "number"},
+-                  "instrumental": {"type": "boolean"}}, ["prompt"]))
++                  "instrumental": {"type": "boolean"}, "composition_plan": {"type": "object"},
++                  "variations": {"type": "integer"}}))
+     async def music(ctx: ToolContext, a: dict) -> ToolOutput:
++        if not a.get("prompt") and not a.get("composition_plan"):
++            return ToolOutput("music needs a prompt or a composition_plan.", is_error=True)
+         try:
+-            r = await svc.music(a["prompt"], session_id=ctx.session_id, source="agent",
+-                                duration_s=float(a.get("duration_s") or 30), instrumental=bool(a.get("instrumental")),
+-                                message_id=ctx.message_id)
++            plan = composition_plan_checked(a["composition_plan"]) if a.get("composition_plan") else None
++            return await several(count(a), lambda: svc.music(
++                a.get("prompt") or "", session_id=ctx.session_id, source="agent",
++                duration_s=float(a.get("duration_s") or 30), instrumental=bool(a.get("instrumental")),
++                message_id=ctx.message_id, composition_plan=plan))
+         except (ElevenLabsError, BudgetExceeded) as e:
+             return ToolOutput(str(e), is_error=True)
+-        return summary(r)
+ 
+     @reg.add("list_voices", "List ElevenLabs voices in the account (id, name, labels).",
+              obj({"search": {"type": "string"}}), read_only=True)
+@@ -531,11 +599,17 @@ def register(app_: FastAPI, api: APIRouter, S: "AppState") -> None:
+     @api.post("/elevenlabs/music")
+     async def ui_music(body: dict = Body(...)) -> list[dict]:
+         n = max(1, min(int(body.get("variations") or 1), 3))
++        try:
++            plan = composition_plan_checked(body["composition_plan"]) if body.get("composition_plan") else None
++        except ElevenLabsError as e:
++            raise HTTPException(400, str(e)) from e
++        if not plan and not body.get("prompt"):
++            raise HTTPException(400, "A prompt or a composition_plan is needed.")
+         try:
+             return list(await asyncio.gather(*(svc.music(
+-                body["prompt"], session_id=body.get("session_id"), source="user",
++                body.get("prompt") or "", session_id=body.get("session_id"), source="user",
+                 duration_s=float(body.get("duration_s") or 30), instrumental=bool(body.get("instrumental")),
+-                profile=body.get("profile")) for _ in range(n))))
++                profile=body.get("profile"), composition_plan=plan) for _ in range(n))))
+         except (ElevenLabsError, BudgetExceeded) as e:
+             raise wrap(e) from e
+ 
+diff --git a/backend/gamedevworkstation/features/media_outputs.py b/backend/gamedevworkstation/features/media_outputs.py
+new file mode 100644
+index 0000000..8eb6827
+--- /dev/null
++++ b/backend/gamedevworkstation/features/media_outputs.py
+@@ -0,0 +1,130 @@
++"""Media outputs: video, audio and image files a command writes (a trailer render, a capture, an
++ffmpeg mix) become items, so they show in the session's files and can be played from the chat.
++
++A post_tool observer on `run_command`: paths in the command and its output with a media extension
++that exist in the session folder and changed since the command started are indexed once per
++version (path + mtime + size), and the tool result gets their item ids.
++"""
++from __future__ import annotations
++
++import mimetypes
++import re
++import time
++from pathlib import Path
++from typing import TYPE_CHECKING
++
++from fastapi import APIRouter, FastAPI
++
++from .hookbus import HookEvent, HookResult
++
++if TYPE_CHECKING:
++    from ..app import AppState
++
++MEDIA_EXTS = {
++    ".mp4": "video", ".mov": "video", ".webm": "video", ".mkv": "video", ".gif": "image",
++    ".wav": "audio", ".mp3": "audio", ".m4a": "audio", ".ogg": "audio", ".flac": "audio", ".aac": "audio",
++    ".png": "image", ".jpg": "image", ".jpeg": "image", ".webp": "image",
++}
++MAX_PER_CALL = 12  # files indexed per command (a frame dump shouldn't flood the files list)
++_EXT = "|".join(sorted((e[1:] for e in MEDIA_EXTS), key=len, reverse=True))
++# A quoted path (spaces allowed), or a bare one without spaces / quotes / shell punctuation.
++_PATH = re.compile(rf"""["']([^"'\n]+?\.(?:{_EXT}))["']|((?:~|\.{{1,2}})?[^\s"'`<>|;&()=,]*\.(?:{_EXT}))(?![\w.])""",
++                   re.I)
++
++
++def media_paths(text: str) -> list[str]:
++    """Media file paths named in `text`, in order of first mention, without duplicates. URLs and
++    ffmpeg pattern names (frame_%04d.png) are left out."""
++    out: list[str] = []
++    for m in _PATH.finditer(text or ""):
++        p = (m.group(1) or m.group(2) or "").strip()
++        start = m.start(1) if m.group(1) else m.start(2)
++        if not p or "%" in p or "*" in p or "://" in p or (text[max(0, start - 3):start] == "://"):
++            continue
++        if re.match(r"^[a-z][a-z0-9+.-]*:", p, re.I) and not re.match(r"^[a-z]:[\\/]", p, re.I):
++            continue  # scheme:… (data:, file:, http:) but not a Windows drive
++        if p not in out:
++            out.append(p)
++    return out
++
++
++class MediaOutputs:
++    def __init__(self, app: "AppState"):
++        self.app = app
++        self._seen: dict[str, tuple[float, int]] = {}  # resolved path → (mtime, size) indexed
++        self._started: dict[int, float] = {}  # id(args) of a running command → when it started
++
++    def started(self, ev: HookEvent) -> None:
++        """pre_tool: note the start, so files the command only reads (older) aren't indexed."""
++        if len(self._started) > 256:  # calls that never got a post_tool (denied, crashed)
++            self._started.clear()
++        self._started[id(ev.args)] = time.time()
++
++    def _candidates(self, ev: HookEvent) -> list[Path]:
++        folder = ev.ctx.folder
++        if folder is None:
++            return []
++        text = "\n".join(str(v) for v in (ev.args or {}).values() if isinstance(v, str))
++        text += "\n" + (ev.output.text if ev.output is not None else "")
++        cwd = folder
++        if isinstance((ev.args or {}).get("cwd"), str):
++            cwd = (folder / ev.args["cwd"]).resolve()
++        root = folder.resolve()
++        out: list[Path] = []
++        for raw in media_paths(text):
++            p = Path(raw).expanduser()
++            p = (p if p.is_absolute() else cwd / p).resolve()
++            if p.suffix.lower() not in MEDIA_EXTS or p in out:
++                continue
++            if p != root and root not in p.parents:  # only the session's own files
++                continue
++            if p.is_file():
++                out.append(p)
++        return out
++
++    async def observe(self, ev: HookEvent) -> HookResult | None:
++        if ev.output is None or ev.output.is_error:
++            return None
++        started = self._started.pop(id(ev.args), 0.0)
++        ids, names = [], []
++        for p in self._candidates(ev):
++            if len(ids) >= MAX_PER_CALL:
++                break
++            st = p.stat()
++            if started and st.st_mtime < started - 2:
++                continue  # named but not written by this command (an input, an old render)
++            key = str(p)
++            if self._seen.get(key) == (st.st_mtime, st.st_size):
++                continue
++            kind = MEDIA_EXTS[p.suffix.lower()]
++            iid = self.app.items.add(kind="media", subtype=kind, source="tool", session_id=ev.ctx.session_id,
++                                     message_id=ev.ctx.message_id, title=p.name, path=key, size=st.st_size,
++                                     mime=mimetypes.guess_type(p.name)[0] or f"{kind}/*",
++                                     meta={"from": "run_command", "indexed_at": time.time()})
++            if not iid:
++                continue
++            self._seen[key] = (st.st_mtime, st.st_size)
++            ids.append(iid)
++            names.append(f"{p.name} ({iid})")
++        if not ids:
++            return None
++        ev.output.items.extend(i for i in ids if i not in ev.output.items)
++        return HookResult(action="note", hook="media_outputs", note="Media files saved as items: " + ", ".join(names))
++
++
++def install(app: "AppState") -> MediaOutputs:
++    """Register the observer (idempotent). register() calls this; tests call it on a bare AppState."""
++    mo = app.extensions.get("media_outputs")
++    if isinstance(mo, MediaOutputs):
++        return mo
++    mo = MediaOutputs(app)
++    app.extensions["media_outputs"] = mo
++    app.hooks.register("pre_tool", "media_outputs.started", mo.started, order=900,
++                       when=lambda ev: ev.tool == "run_command")
++    app.hooks.register("post_tool", "media_outputs.observe", mo.observe, order=80,
++                       when=lambda ev: ev.tool == "run_command")
++    return mo
++
++
++def register(app_: FastAPI, api: APIRouter, S: "AppState") -> None:
++    install(S)
+diff --git a/backend/gamedevworkstation/providers/elevenlabs_client.py b/backend/gamedevworkstation/providers/elevenlabs_client.py
+index 2d73c85..61a98e7 100644
+--- a/backend/gamedevworkstation/providers/elevenlabs_client.py
++++ b/backend/gamedevworkstation/providers/elevenlabs_client.py
+@@ -159,9 +159,14 @@ class ElevenLabsClient:
+         return await self._audio(self.sdk.text_to_sound_effects.with_raw_response.convert, **kw)
+ 
+     async def music(self, prompt: str, length_ms: int, instrumental: bool = False,
+-                    output_format: str = "mp3_44100_128") -> tuple[bytes, dict]:
+-        kw = {"prompt": prompt, "music_length_ms": max(3000, min(600_000, int(length_ms))), "model_id": MUSIC_MODEL,
+-              "force_instrumental": instrumental, "output_format": output_format}
++                    output_format: str = "mp3_44100_128", composition_plan: dict | None = None) -> tuple[bytes, dict]:
++        """A track from a prompt, or from a composition plan (sections with styles and durations;
++        the API takes one or the other, and the plan sets the length)."""
++        if composition_plan:
++            kw = {"composition_plan": composition_plan, "model_id": MUSIC_MODEL, "output_format": output_format}
++        else:
++            kw = {"prompt": prompt, "music_length_ms": max(3000, min(600_000, int(length_ms))), "model_id": MUSIC_MODEL,
++                  "force_instrumental": instrumental, "output_format": output_format}
+         return await self._audio(self.sdk.music.with_raw_response.compose, **kw)
+ 
+     async def voice_changer(self, audio_path: Path, voice_id: str, output_format: str = "mp3_44100_128",
+diff --git a/backend/gamedevworkstation/routes.py b/backend/gamedevworkstation/routes.py
+index 7f81ce8..645525d 100644
+--- a/backend/gamedevworkstation/routes.py
++++ b/backend/gamedevworkstation/routes.py
+@@ -20,7 +20,7 @@ def _feature_modules() -> list:
+     names = [f"gamedevworkstation.features.{n}" for n in (
+         "usage_routes", "session_routes", "subagents", "delegation", "terminal", "elevenlabs_feature",
+         "items_routes", "changes_routes", "worktrees", "web_tools", "mcp_feature", "skill_editor", "skill_assistant", "tasks_feature", "task_board", "harnesses", "settings_routes", "updates",
+-        "storage",
++        "storage", "media_outputs",
+         # Hooks & gates, quality ladder, campaigns, fleet: added by later work packages; a module
+         # that doesn't exist yet is skipped below.
+         "hooks", "ladder", "campaigns", "fleet",
+diff --git a/skills/trailer-maker/SKILL.md b/skills/trailer-maker/SKILL.md
+new file mode 100644
+index 0000000..a23a152
+--- /dev/null
++++ b/skills/trailer-maker/SKILL.md
+@@ -0,0 +1,37 @@
++---
++name: trailer-maker
++description: Makes a game trailer from a Unity project: beat sheet, captured gameplay clips and title cards, an audio bed (music, VO, SFX via the ElevenLabs tools or a licensed track), an edit list rendered with ffmpeg by scripts/render_edit.py, then a review by three reviewers before it ships. Use when asked for a trailer, teaser, gameplay reel, store video, launch or announcement video, or to re-cut one.
++---
++
++# trailer-maker
++
++Make a 30–90 s trailer whose every cut is planned, rendered from an edit list, and reviewed. `T` = the trailer folder, `Trailer/<name>/` in the project (not under `Assets/`). `<skills>` = the folder holding these skills.
++
++## Setup
++
++- ffmpeg: `python3 <skills>/trailer-maker/scripts/render_edit.py caps` (needs `libx264` and `aac`). Title cards are made
++in Unity (with your game's font), so the slim Homebrew formula is enough; `ffmpeg-full` adds `drawtext`/libass if
++you want burned-in captions. `TRAILER_FFMPEG` picks a specific build.
++- ElevenLabs tools (`music`, `tts`, `sound_effect`) need a key on the ElevenLabs page; music needs a paid plan.
++
++## Workflow
++
++1. **Beat sheet** → `T/BEATS.md`: hook (first 3 s), the core loop, escalation, the money shot, title, call to action
++   (store / wishlist / date). One row per beat: seconds, what's on screen, audio cue. Ask the user to approve it.
++2. **Capture** each beat in Play Mode (Unity Recorder, 1080p or 4K, 60 fps) to `T/clips/`; title and end cards
++   as PNGs from a Unity scene to `T/cards/`. The Recorder movie may not **capture its audio**: record game audio separately or rebuild it in the mix (references/audio.md).
++3. **Audio bed**: music via `music` with a `composition_plan` whose
++sections match the beat sheet, VO via `tts`, SFX via `sound_effect`; copy files to `T/audio/`, record items in
++   `T/audio/sources.json` (references/audio.md).
++4. **Edit list** → `T/edit.json` (format in the script's header): cuts land on the music's section changes.
++   `render_edit.py check T/edit.json` until `RESULT: OK`.
++5. **Render**: `render_edit.py render T/edit.json` → `T/out/trailer.mp4`. The file is indexed as an item, so the
++   user can play it from the chat.
++6. **Review** with the three reviewers (references/reviewers.md); fix and re-render until none fails, at most 3 rounds.
++7. **Report** → `T/REPORT.md`: length, beats, sources and licenses, credits spent, reviewer scores, open issues.
++
++## Rules
++
++- Never regenerate audio that already fits: reuse items (`sources.json`). Each generation is billed.
++- Footage is real gameplay from the current build; no mock-ups presented as gameplay.
++- Keep `T/edit.json` the source of truth: a change is an edit-list change and a re-render, never a hand-edited export.
+diff --git a/skills/trailer-maker/references/audio.md b/skills/trailer-maker/references/audio.md
+new file mode 100644
+index 0000000..db80c17
+--- /dev/null
++++ b/skills/trailer-maker/references/audio.md
+@@ -0,0 +1,31 @@
++# Trailer audio
++
++The audio bed is music + VO + SFX + (optionally) game audio, all placed in the edit list's `audio` array.
++
++## Game audio
++
++Unity Recorder's movie output can drop audio (or record it out of sync with variable frame rate). Either record the
++game's output separately (Recorder's Audio recorder, or a loopback device) into `T/audio/game_<beat>.wav` and give it
++the same `start` as its clip, or rebuild the moment in the mix with `sound_effect` takes.
++
++## Generating
++
++1. Music: `music` with a `composition_plan` (the plan sets the length; 3–600 s in total), one section per beat or
++   group of beats, `duration_ms` taken from `T/BEATS.md` so the
++sections match the beat sheet, VO via `tts`, SFX via `sound_effect`; copy files to `T/audio/`, record items in
++   `sources.json`. Example:
++   `{"positive_global_styles": ["orchestral", "hybrid percussion"], "negative_global_styles": ["vocals"],
++   "sections": [{"section_name": "hook", "positive_local_styles": ["sparse"], "negative_local_styles": [],
++   "duration_ms": 6000, "lines": []}, …]}`
++2. Ask for `variations` (up to 4 per call) only for the piece being chosen, play them to the user and wait
++for approval. Reuse items instead of regenerating; record what you used in `audio/sources.json`:
++   `[{"file": "music.mp3", "item": "itm_…", "tool": "music", "prompt_or_plan": …, "credits": 900}]`
++3. Place each file in `T/edit.json` → `audio` with its `start` (seconds on the trailer timeline) and `gain_db`:
++   music about −2 dB, VO 0 dB, SFX −6 dB; music `fade_out` 1–2 s at the end.
++
++A licensed track works the same way from step 3 (record the license in REPORT.md).
++
++## Levels
++
++Aim for about −14 LUFS integrated (store pages and YouTube normalize to it); the renderer limits peaks at 0.95.
++Check with `ffmpeg -i T/out/trailer.mp4 -af loudnorm=print_format=summary -f null -`.
+diff --git a/skills/trailer-maker/references/reviewers.md b/skills/trailer-maker/references/reviewers.md
+new file mode 100644
+index 0000000..b852e0a
+--- /dev/null
++++ b/skills/trailer-maker/references/reviewers.md
+@@ -0,0 +1,14 @@
++# Trailer reviewers
++
++Three reviewer subagents look at the render independently (frames every 0.5 s, e.g.
++`ffmpeg -i T/out/trailer.mp4 -vf fps=2 T/review/f_%03d.png`, plus `T/BEATS.md`, `T/edit.json` and the loudness
++summary). Each scores 1–5 and lists concrete fixes as edit-list changes. The lowest score counts: below 3 fails.
++
++| Reviewer | Asks |
++|---|---|
++| **Hook Critic** (a player scrolling a store page) | Is the game's genre and fantasy clear in 3 s? Would I keep watching at 10 s? Is the call to action readable and long enough (≥ 2 s)? |
++| **Editor** (pacing and craft) | Do cuts land on the music's section changes? Any shot shorter than 0.5 s or longer than 4 s without a reason? Black frames, letterboxing, jumps, UI clutter, debug overlays? |
++| **Sound Mixer** (audio) | Is VO intelligible over music? Loudness near −14 LUFS, no clipping? Does every big on-screen hit have a sound? Is the end clean (no cut-off tail)? |
++
++Write each review to `T/review/<reviewer>.md` and the scores to `T/REPORT.md`. At most 3 rounds; after that the
++user decides with the open issues listed.
+diff --git a/skills/trailer-maker/scripts/render_edit.py b/skills/trailer-maker/scripts/render_edit.py
+new file mode 100644
+index 0000000..c1aeafa
+--- /dev/null
++++ b/skills/trailer-maker/scripts/render_edit.py
+@@ -0,0 +1,280 @@
++#!/usr/bin/env python3
++"""Render a trailer from an edit list (JSON) with ffmpeg: clips and stills cut, scaled and
++concatenated, the audio bed (music, VO, SFX) placed on the timeline and mixed.
++
++Usage:
++  render_edit.py caps                       which ffmpeg is used and what it can do
++  render_edit.py check EDIT                 validate the edit list and probe every source
++  render_edit.py render EDIT [--dry-run]    render (--dry-run prints the ffmpeg command only)
++
++Edit list (paths relative to the edit file's folder):
++  {"output": "out/trailer.mp4", "width": 1920, "height": 1080, "fps": 30,
++   "clips": [{"src": "clips/boss.mp4", "in": 2.0, "out": 5.5, "fade_in": 0.2, "fade_out": 0.2},
++             {"src": "cards/title.png", "duration": 2.5}],
++   "audio": [{"src": "audio/music.mp3", "start": 0, "gain_db": -2, "fade_out": 1.5},
++             {"src": "audio/vo_01.mp3", "start": 3.2}]}
++Clip audio is not used: game audio is recorded separately and placed in "audio" like the rest.
++
++ffmpeg: $TRAILER_FFMPEG, else Homebrew's ffmpeg-full, else ffmpeg on PATH (ffprobe next to it).
++The last stdout line is RESULT: OK … or RESULT: FAIL … (details as JSON just above it). Exit: 0 ok, 1 failed, 2 usage.
++Python 3.9+ stdlib only.
++"""
++import json
++import os
++import re
++import shutil
++import subprocess
++import sys
++from pathlib import Path
++
++IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
++FULL_FFMPEG = ("/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg", "/usr/local/opt/ffmpeg-full/bin/ffmpeg")
++
++
++def out(*args):
++    print(*args, flush=True)
++
++
++def result(ok, summary, **extra):
++    """The machine-readable last line (RESULT: OK … / RESULT: FAIL …, which the quality ladder and
++    workflows observe); details go on the line before it as JSON."""
++    if extra:
++        out(json.dumps(extra))
++    out(f"RESULT: {'OK' if ok else 'FAIL'} {summary}")
++    return 0 if ok else 1
++
++
++def find_ffmpeg():
++    """(ffmpeg, ffprobe or None), or (None, None) when there is no ffmpeg."""
++    env = os.environ.get("TRAILER_FFMPEG")
++    cands = [env] if env else []
++    cands += [p for p in FULL_FFMPEG if Path(p).is_file()]
++    if w := shutil.which("ffmpeg"):
++        cands.append(w)
++    for c in cands:
++        if c and Path(c).is_file() and os.access(c, os.X_OK):
++            probe_ = Path(c).with_name("ffprobe" + Path(c).suffix)
++            return c, (str(probe_) if probe_.is_file() else shutil.which("ffprobe"))
++    return None, None
++
++
++def ffmpeg_caps(ffmpeg):
++    """What this ffmpeg build has that the trailer needs (or could use)."""
++    def listing(flag):
++        try:
++            return subprocess.run([ffmpeg, "-hide_banner", flag], capture_output=True, text=True, timeout=30).stdout
++        except (OSError, subprocess.SubprocessError):
++            return ""
++    filters, encoders = listing("-filters"), listing("-encoders")
++
++    def has(text, name):
++        return re.search(rf"^\s*\S+\s+{re.escape(name)}\s", text, re.M) is not None
++    return {"drawtext": has(filters, "drawtext"), "subtitles": has(filters, "subtitles"),
++            "loudnorm": has(filters, "loudnorm"), "libx264": has(encoders, "libx264"), "aac": has(encoders, "aac")}
++
++
++def parse_ffmpeg_info(stderr):
++    """{"duration", "streams"} from `ffmpeg -i FILE` stderr (when there's no ffprobe)."""
++    info = {"duration": None, "streams": []}
++    if m := re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", stderr or ""):
++        info["duration"] = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
++    for m in re.finditer(r"Stream #\d+:\d+[^:]*:\s*(Video|Audio):\s*([^\s,]+)([^\n]*)", stderr or ""):
++        kind, codec, rest = m.group(1).lower(), m.group(2), m.group(3)
++        s = {"codec_type": kind, "codec_name": codec}
++        if kind == "video":
++            if d := re.search(r"\b(\d{2,5})x(\d{2,5})\b", rest):
++                s["width"], s["height"] = int(d.group(1)), int(d.group(2))
++            if f := re.search(r"([\d.]+)\s*fps", rest):
++                s["fps"] = float(f.group(1))
++        elif hz := re.search(r"(\d+)\s*Hz", rest):
++            s["sample_rate"] = int(hz.group(1))
++        info["streams"].append(s)
++    return info
++
++
++def probe(ffprobe, path, ffmpeg=None):
++    """{"duration", "streams"} of a media file, or None when it can't be read."""
++    if ffprobe:
++        try:
++            r = subprocess.run([ffprobe, "-v", "error", "-show_format", "-show_streams", "-of", "json", str(path)],
++                               capture_output=True, text=True, timeout=60)
++            if r.returncode == 0:
++                d = json.loads(r.stdout or "{}")
++                dur = (d.get("format") or {}).get("duration")
++                streams = []
++                for s in d.get("streams") or []:
++                    x = {k: s[k] for k in ("codec_type", "codec_name", "width", "height", "sample_rate") if k in s}
++                    if "sample_rate" in x:
++                        x["sample_rate"] = int(x["sample_rate"])
++                    if (fr := s.get("avg_frame_rate")) and "/" in fr and not fr.endswith("/0"):
++                        n, dd = fr.split("/")
++                        x["fps"] = round(float(n) / float(dd), 3)
++                    streams.append(x)
++                return {"duration": float(dur) if dur else None, "streams": streams}
++        except (OSError, subprocess.SubprocessError, ValueError):
++            pass
++    if ffmpeg:
++        try:
++            r = subprocess.run([ffmpeg, "-hide_banner", "-i", str(path)], capture_output=True, text=True, timeout=60)
++        except (OSError, subprocess.SubprocessError):
++            return None
++        info = parse_ffmpeg_info(r.stderr)
++        return info if info["streams"] else None
++    return None
++
++
++def stream(info, kind):
++    """The first stream of `kind` ("video" / "audio") in probe() output, or None."""
++    return next((s for s in (info or {}).get("streams") or [] if s.get("codec_type") == kind), None)
++
++
++def num(v, name, errors, default=None, low=None):
++    if v is None:
++        return default
++    if isinstance(v, bool) or not isinstance(v, (int, float)):
++        errors.append(f"{name} must be a number")
++        return default
++    if low is not None and v < low:
++        errors.append(f"{name} must be >= {low}")
++    return float(v)
++
++
++def load_edit(path, ffmpeg, ffprobe):
++    """(plan, errors): the edit list with resolved paths and clip lengths."""
++    errors = []
++    try:
++        edit = json.loads(Path(path).read_text())
++    except (OSError, ValueError) as e:
++        return None, [f"can't read the edit list: {e}"]
++    base = Path(path).resolve().parent
++    plan = {"output": str(base / (edit.get("output") or "out/trailer.mp4")),
++            "width": int(edit.get("width") or 1920), "height": int(edit.get("height") or 1080),
++            "fps": float(edit.get("fps") or 30), "clips": [], "audio": []}
++    if not edit.get("clips"):
++        errors.append("clips: at least one clip is needed")
++    for i, c in enumerate(edit.get("clips") or []):
++        where = f"clips[{i}]"
++        src = base / str(c.get("src") or "")
++        if not c.get("src") or not src.is_file():
++            errors.append(f"{where}: no file {c.get('src')!r}")
++            continue
++        still = src.suffix.lower() in IMAGE_EXTS
++        info = None if still else probe(ffprobe, src, ffmpeg)
++        if not still and not stream(info, "video"):
++            errors.append(f"{where}: {src.name} has no video stream")
++            continue
++        t_in = num(c.get("in"), f"{where}.in", errors, 0.0, 0)
++        if still:
++            length = num(c.get("duration"), f"{where}.duration", errors, 3.0, 0.1)
++        else:
++            src_dur = info.get("duration") or 0
++            t_out = num(c.get("out"), f"{where}.out", errors, src_dur)
++            if src_dur and t_out > src_dur + 0.05:
++                errors.append(f"{where}: out {t_out:g}s is past the end of {src.name} ({src_dur:.2f}s)")
++            length = t_out - t_in
++            if length <= 0:
++                errors.append(f"{where}: out must be after in")
++        plan["clips"].append({"src": str(src), "still": still, "in": t_in, "length": length,
++                              "fade_in": num(c.get("fade_in"), f"{where}.fade_in", errors, 0.0, 0),
++                              "fade_out": num(c.get("fade_out"), f"{where}.fade_out", errors, 0.0, 0)})
++    for i, a in enumerate(edit.get("audio") or []):
++        where = f"audio[{i}]"
++        src = base / str(a.get("src") or "")
++        if not a.get("src") or not src.is_file():
++            errors.append(f"{where}: no file {a.get('src')!r}")
++            continue
++        if not stream(probe(ffprobe, src, ffmpeg), "audio"):
++            errors.append(f"{where}: {src.name} has no audio stream")
++            continue
++        plan["audio"].append({"src": str(src), "start": num(a.get("start"), f"{where}.start", errors, 0.0, 0),
++                              "gain_db": num(a.get("gain_db"), f"{where}.gain_db", errors, 0.0),
++                              "fade_in": num(a.get("fade_in"), f"{where}.fade_in", errors, 0.0, 0),
++                              "fade_out": num(a.get("fade_out"), f"{where}.fade_out", errors, 0.0, 0)})
++    plan["duration"] = round(sum(c["length"] for c in plan["clips"]), 3)
++    return plan, errors
++
++
++def build_command(ffmpeg, plan):
++    w, h, fps = plan["width"], plan["height"], plan["fps"]
++    args, parts, labels = [ffmpeg, "-hide_banner", "-y"], [], []
++    for i, c in enumerate(plan["clips"]):
++        if c["still"]:
++            args += ["-loop", "1", "-t", f"{c['length']:.3f}", "-i", c["src"]]
++            chain = f"[{i}:v]"
++        else:
++            args += ["-ss", f"{c['in']:.3f}", "-t", f"{c['length']:.3f}", "-i", c["src"]]
++            chain = f"[{i}:v]"
++        f = (f"{chain}fps={fps:g},scale={w}:{h}:force_original_aspect_ratio=decrease,"
++             f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,format=yuv420p,setpts=PTS-STARTPTS")
++        if c["fade_in"]:
++            f += f",fade=t=in:st=0:d={c['fade_in']:.3f}"
++        if c["fade_out"]:
++            f += f",fade=t=out:st={max(0.0, c['length'] - c['fade_out']):.3f}:d={c['fade_out']:.3f}"
++        parts.append(f + f"[v{i}]")
++        labels.append(f"[v{i}]")
++    parts.append("".join(labels) + f"concat=n={len(labels)}:v=1:a=0[vout]")
++    n = len(plan["clips"])
++    alabels = []
++    for j, a in enumerate(plan["audio"]):
++        args += ["-i", a["src"]]
++        ms = int(round(a["start"] * 1000))
++        f = f"[{n + j}:a]aresample=48000,aformat=channel_layouts=stereo,volume={a['gain_db']:g}dB"
++        if a["fade_in"]:
++            f += f",afade=t=in:st=0:d={a['fade_in']:.3f}"
++        if a["fade_out"]:
++            # Fade at the trailer's end, or at the source's own end when that comes first.
++            end = plan["duration"] - a["start"]
++            f += f",atrim=0:{end:.3f},afade=t=out:st={max(0.0, end - a['fade_out']):.3f}:d={a['fade_out']:.3f}"
++        parts.append(f + f",adelay={ms}|{ms}[a{j}]")
++        alabels.append(f"[a{j}]")
++    maps = ["-map", "[vout]"]
++    if alabels:
++        parts.append("".join(alabels) + f"amix=inputs={len(alabels)}:normalize=0:duration=longest,"
++                                        f"atrim=0:{plan['duration']:.3f},alimiter=limit=0.95[aout]")
++        maps += ["-map", "[aout]", "-c:a", "aac", "-b:a", "256k"]
++    args += ["-filter_complex", ";".join(parts), *maps, "-c:v", "libx264", "-preset", "medium", "-crf", "18",
++             "-pix_fmt", "yuv420p", "-r", f"{fps:g}", "-t", f"{plan['duration']:.3f}", "-movflags", "+faststart",
++             plan["output"]]
++    return args
++
++
++def main(argv):
++    if not argv or argv[0] not in ("caps", "check", "render") or (argv[0] != "caps" and len(argv) < 2):
++        out(__doc__)
++        return 2
++    ffmpeg, ffprobe = find_ffmpeg()
++    if not ffmpeg:
++        return result(False, "No ffmpeg: `brew install ffmpeg` (or set TRAILER_FFMPEG to one).")
++    if argv[0] == "caps":
++        caps = ffmpeg_caps(ffmpeg)
++        missing = [k for k in ("libx264", "aac") if not caps[k]]
++        return result(not missing, f"{ffmpeg}" + (f" lacks {', '.join(missing)}" if missing else " can render"),
++                      ffmpeg=ffmpeg, ffprobe=ffprobe, caps=caps)
++    plan, errors = load_edit(argv[1], ffmpeg, ffprobe)
++    if errors:
++        for e in errors:
++            out(f"- {e}")
++        return result(False, f"{len(errors)} problem(s) in the edit list", errors=errors)
++    if argv[0] == "check":
++        for c in plan["clips"]:
++            out(f"{Path(c['src']).name}: {c['length']:.2f}s" + (" (still)" if c["still"] else f" from {c['in']:g}s"))
++        return result(True, f"{len(plan['clips'])} clips, {len(plan['audio'])} audio items, "
++                            f"{plan['duration']:.2f}s", duration=plan["duration"])
++    cmd = build_command(ffmpeg, plan)
++    if "--dry-run" in argv:
++        out(" ".join(json.dumps(a) if re.search(r"[\s;|\[\]]", a) else a for a in cmd))
++        return result(True, "dry run: nothing rendered", duration=plan["duration"])
++    Path(plan["output"]).parent.mkdir(parents=True, exist_ok=True)
++    r = subprocess.run(cmd, capture_output=True, text=True)
++    if r.returncode != 0:
++        out(r.stderr[-4000:])
++        return result(False, f"ffmpeg failed (exit {r.returncode})")
++    got = probe(ffprobe, plan["output"], ffmpeg)
++    dur = (got or {}).get("duration")
++    ok = bool(stream(got, "video")) and dur is not None and abs(dur - plan["duration"]) < 0.5
++    return result(ok, f"Rendered {plan['output']} ({dur or 0:.2f}s of {plan['duration']:.2f}s planned)",
++                  output=plan["output"], duration=dur)
++
++
++if __name__ == "__main__":
++    sys.exit(main(sys.argv[1:]))
+diff --git a/skills/unity-router/SKILL.md b/skills/unity-router/SKILL.md
+index 4d2cdf1..4486c25 100644
+--- a/skills/unity-router/SKILL.md
++++ b/skills/unity-router/SKILL.md
+@@ -67,6 +67,7 @@ Signals are words or situations in the task. Load in order, at most 3. "Skip" li
+ | 14 | MCP call fails, tool missing, wrong instance, parameter shape, tool groups | unity-mcp-orchestrator | everything else until the call works |
+ | 15 | critique, taste, aesthetic review, TASTE.md, L4 review | design-critique | implementation skills until the review identifies changes |
+ | 16 | failure analysis, postmortem, exhausted gate, parked campaign, "that broke" | postmortem | implementation skills until the cause and prevention rule are recorded |
++| 17 | trailer, teaser, gameplay reel, store video, launch video, re-cut | trailer-maker, play-verify | build-ship until the trailer is approved (workflow `trailer`) |
+ 
+ ## Workflows and gates
+ Chains are workflow templates run by the harness in one session; they are a harness feature, not additional skills. Campaigns span multiple sessions and keep their durable brief, design target and continuation state in `.gamedevworkstation/campaigns/<slug>.md` at the project root. Use the matching template:
+diff --git a/skills/unity-router/chains/trailer.toml b/skills/unity-router/chains/trailer.toml
+new file mode 100644
+index 0000000..504ced2
+--- /dev/null
++++ b/skills/unity-router/chains/trailer.toml
+@@ -0,0 +1,42 @@
++# Workflow template (features/chains.py). done_when types adapted from SethGammon/Citadel (MIT).
++id = "trailer"
++title = "Trailer"
++summary = "Beat sheet → capture clips and cards → audio bed → edit list and render → three-reviewer review → report"
++kinds = ["chain", "campaign"]
++applies_to = "unity"
++critique = false
++
++[[phase]]
++name = "Beats"
++type = "plan"
++skills = ["trailer-maker"]
++instructions = "Write Trailer/<name>/BEATS.md (trailer-maker step 1) and get the user's approval."
++done_when = [{ type = "file_exists", path = "Trailer/*/BEATS.md", newer_than = "phase_start" }, { type = "manual", question = "Is the beat sheet approved?" }]
++
++[[phase]]
++name = "Capture"
++type = "build"
++skills = ["trailer-maker", "play-verify"]
++instructions = "Record every beat's clip to Trailer/<name>/clips/ and the title and end cards to cards/."
++done_when = [{ type = "file_exists", path = "Trailer/*/clips/*.mp4", newer_than = "phase_start" }]
++
++[[phase]]
++name = "Audio"
++type = "build"
++skills = ["trailer-maker"]
++instructions = "Build the audio bed (references/audio.md); reuse items instead of regenerating."
++done_when = [{ type = "file_exists", path = "Trailer/*/audio/sources.json", newer_than = "phase_start" }]
++
++[[phase]]
++name = "Render"
++type = "build"
++skills = ["trailer-maker"]
++instructions = "Write edit.json, then render_edit.py check and render it."
++done_when = [{ type = "command_passes", observe = "render_edit" }, { type = "file_exists", path = "Trailer/*/out/*.mp4", newer_than = "phase_start" }]
++
++[[phase]]
++name = "Review"
++type = "verify"
++skills = ["trailer-maker"]
++instructions = "Run the three reviewers (references/reviewers.md); fix and re-render until none scores below 3."
++done_when = [{ type = "file_exists", path = "Trailer/*/REPORT.md", newer_than = "phase_start" }, { type = "manual", question = "Watch out/trailer.mp4: ship it?" }]

@@ -16,3 +16,6 @@ src-tauri/app-icon.png
 .DS_Store
 backend/gamedevworkstation/_build_info.json
 *.tsbuildinfo
+
+# Eval Forge stream logs: large, and they carry the machine's setup
+evals/runs/**/*.log

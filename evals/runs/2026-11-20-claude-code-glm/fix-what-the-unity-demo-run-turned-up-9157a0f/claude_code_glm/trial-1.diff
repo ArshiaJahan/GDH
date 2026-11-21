@@ -1,0 +1,386 @@
+diff --git a/backend/gamedevworkstation/approvals.py b/backend/gamedevworkstation/approvals.py
+index 59e2a99..426f0a4 100644
+--- a/backend/gamedevworkstation/approvals.py
++++ b/backend/gamedevworkstation/approvals.py
+@@ -76,6 +76,9 @@ class Approvals:
+             return {"status": (row or {}).get("status", "denied")}
+         try:
+             return await asyncio.wait_for(asyncio.shield(fut), timeout)
++        except asyncio.CancelledError:
++            self.expire(aid)  # nobody is waiting on the card any more: close it instead of leaving it looking live
++            raise
+         finally:
+             if fut.done():
+                 self._waiters.pop(aid, None)
+diff --git a/backend/gamedevworkstation/features/claude_code.py b/backend/gamedevworkstation/features/claude_code.py
+index 7758d46..54cca38 100644
+--- a/backend/gamedevworkstation/features/claude_code.py
++++ b/backend/gamedevworkstation/features/claude_code.py
+@@ -520,7 +520,8 @@ class Proc:
+         window = str(info.get("rateLimitType") or "").replace("_", " ")
+         text = ("Claude plan limit reached" if status == "rejected" else "Close to the Claude plan limit") + \
+             (f" ({window})" if window else "") + (time.strftime(", resets at %H:%M", time.localtime(resets)) if resets else "")
+-        self.app.bus.publish("agent.status", {"kind": "rate_limit", "text": text, "until": resets,
++        # its own kind: the chat keeps this text (and reset time) instead of a "retrying in" countdown
++        self.app.bus.publish("agent.status", {"kind": "plan_limit", "text": text, "until": resets,
+                                               "retry_in_s": round(max(0.0, resets - time.time()), 1) if resets else None},
+                              self.sid)
+         if turn and turn.jid:
+diff --git a/backend/gamedevworkstation/features/gdw_mcp.py b/backend/gamedevworkstation/features/gdw_mcp.py
+index 764cb67..f382f52 100644
+--- a/backend/gamedevworkstation/features/gdw_mcp.py
++++ b/backend/gamedevworkstation/features/gdw_mcp.py
+@@ -50,6 +50,7 @@ APPROVE_TOOL = "approve"
+ PROMPT_TOOL = f"mcp__{SERVER}__{APPROVE_TOOL}"
+ PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
+ MAX_BODY = 4 * 1024 * 1024
++TOOL_TIMEOUT_MS = 24 * 60 * 60 * 1000  # per-server tool-call timeout: batch Editor runs and approval waits run long
+ # Not offered: Claude Code has its own (file tools, shell, web fetch), they bill an API key
+ # (web_search, critique), or they belong to the built-in loop (subagents, waves, campaigns, chains).
+ EXCLUDED_TOOLS = frozenset({
+@@ -124,9 +125,12 @@ class GdwMcp:
+         return f"http://127.0.0.1:{int(port)}{PATH}"
+ 
+     def config_json(self, token: str) -> dict:
+-        """The --mcp-config document for one claude process (`type` is required for URL servers [docs])."""
++        """The --mcp-config document for one claude process (`type` is required for URL servers [docs]).
++        `timeout` (ms, per server) lifts the CLI's 300 s idle limit, which otherwise aborts a Unity batch
++        run or a tool call waiting on an approval card."""
+         return {"mcpServers": {SERVER: {"type": "http", "url": self.url(),
+-                                        "headers": {"Authorization": f"Bearer {token}"}}}}
++                                        "headers": {"Authorization": f"Bearer {token}"},
++                                        "timeout": TOOL_TIMEOUT_MS}}}
+ 
+     # -------------------------------------------------------------- tools
+ 
+diff --git a/backend/gamedevworkstation/features/ladder.py b/backend/gamedevworkstation/features/ladder.py
+index a040154..ebe7ac7 100644
+--- a/backend/gamedevworkstation/features/ladder.py
++++ b/backend/gamedevworkstation/features/ladder.py
+@@ -886,9 +886,14 @@ class Ladder:
+             st = crit["detail"]["results"][ac.id]
+             cands.append((crit["ts"], st == "PASS", [crit], f"check_criteria {st}"))
+         names = ac.values("test")
+-        if names:
++        # A replay verification test counts only through a tool-observed replay_verified report, never
++        # through a test run that "covered" it; a criterion naming both kinds needs both.
++        replay_names = [n for n in names if "ReplayVerificationTests" in n or "LogMatchesCheckpoints" in n]
++        plain = [n for n in names if n not in replay_names]
++        test_hit = None
++        if plain:
+             got = []
+-            for name in names:
++            for name in plain:
+                 hit = None
+                 for r in rows:
+                     d = r["detail"]
+@@ -906,11 +911,13 @@ class Ladder:
+                 if hit is None:
+                     break
+                 got.append(hit)
+-            if len(got) == len(names):
+-                cands.append((min(h[0] for h in got), all(h[1] for h in got), [h[2] for h in got],
+-                              "; ".join(h[3] for h in got if not h[1]) or "tests passed"))
++            if len(got) == len(plain):
++                test_hit = (min(h[0] for h in got), all(h[1] for h in got), [h[2] for h in got],
++                            "; ".join(h[3] for h in got if not h[1]) or "tests passed")
++                if not replay_names:
++                    cands.append(test_hit)
+         # Replay-verified evidence for headless ACs with replay verification tests.
+-        if any("ReplayVerificationTests" in n or "LogMatchesCheckpoints" in n for n in names):
++        if replay_names:
+             for r in rows:
+                 d = r["detail"]
+                 if d.get("kind") != "replay_verified":
+@@ -934,7 +941,11 @@ class Ladder:
+                 detail = "replay_verified pass"
+                 if env == "differs":
+                     detail += " (environment differs)"
+-                cands.append((r["ts"], True, [r], detail))
++                if not plain:
++                    cands.append((r["ts"], True, [r], detail))
++                elif test_hit is not None:
++                    cands.append((min(r["ts"], test_hit[0]), test_hit[1], [r, *test_hit[2]],
++                                  f"{detail}; {test_hit[3]}"))
+         return cands
+ 
+     def _ac_level(self, ac: AC, story: Story, rows: list[dict], content: tuple[float, str | None], lv: Level,
+diff --git a/backend/gamedevworkstation/features/prompt_improver.py b/backend/gamedevworkstation/features/prompt_improver.py
+index fd4d27b..63d5536 100644
+--- a/backend/gamedevworkstation/features/prompt_improver.py
++++ b/backend/gamedevworkstation/features/prompt_improver.py
+@@ -263,9 +263,24 @@ def _question_payload(q: Question, i: int, n: int, run_id: str, message_id: str)
+     return payload
+ 
+ 
+-def _json_object(text: str) -> dict:
++def loads_reply(text: str) -> Any:
++    """A model's JSON reply, read leniently: code fences are dropped, raw newlines/tabs inside strings
++    are accepted (strict=False), and an object wrapped in prose is found by its first decodable '{'."""
+     body = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", (text or "").strip(), flags=re.I)
+-    data = json.loads(body)
++    dec = json.JSONDecoder(strict=False)
++    try:
++        return dec.decode(body)
++    except ValueError as first:
++        for m in re.finditer(r"\{", body):
++            try:
++                return dec.raw_decode(body, m.start())[0]
++            except ValueError:
++                continue
++        raise first
++
++
++def _json_object(text: str) -> dict:
++    data = loads_reply(text)
+     if not isinstance(data, dict):
+         raise ValueError("expected an object")
+     return data
+diff --git a/backend/gamedevworkstation/features/replay.py b/backend/gamedevworkstation/features/replay.py
+index 46d70f4..7a2089e 100644
+--- a/backend/gamedevworkstation/features/replay.py
++++ b/backend/gamedevworkstation/features/replay.py
+@@ -217,6 +217,9 @@ def _validated_request(op: str, args: dict, *, replay_cfg: dict | None = None) -
+     if args.get("scene") is not None:
+         request["scene"] = _project_relative(args["scene"], field="scene", suffix=".unity", prefix="Assets/")
+ 
++    if op == "record":
++        _record_seconds(args, replay_cfg or {})  # reject a bad max_seconds before anything starts
++
+     seed = args.get("seed")
+     if seed is not None:
+         seed = _as_int(seed, field="seed")
+@@ -384,6 +387,18 @@ def _local_platform_name() -> str:
+     return {"Darwin": "macOS", "Windows": "Windows", "Linux": "Linux"}.get(name, name)
+ 
+ 
++def _os_family(name: str) -> str:
++    """"macOS", "Mac OS X 26.6.2", "Darwin" → "macos"; likewise "windows" and "linux"; else the name, lowercased."""
++    low = (name or "").strip().lower()
++    if any(k in low for k in ("mac", "darwin", "os x", "osx")):
++        return "macos"
++    if "windows" in low or low.startswith("win"):
++        return "windows"
++    if any(k in low for k in ("linux", "ubuntu", "debian", "fedora", "centos")):
++        return "linux"
++    return low
++
++
+ def _local_cpu_model() -> str | None:
+     try:
+         if platform.system() == "Darwin":
+@@ -423,10 +438,27 @@ def _project_identifier(root: Path) -> str | None:
+         text = (root / "ProjectSettings" / "ProjectSettings.asset").read_text(errors="replace", encoding="utf-8")
+     except OSError:
+         return None
+-    m = re.search(r"^\s*applicationIdentifier:\s*\n\s+[A-Za-z]+:\s*(\S+)", text, re.M)
+-    if not m:
+-        m = re.search(r"^\s*applicationIdentifier:\s*(\S+)", text, re.M)
+-    return m.group(1) if m else None
++    m = re.search(r"^\s*applicationIdentifier:[ \t]*\n((?:[ \t]+[A-Za-z0-9_]+:[ \t]*\S+[ \t]*\n?)+)", text, re.M)
++    if m:
++        ids = dict(re.findall(r"([A-Za-z0-9_]+):[ \t]*(\S+)", m.group(1)))
++        if ids:
++            return ids.get("Standalone") or next(iter(ids.values()))
++    m = re.search(r"^\s*applicationIdentifier:[ \t]*(\S+)", text, re.M)
++    if m and m.group(1) not in ("{}", "''", '""'):
++        return m.group(1)
++    # unset ({}): Unity's default is com.<companyName>.<productName>
++    company = re.search(r"^\s*companyName:[ \t]*(.*?)[ \t]*$", text, re.M)
++    product = re.search(r"^\s*productName:[ \t]*(.*?)[ \t]*$", text, re.M)
++    if not company or not product:
++        return None
++    return f"com.{company.group(1).strip(chr(39) + chr(34))}.{product.group(1).strip(chr(39) + chr(34))}"
++
++
++def _same_identifier(a: str, b: str) -> bool:
++    """Unity strips characters a bundle id can't hold (spaces, punctuation) from the default it builds."""
++    def norm(s: str) -> str:
++        return re.sub(r"[^a-z0-9.]", "", s.lower())
++    return norm(a) == norm(b)
+ 
+ 
+ def _scene_guid(root: Path, scene_path: str | None) -> str | None:
+@@ -459,7 +491,7 @@ def environment_diff(root: Path, header: dict | None, *, scene_hint: str | None
+     os_info = header.get("os") if isinstance(header.get("os"), dict) else {}
+     recorded_platform = str(os_info.get("platform") or "")
+     current_platform = _local_platform_name()
+-    if recorded_platform and current_platform and current_platform.lower() not in recorded_platform.lower():
++    if recorded_platform and current_platform and _os_family(recorded_platform) != _os_family(current_platform):
+         diff.add("os")
+ 
+     cpu = header.get("cpu") if isinstance(header.get("cpu"), dict) else {}
+@@ -481,7 +513,7 @@ def environment_diff(root: Path, header: dict | None, *, scene_hint: str | None
+     project = header.get("project") if isinstance(header.get("project"), dict) else {}
+     recorded_id = str(project.get("id") or "")
+     current_id = _project_identifier(root)
+-    if recorded_id and current_id and recorded_id != current_id:
++    if recorded_id and current_id and not _same_identifier(recorded_id, current_id):
+         diff.add("project_id")
+ 
+     scene = header.get("scene") if isinstance(header.get("scene"), dict) else {}
+@@ -889,17 +921,46 @@ def _tool_output(op: str, run_id: str, result: "BridgeResult | None", report: di
+ 
+ # --------------------------------------------------------------------------- ops
+ 
+-_WATCHDOGS: set[asyncio.Task] = set()
++_WATCHDOGS: dict[str, asyncio.Task] = {}  # session id → the stop timer of its current recording
+ 
+ 
+-def _arm_record_limit(app: "AppState", session: dict, run_id: str, replay_cfg: dict) -> asyncio.Task | None:
+-    """[unity.replay] max_seconds: stop a live recording that runs past the limit (L3)."""
++def _record_seconds(args: dict, replay_cfg: dict) -> int:
++    """How long this recording may run: the agent's max_seconds, capped by [unity.replay] max_seconds
++    (0 or less there: no cap). Without max_seconds, the configured limit."""
+     limit = _cfg_int(replay_cfg, "max_seconds", 600)
++    asked = args.get("max_seconds")
++    if asked is None:
++        return limit
++    try:
++        seconds = _as_int(asked, field="max_seconds")
++    except ReplayOpError:
++        raise ReplayOpError("bad_max_seconds", f"max_seconds must be a positive integer, got {asked!r}") from None
++    if seconds <= 0:
++        raise ReplayOpError("bad_max_seconds", f"max_seconds must be a positive integer, got {asked!r}")
++    return min(seconds, limit) if limit > 0 else seconds
++
++
++def _disarm_record_limit(session_id: str) -> None:
++    """Clear this session's stop timer (stop, or a new recording replacing it)."""
++    task = _WATCHDOGS.pop(session_id, None)
++    if task is not None and not task.done():
++        task.cancel()
++
++
++def _arm_record_limit(app: "AppState", session: dict, run_id: str, replay_cfg: dict,
++                      seconds: int | None = None) -> asyncio.Task | None:
++    """Stop a live recording that runs past `seconds` (default [unity.replay] max_seconds). One timer per
++    session: arming replaces the previous one, so an old recording's timer can't stop a later run."""
++    sid = str(session.get("id") or "")
++    _disarm_record_limit(sid)
++    limit = _cfg_int(replay_cfg, "max_seconds", 600) if seconds is None else int(seconds)
+     if limit <= 0:
+         return None
+ 
+     async def _watch() -> None:
+         await asyncio.sleep(limit)
++        if _WATCHDOGS.get(sid) is task:
++            _WATCHDOGS.pop(sid, None)
+         try:
+             from .unity_bridge import get_bridge
+             await get_bridge(app).replay_cancel(session, consent=_gate_consent(app, session))
+@@ -908,14 +969,14 @@ def _arm_record_limit(app: "AppState", session: dict, run_id: str, replay_cfg: d
+             log.debug("replay: max_seconds stop failed", exc_info=True)
+ 
+     task = asyncio.create_task(_watch())
+-    _WATCHDOGS.add(task)
+-    task.add_done_callback(_WATCHDOGS.discard)
++    _WATCHDOGS[sid] = task
+     return task
+ 
+ 
+ 
+ async def _op_stop(app: "AppState", session: dict, root: Path, run_id: str, br: Any) -> ToolOutput:
+     """Stop the job for this run_id and cancel any live Editor replay session."""
++    _disarm_record_limit(str(session.get("id") or ""))
+     stopped_job = None
+     for job in app.jobs.list() or []:
+         if job.get("id") and job.get("status") in ("running", "queued") \
+@@ -1062,7 +1123,7 @@ async def run_replay_op(app: "AppState", session: dict, op: str, args: dict,
+                                      consent=consent, cancel=cancel)
+         if result.status == "pass":
+             _index_artifacts(app, session, [request_path])
+-            _arm_record_limit(app, session, run_id, replay_cfg)
++            _arm_record_limit(app, session, run_id, replay_cfg, _record_seconds(args, replay_cfg))
+         return _tool_output(op, run_id, result, None)
+ 
+     archive, precheck_status, precheck_message = _read_archive(root, request, replay_cfg)
+diff --git a/backend/gamedevworkstation/features/unity_bridge.py b/backend/gamedevworkstation/features/unity_bridge.py
+index b34369d..48b9c9d 100644
+--- a/backend/gamedevworkstation/features/unity_bridge.py
++++ b/backend/gamedevworkstation/features/unity_bridge.py
+@@ -1707,7 +1707,10 @@ class UnityBridge:
+             if problem:
+                 return BridgeResult("skipped", problem, "cli_batch")
+             xml = self._paths(root, f"replay-{op}", "xml")
+-            extra_args = ["-gdwReplayRequest", request_path] if request_path else []
++            # the CLI prints only JSON: ask the Editor for its own log, the one the report's log_sha256 hashes
++            editor_log = xml.with_name(xml.stem + "-editor.log")
++            extra_args = ["-logFile", str(editor_log)]
++            extra_args += ["-gdwReplayRequest", request_path] if request_path else []
+             try:
+                 argv = uc.argv_test_batch(cli, root, platform, xml, t,
+                                           test_filter="Gdw.Replay.Tests.ReplayVerificationTests.LogMatchesCheckpoints",
+@@ -1723,7 +1726,8 @@ class UnityBridge:
+                                         timeout_s=t, log_path=log_path, cancel=cancel)
+             r = uc.result_from_test_batch(run, xml, platform)
+             r.evidence.update({"replay_op": op, "started_at": run.started_at,
+-                               "log": str(log_path), "job_id": run.job_id})
++                               "log": str(editor_log),
++                               "cli_log": str(log_path), "job_id": run.job_id})
+             return r
+         if st.mode == "raw_batch":
+             args = ["test", "playmode", "--filter", "Gdw.Replay.Tests.ReplayVerificationTests.LogMatchesCheckpoints"]
+diff --git a/backend/gamedevworkstation/features/unity_tool.py b/backend/gamedevworkstation/features/unity_tool.py
+index de3ac37..3d01968 100644
+--- a/backend/gamedevworkstation/features/unity_tool.py
++++ b/backend/gamedevworkstation/features/unity_tool.py
+@@ -106,6 +106,8 @@ SCHEMA = obj({
+                     "fps": {"type": "integer", "minimum": 1, "maximum": 60}}},
+     "subjects": {"type": "array", "items": {"type": "string"}, "maxItems": 32,
+                  "description": "provider ids or scene paths to record/replay"},
++    "max_seconds": {"type": "integer", "minimum": 1,
++                    "description": "record: stop this recording after N seconds (capped by [unity.replay] max_seconds)"},
+ }, ["op"])
+ 
+ 
+diff --git a/frontend/src/components/Chat.tsx b/frontend/src/components/Chat.tsx
+index 994d68e..f6001fc 100644
+--- a/frontend/src/components/Chat.tsx
++++ b/frontend/src/components/Chat.tsx
+@@ -21,6 +21,22 @@ import { EffortMeter, ProviderDot, fmtUsd, modelLabel, tiersOf, useModelCatalog
+ const EMPTY: Msg[] = [];
+ const STOPPABLE_JOBS = new Set(["subagent", "codex_cli", "command"]);
+ 
++/** A wait as people read it: 45s, 3m 20s, 2h 5m, 6d 7h. */
++export function formatWait(seconds: number): string {
++  const s = Math.max(0, Math.ceil(seconds));
++  if (s < 60) return `${s}s`;
++  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
++  if (d) return h ? `${d}d ${h}h` : `${d}d`;
++  if (h) return m ? `${h}h ${m}m` : `${h}h`;
++  return r ? `${m}m ${r}s` : `${m}m`;
++}
++
++/** The status line's text: a rate-limit retry counts down; other notices (plan limits, compacting) keep their own text. */
++export function statusText(s: AgentStatus, nowMs: number): string {
++  const left = s.until ? Math.max(0, Math.ceil(s.until - nowMs / 1000)) : null
++  return s.kind === "rate_limit" && left != null ? `Rate limited, retrying in ${formatWait(left)}` : s.text;
++}
++
+ /** "Rate limited, retrying in Ns" with a live countdown. */
+ function StatusLine({ s }: { s: AgentStatus }) {
+   const [now, setNow] = useState(Date.now());
+@@ -28,8 +44,7 @@ function StatusLine({ s }: { s: AgentStatus }) {
+     const t = setInterval(() => setNow(Date.now()), 500);
+     return () => clearInterval(t);
+   }, []);
+-  const left = s.until ? Math.max(0, Math.ceil(s.until - now / 1000)) : null;
+-  const text = s.kind === "rate_limit" && left != null ? `Rate limited, retrying in ${left}s` : s.text;
++  const text = statusText(s, now)
+   return (
+     <div role="status" className="my-2 flex items-center gap-1.5 text-[13px] text-warn">
+       <Clock size={13} /> {text}
+diff --git a/tests/test_claude_code.py b/tests/test_claude_code.py
+index 5d5125c..6b2ee02 100644
+--- a/tests/test_claude_code.py
++++ b/tests/test_claude_code.py
+@@ -1263,7 +1263,7 @@ async def test_rate_limit_event_shows_only_when_not_allowed(rig):
+     p._on_event({**real, "rate_limit_info": {**real["rate_limit_info"], "status": "rejected"}})
+     row = rig.app.db.one("SELECT data FROM events WHERE session_id=? AND type='agent.status' ORDER BY rowid DESC LIMIT 1", [rig.sid])
+     data = json.loads(row["data"])
+-    assert data["kind"] == "rate_limit" and data["text"].startswith("Claude plan limit reached (five hour)")
++    assert data["kind"] == "plan_limit" and data["text"].startswith("Claude plan limit reached (five hour)")
+ 
+ 
+ async def test_hooks_not_applied_fails_closed(rig):

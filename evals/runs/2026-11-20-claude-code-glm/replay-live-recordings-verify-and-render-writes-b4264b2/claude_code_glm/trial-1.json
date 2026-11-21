@@ -1,0 +1,44 @@
+{
+ "task": "replay-live-recordings-verify-and-render-writes-b4264b2",
+ "agent": "claude_code_glm",
+ "trial": 1,
+ "passed": false,
+ "blame": "agent",
+ "reason": "failed command 'tests' (its own versions of skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs were replaced by the hidden tests)",
+ "wall_s": 295.1,
+ "cost_usd": 1.8933,
+ "tool_calls": 33,
+ "input_tokens": 3111072,
+ "output_tokens": 21170,
+ "agent_error": "",
+ "timed_out": false,
+ "tampered": [
+  "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+ ],
+ "failed_steps": [
+  "tests"
+ ],
+ "diff_lines": 371,
+ "started_at": "2026-11-20T23:34:08Z",
+ "helper_calls": 0,
+ "model": "claude-opus-5-5",
+ "grade": {
+  "passed": false,
+  "tampered": [
+   "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+  ],
+  "environment_failure": false,
+  "steps": [
+   {
+    "name": "tests",
+    "kind": "command",
+    "passed": false,
+    "exit": 1,
+    "duration_s": 0.6730497502721846,
+    "output": "    frames = run / \"capture\" / \"frames\"\n        frames.mkdir(parents=True)\n        for i in range(3):\n            (frames / f\"frame-{i:06d}.png\").write_bytes(b\"png\")\n        seen = {}\n    \n        def fake_execute(plan, **kw):\n            seen[\"plan\"] = plan\n            for p in plan.outputs:\n                p.parent.mkdir(parents=True, exist_ok=True)\n                p.write_bytes(b\"media\")\n            return {\"ok\": True, \"results\": [{\"step\": i, \"output\": p, \"ok\": True} for i, p in enumerate(plan.outputs)],\n                    \"warnings\": [], \"verifications\": []}\n    \n        monkeypatch.setattr(replay_media, \"execute_steps\", fake_execute)\n        monkeypatch.setattr(replay_media, \"_ffmpeg_paths\", lambda *a, **k: (\"ffmpeg\", \"ffprobe\"))\n        out = replay._export_capture(tmp_path, \"rr_0123456789abcdef\", {\"capture\": CAPTURE})\n    \n>       assert out[\"ok\"] is True and out[\"frames\"] == 3 and out[\"error\"] == \"\"\n                                                            ^^^^^^^^^^^^\nE       KeyError: 'error'\n\ntests/test_replay_render_export.py:60: KeyError\n__________________ test_export_failure_keeps_the_ffmpeg_error __________________\n\ntmp_path = PosixPath('/private/var/folders/07/xyyrk2p92jnblsq7j428mt5h0000gn/T/pytest-of-arshiajahan/pytest-1393/test_export_failure_keeps_the_0')\nmonkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x106d8fac0>\n\n    def test_export_failure_keeps_the_ffmpeg_error(tmp_path, monkeypatch):\n        run = _run_dir(tmp_path)\n        (run / \"capture\" / \"frames\").mkdir(parents=True)\n        (run / \"capture\" / \"frames\" / \"frame-000000.png\").write_bytes(b\"png\")\n        monkeypatch.setattr(replay_media, \"_ffmpeg_paths\", lambda *a, **k: (\"ffmpeg\", \"ffprobe\"))\n        monkeypatch.setattr(replay_media, \"execute_steps\", lambda plan, **kw: {\n            \"ok\": False, \"results\": [{\"step\": 0, \"output\": plan.outputs[0], \"ok\": False, \"error\": \"no encoder\"}],\n            \"warnings\": []})\n        out = replay._export_capture(tmp_path, \"rr_0123456789abcdef\", {\"capture\": CAPTURE})\n>       assert out[\"ok\"] is False and out[\"outputs\"] == [] and out[\"error\"] == \"no encoder\"\n                                      ^^^^^^^^^^^^^^\nE       KeyError: 'outputs'\n\ntests/test_replay_render_export.py:75: KeyError\n________ test_the_verification_test_captures_frames_for_render_requests ________\n\n    def test_the_verification_test_captures_frames_for_render_requests():\n        test = _src(\"Tests/PlayMode/ReplayVerificationTests.cs\")\n        assert \"ReplayCaptureHooks.Start(framesDir\" in test\n        assert \"ReplayLoop.AfterCheckpoint = () => ReplayCaptureHooks.CaptureFrame()\" in test\n        assert re.search(r'Path\\.Combine\\([^;]*\"capture\", \"frames\"\\)', test)\n        assert \"ReplayCaptureHooks.Start = Start;\" in _src(\"Editor/ReplayCapture.cs\")\n>       assert \"AfterCheckpoint?.Invoke();\" in _src(\"Runtime/ReplayLoop.cs\")\nE       AssertionError: assert 'AfterCheckpoint?.Invoke();' in 'using System;\\nusing System.Collections.Generic;\\nusing UnityEngine;\\nusing UnityEngine.LowLevel;\\nusing UnityEngine....d, out var a);\\n                if (e != a) return id;\\n            }\\n            return null;\\n        }\\n    }\\n}\\n'\nE        +  where 'using System;\\nusing System.Collections.Generic;\\nusing UnityEngine;\\nusing UnityEngine.LowLevel;\\nusing UnityEngine....d, out var a);\\n                if (e != a) return id;\\n            }\\n            return null;\\n        }\\n    }\\n}\\n' = _src('Runtime/ReplayLoop.cs')\n\ntests/test_replay_render_export.py:86: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_replay_render_export.py::test_a_render_without_frames_is_reported_not_passed\nFAILED tests/test_replay_render_export.py::test_frames_are_encoded_with_the_requested_spec\nFAILED tests/test_replay_render_export.py::test_export_failure_keeps_the_ffmpeg_error\nFAILED tests/test_replay_render_export.py::test_the_verification_test_captures_frames_for_render_requests\n4 failed, 4 passed in 0.30s\n",
+    "environment": false,
+    "detail": {}
+   }
+  ]
+ }
+}

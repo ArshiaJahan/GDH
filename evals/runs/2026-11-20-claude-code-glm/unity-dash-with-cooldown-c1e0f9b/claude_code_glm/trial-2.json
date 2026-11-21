@@ -1,0 +1,38 @@
+{
+ "task": "unity-dash-with-cooldown-c1e0f9b",
+ "agent": "claude_code_glm",
+ "trial": 2,
+ "passed": true,
+ "blame": "",
+ "reason": "passed",
+ "wall_s": 48.3,
+ "cost_usd": 0.2987,
+ "tool_calls": 8,
+ "input_tokens": 264018,
+ "output_tokens": 2927,
+ "agent_error": "",
+ "timed_out": false,
+ "tampered": [],
+ "failed_steps": [],
+ "diff_lines": 45,
+ "started_at": "2026-11-21T00:06:58Z",
+ "helper_calls": 0,
+ "model": "claude-opus-5-5",
+ "grade": {
+  "passed": true,
+  "tampered": [],
+  "environment_failure": false,
+  "steps": [
+   {
+    "name": "tests",
+    "kind": "command",
+    "passed": true,
+    "exit": 0,
+    "duration_s": 12.596380083821714,
+    "output": "",
+    "environment": false,
+    "detail": {}
+   }
+  ]
+ }
+}

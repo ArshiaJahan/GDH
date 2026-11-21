@@ -1,0 +1,44 @@
+{
+ "task": "replay-live-recordings-verify-and-render-writes-b4264b2",
+ "agent": "claude_code_glm",
+ "trial": 2,
+ "passed": false,
+ "blame": "agent",
+ "reason": "failed command 'tests' (its own versions of skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs were replaced by the hidden tests)",
+ "wall_s": 256.0,
+ "cost_usd": 1.9395,
+ "tool_calls": 36,
+ "input_tokens": 3513268,
+ "output_tokens": 19604,
+ "agent_error": "",
+ "timed_out": false,
+ "tampered": [
+  "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+ ],
+ "failed_steps": [
+  "tests"
+ ],
+ "diff_lines": 288,
+ "started_at": "2026-11-20T23:37:24Z",
+ "helper_calls": 0,
+ "model": "claude-opus-5-5",
+ "grade": {
+  "passed": false,
+  "tampered": [
+   "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+  ],
+  "environment_failure": false,
+  "steps": [
+   {
+    "name": "tests",
+    "kind": "command",
+    "passed": false,
+    "exit": 1,
+    "duration_s": 0.6851659580133855,
+    "output": "lay(self, session, op, request, *, consent=None, cancel=None):\n                return BridgeResult(\"fail\", \"1 failing test of 1\", \"cli_batch\", evidence={\"replay_op\": op})\n    \n        s = app.store.create(folder=str(proj), mode=\"ask\")\n        app.extensions[\"unity_bridge\"] = FailingRender(app)\n        r = await UT.run_op(app, s, dict(RENDER))\n>       assert not r.text.startswith(\"Replay render: pass\"), r.text[:300]\nE       AssertionError: Replay render: pass. 1 tests passed; exported Logs/harness/replay/rr-test0001/run.mp4, Logs/harness/replay/rr-test0001/run.gif from 2 frames\nE         {\nE          \"op\": \"render\",\nE          \"run_id\": \"rr-test0001\",\nE          \"route\": \"cli_batch\",\nE          \"status\": \"pass\",\nE          \"summary\": \"1 tests passed; exported Logs/harness/replay/rr-test0001/ru\nE       assert not True\nE        +  where True = <built-in method startswith of str object at 0x126a552b0>('Replay render: pass')\nE        +    where <built-in method startswith of str object at 0x126a552b0> = 'Replay render: pass. 1 tests passed; exported Logs/harness/replay/rr-test0001/run.mp4, Logs/harness/replay/rr-test000...gs/harness/replay/rr-test0001/run.mp4\"\\n   ],\\n   \"capture_dir\": \"Logs/harness/replay/rr-test0001/capture\"\\n  }\\n }\\n}'.startswith\nE        +      where 'Replay render: pass. 1 tests passed; exported Logs/harness/replay/rr-test0001/run.mp4, Logs/harness/replay/rr-test000...gs/harness/replay/rr-test0001/run.mp4\"\\n   ],\\n   \"capture_dir\": \"Logs/harness/replay/rr-test0001/capture\"\\n  }\\n }\\n}' = ToolOutput(text='Replay render: pass. 1 tests passed; exported Logs/harness/replay/rr-test0001/run.mp4, Logs/harness/r...ture_dir\": \"Logs/harness/replay/rr-test0001/capture\"\\n  }\\n }\\n}', is_error=False, items=[], images=[], untrusted=None).text\n\ntests/test_replay_render_export.py:177: AssertionError\n------------------------------ Captured log call -------------------------------\nWARNING  gamedevworkstation.features.replay:replay.py:1134 replay: couldn't add exports to the report\nTraceback (most recent call last):\n  File \"/private/var/folders/07/xyyrk2p92jnblsq7j428mt5h0000gn/T/gdw-eval-tgf5e5os/tree/backend/gamedevworkstation/features/replay.py\", line 1130, in run_replay_op\n    mark = (out_dir / _OWN_REPORT_MARK).read_text(encoding=\"utf-8\").strip()\n           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^\n  File \"/Users/arshiajahan/anaconda3/lib/python3.13/pathlib/_local.py\", line 546, in read_text\n    return PathBase.read_text(self, encoding, errors, newline)\n           ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/arshiajahan/anaconda3/lib/python3.13/pathlib/_abc.py\", line 632, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:\n         ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/arshiajahan/anaconda3/lib/python3.13/pathlib/_local.py\", line 537, in open\n    return io.open(self, mode, buffering, encoding, errors, newline)\n           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nFileNotFoundError: [Errno 2] No such file or directory: '/private/var/folders/07/xyyrk2p92jnblsq7j428mt5h0000gn/T/pytest-of-arshiajahan/pytest-1396/test_a_failed_render_isnt_repo0/Game/Logs/harness/replay/rr-test0001/.report.gdw.sha256'\n=========================== short test summary info ============================\nFAILED tests/test_replay_render_export.py::test_a_render_without_frames_is_reported_not_passed\nFAILED tests/test_replay_render_export.py::test_frames_are_encoded_with_the_requested_spec\nFAILED tests/test_replay_render_export.py::test_export_failure_keeps_the_ffmpeg_error\nFAILED tests/test_replay_render_export.py::test_the_verification_test_captures_frames_for_render_requests\nFAILED tests/test_replay_render_export.py::test_a_passing_render_through_the_tool_returns_the_export\nFAILED tests/test_replay_render_export.py::test_a_failed_render_isnt_reported_with_an_earlier_verify_report\n6 failed, 2 passed in 0.30s\n",
+    "environment": false,
+    "detail": {}
+   }
+  ]
+ }
+}

@@ -1,0 +1,613 @@
+diff --git a/README.md b/README.md
+index 7e26bcd..32ba293 100644
+--- a/README.md
++++ b/README.md
+@@ -57,6 +57,11 @@ Everything runs locally; the backend listens on `127.0.0.1` only.
+ 
+ ### Claude Code sessions
+ 
++New sessions run on Claude Code (your Claude subscription) by default (`[sessions] default_harness =
++"claude_code"`). The New session screen (⌘N) has a greeting, a large composer (Chat only / Folder,
++Claude model, effort, Plan / Ask / Accept edits, Tools) and recent-folder pills; the session is
++created on Send. Scheduled tasks, campaigns, fleet and subagents keep the built-in loop.
++
+ Checked against claude 2.1.308 logged in with a claude.ai subscription: login detection, the
+ stream-json protocol, the PreToolUse hook, the permission prompt tool, GDW's MCP tools, Plan mode's
+ plan card, questions, Stop and `--resume` (redacted captures in `tests/fixtures/claude_stream/`).
+diff --git a/backend/gamedevworkstation/default_config.toml b/backend/gamedevworkstation/default_config.toml
+index 2a85b42..a605660 100644
+--- a/backend/gamedevworkstation/default_config.toml
++++ b/backend/gamedevworkstation/default_config.toml
+@@ -71,6 +71,7 @@ theme = "system"                    # system | light | dark
+ auto_title = true                   # name sessions after the first reply (claude.fast, low effort, a fraction of a cent)
+ trash_days = 30                     # sessions in Trash are deleted for good after this many days
+ event_retention_days = 7            # the event log (replay for briefly disconnected windows) keeps this many days
++default_harness = "claude_code"     # new sessions: claude_code (your Claude subscription) | builtin | agent_sdk | codex_cli
+ 
+ [updates]
+ # `make release` builds new versions into this folder; the app checks it and offers
+diff --git a/backend/gamedevworkstation/features/claude_code.py b/backend/gamedevworkstation/features/claude_code.py
+index 6e0fce6..3b7c024 100644
+--- a/backend/gamedevworkstation/features/claude_code.py
++++ b/backend/gamedevworkstation/features/claude_code.py
+@@ -64,14 +64,14 @@ from typing import TYPE_CHECKING, Any
+ from fastapi import APIRouter, Body, FastAPI, HTTPException
+ 
+ from ..children import CHILDREN
+-from ..config import data_dir
++from ..config import data_dir, sessions_dir
+ from ..core.types import Message, TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock, Usage, new_id
+ from ..providers.base import compute_cost
+ from ..skills import turn_skill_segments
+ from ..store import remove_claude_code_folder, valid_claude_code_session
+ from .claude_cli import LOGIN_HINT, CliProbe, redact
+ from .gdw_mcp import PROMPT_TOOL, SERVER, GdwMcp, mount
+-from .harnesses import DEFERRED_SDK_TOOLS, HOOK_TIMEOUT_S, _cwd, _project_instructions, _prompt_text, make_gate
++from .harnesses import DEFERRED_SDK_TOOLS, HOOK_TIMEOUT_S, _project_instructions, _prompt_text, make_gate
+ 
+ if TYPE_CHECKING:
+     from ..app import AppState
+@@ -148,6 +148,27 @@ def _cap_prompt(text: str) -> str:
+     return raw[:limit].decode("utf-8", errors="ignore") + PROMPT_TRUNCATED
+ 
+ 
++
++def work_dir(sid: str) -> Path:
++    """A chat-only session's private working folder: data_dir/claude_code/<sid>/work (0700)."""
++    d = data_dir() / "claude_code" / sid / "work"
++    d.mkdir(parents=True, exist_ok=True)
++    os.chmod(d.parent, 0o700)
++    os.chmod(d, 0o700)
++    return d
++
++
++def session_cwd(s: dict) -> Path:
++    """Where the claude process runs: the session's folder, else its private work folder. A chat-only
++    session that already has a Claude Code conversation in the old shared sessions/<sid> folder keeps
++    it, since --resume only finds conversations by their working directory."""
++    if s.get("folder"):
++        return Path(s["folder"])
++    legacy = sessions_dir() / s["id"]
++    if (s.get("settings") or {}).get("claude_code_session") and legacy.is_dir():
++        return legacy
++    return work_dir(s["id"])
++
+ class ClaudeStartError(RuntimeError):
+     def __init__(self, text: str, stderr: str = ""):
+         super().__init__(text)
+@@ -785,7 +806,7 @@ class ClaudeCode:
+                 proc.billing = billing
+                 touched: list[Path] = []
+                 turn = Turn(sid=sid, model=model, effort=effort, jid=jid, touched=touched,
+-                            gate=make_gate(app, lambda: app.store.get(sid) or s, _cwd(s), touched))
++                            gate=make_gate(app, lambda: app.store.get(sid) or s, session_cwd(s), touched))
+                 proc.turn = turn
+                 proc.last_used = time.monotonic()
+                 if proc.reader.done():  # it already exited (bad flags, crash at start)
+@@ -834,7 +855,7 @@ class ClaudeCode:
+             cli = self.probe.cached() and self.probe.cached().get("path")  # type: ignore[union-attr]
+             if not cli:
+                 raise RuntimeError("The claude CLI isn't installed.")
+-            cwd = _cwd(s)
++            cwd = session_cwd(s)
+             sig = self._signature(s, cli, model, effort, cwd)
+             cur = self.procs.get(sid)
+             if cur and cur.alive and cur.signature == sig and cur.turn is None and not cur.starting \
+@@ -954,7 +975,7 @@ class ClaudeCode:
+         s = self.app.store.get(sid)
+         if not s:
+             return None
+-        return make_gate(self.app, lambda: self.app.store.get(sid) or s, _cwd(s), [])
++        return make_gate(self.app, lambda: self.app.store.get(sid) or s, session_cwd(s), [])
+ 
+     def _note_plan(self, sid: str, name: str, inp: dict) -> None:
+         """Keep the plan text the CLI writes (GDW never reads ~/.claude), for the plan card."""
+diff --git a/backend/gamedevworkstation/features/session_routes.py b/backend/gamedevworkstation/features/session_routes.py
+index 46bfb2b..050653f 100644
+--- a/backend/gamedevworkstation/features/session_routes.py
++++ b/backend/gamedevworkstation/features/session_routes.py
+@@ -2,7 +2,10 @@
+ from __future__ import annotations
+ 
+ import json
++import os
+ import shutil
++import subprocess
++import sys
+ from typing import TYPE_CHECKING
+ 
+ from fastapi import APIRouter, FastAPI, HTTPException
+@@ -104,6 +107,36 @@ async def compact(app: "AppState", sid: str) -> dict:
+         raise HTTPException(502, f"Compact failed: {e}") from e
+ 
+ 
++def account_full_name() -> str:
++    """The OS account's full name ("Arshia Jahan"): `id -F` on macOS, else the passwd GECOS field."""
++    if sys.platform == "darwin":
++        try:
++            out = subprocess.run(["id", "-F"], capture_output=True, text=True, timeout=2)
++            if out.returncode == 0 and out.stdout.strip():
++                return out.stdout.strip()
++        except (OSError, subprocess.SubprocessError):
++            pass
++    try:
++        import pwd
++
++        return pwd.getpwuid(os.getuid()).pw_gecos.split(",")[0].strip()
++    except (ImportError, KeyError, AttributeError, OSError):
++        return ""
++
++
++def greeting_name(full: str) -> str | None:
++    """The first name to greet with, or None when there's no usable name."""
++    words = (full or "").split()
++    if not words or not any(ch.isalpha() for ch in words[0]):
++        return None
++    return words[0][:40]
++
++
++async def greeting() -> dict:
++    """The New session screen's greeting name, from the Mac account."""
++    return {"name": greeting_name(account_full_name())}
++
++
+ def register(app: FastAPI, api: APIRouter, S: "AppState") -> None:
+     @api.get("/sessions/{sid}/context")
+     async def ctx(sid: str) -> dict:
+@@ -113,6 +146,8 @@ def register(app: FastAPI, api: APIRouter, S: "AppState") -> None:
+     async def do_compact(sid: str) -> dict:
+         return await compact(S, sid)
+ 
++    api.get("/greeting")(greeting)
++
+     @api.get("/environment")
+     async def environment() -> dict:
+         try:
+diff --git a/backend/gamedevworkstation/server.py b/backend/gamedevworkstation/server.py
+index 9649cc8..e956aad 100644
+--- a/backend/gamedevworkstation/server.py
++++ b/backend/gamedevworkstation/server.py
+@@ -28,6 +28,14 @@ from .skills import get_skill, pinned_skill_names, skill_invocation, skill_load_
+ from .store import valid_claude_code_session
+ 
+ HARNESSES = ("builtin", "agent_sdk", "codex_cli", "claude_code")
++
++
++def new_session_harness(config: Any) -> str:
++    """The harness a session made from the New session screen gets when the client names none:
++    [sessions].default_harness (claude_code: your Claude subscription), "builtin" if unknown. Scheduled
++    tasks, campaigns, fleet and subagents create sessions through the store and keep the built-in loop."""
++    h = (getattr(config, "sessions", None) or {}).get("default_harness", "claude_code")
++    return h if h in HARNESSES else "builtin"
+ WS_OVERFLOW = 4000  # close code: this client fell too far behind; reconnect with ?since=<last seq>
+ 
+ # /api/file serves these inline as they are; a browser shows them but runs nothing in them.
+@@ -197,6 +205,14 @@ def create_app(token: str, state: AppState | None = None) -> FastAPI:
+         harness = body.get("harness")
+         if harness is not None:
+             await _check_harness(harness)
++        elif (harness := new_session_harness(S.config)) != "builtin" \
++                and (not body.get("model") or S.config.model(_model_arg(body["model"])).provider == "anthropic"):
++            try:  # the default falls back to the built-in loop when its CLI isn't there
++                await _check_harness(harness)
++            except HTTPException:
++                harness = "builtin"
++        else:
++            harness = None
+         s = S.store.create(title=body.get("title") or "New session", folder=folder,
+                            model=_model_arg(body["model"]) if body.get("model") else None,
+                            effort=body.get("effort"), mode=body.get("mode"))  # skill disclosure: store.create
+diff --git a/config.example.toml b/config.example.toml
+index 6a56835..074c201 100644
+--- a/config.example.toml
++++ b/config.example.toml
+@@ -71,6 +71,7 @@ theme = "system"                    # system | light | dark
+ auto_title = true                   # name sessions after the first reply (claude.fast, low effort, a fraction of a cent)
+ trash_days = 30                     # sessions in Trash are deleted for good after this many days
+ event_retention_days = 7            # the event log (replay for briefly disconnected windows) keeps this many days
++default_harness = "claude_code"     # new sessions: claude_code (your Claude subscription) | builtin | agent_sdk | codex_cli
+ 
+ [updates]
+ # `make release` builds new versions into this folder; the app checks it and offers
+diff --git a/docs/GUIDE.md b/docs/GUIDE.md
+index 9800535..2d11926 100644
+--- a/docs/GUIDE.md
++++ b/docs/GUIDE.md
+@@ -143,7 +143,11 @@ keep an explicit **Save**.
+   (`build`, `research`) and `relay_tokens` (discoveries passed to the next wave).
+ - `[sessions]` `auto_title` (name new sessions after the first reply, default on), `trash_days`
+   (sessions in Trash are deleted for good after this many days, default 30) and
+-  `event_retention_days` (how long the event log keeps events, default 7; see Settings → Storage).
++  `event_retention_days` (how long the event log keeps events, default 7; see Settings → Storage), and
++  `default_harness` (the harness a session made on the New session screen runs on, default
++  `"claude_code"`: your Claude subscription; when the `claude` CLI isn't installed, or the model isn't a
++  Claude model, it falls back to `"builtin"`). Scheduled tasks, campaigns, fleet and subagents always
++  use the built-in loop, and existing sessions keep their harness.
+ - `[mcp.presets.<key>]` built-in MCP servers (name, transport, command, args, description) added
+   once to Skills & MCP; `[skills.mcp_on_invoke]` maps a skill to the MCP servers that invoking it
+   turns on for the session (every Unity skill → `unity`).
+@@ -697,8 +701,17 @@ change these details: see Troubleshooting.
+ (Claude Code, installed by you and never modified or bundled) inside GameDevWorkstation. You chat
+ in the normal chat; Claude Code's own loop and tools do the work in the session folder (a worktree
+ folder works too: the CLI runs there), and its replies, tool cards, approvals and usage show up like
+-any other session. Pick it in a new session's **Run this session with** menu (shown until the first
+-message) or in the side panel's Environment card → **Harness**.
++any other session. New sessions run on it by default (`[sessions] default_harness`); pick another
++in the New session screen's **Tools** menu, or later in the side panel's Environment card → **Harness**.
++
++**New session screen.** ⌘N (or **+** in the sidebar) opens a greeting with your Mac account's first
++name and a large composer: **Chat only** / **Folder** with the folder chip, the Claude model, effort,
++mode (**Plan**, **Ask**, **Accept edits**) and **Tools** (the harness), plus pills for your recent
++folders. Nothing is created until **Send**. If the first message fails, your text stays in the
++composer. Chat-only sessions run `claude` in a private per-session folder
++(`<data dir>/claude_code/<session id>/work`); chat-only sessions that already had a Claude Code
++conversation keep their old folder so `--resume` still finds it. Workflows are hidden in Claude
++subscription sessions, because they need the API loop (campaign tools and gates).
+ 
+ **Your login.** These sessions use the Claude account you logged in to with `claude auth login`.
+ GameDevWorkstation passes no API key and never uses `--bare`. Every CLI process (including status
+diff --git a/frontend/src/components/Chat.tsx b/frontend/src/components/Chat.tsx
+index 389ab30..fb603ab 100644
+--- a/frontend/src/components/Chat.tsx
++++ b/frontend/src/components/Chat.tsx
+@@ -7,6 +7,7 @@ import { sessionActions } from "../lib/sessions";
+ import { actions, useStore, type AgentStatus, type Block, type Msg } from "../lib/store";
+ import { ApprovalCard } from "./ApprovalCard";
+ import { Composer } from "./Composer";
++import { NewSession } from "./NewSession";
+ import { SafeMarkdown } from "./SafeMarkdown";
+ import { NoKeyNotice, SetupChecklist } from "./SetupChecklist";
+ import { ClaudeCodeChip, ClaudeLoginNotice, HarnessSelect } from "./ClaudeCode";
+@@ -53,6 +54,7 @@ function StatusLine({ s }: { s: AgentStatus }) {
+ export function Chat() {
+   useModelCatalog();
+   const sid = useStore((s) => s.currentId);
++  const composeNew = useStore((s) => s.composeNew);
+   const session = useStore((s) => s.sessions.find((x) => x.id === sid));
+   const messages = useStore((s) => (sid ? s.messages[sid] : undefined)) ?? EMPTY;
+   const streaming = useStore((s) => (sid ? s.streaming[sid] : null));
+@@ -113,15 +115,7 @@ export function Chat() {
+     if (el && stick.current && !anchor.current) el.scrollTop = el.scrollHeight;
+   }, [messages, streaming, pending.length]);
+ 
+-  if (!session) {
+-    return (
+-      <div className="h-full flex flex-col items-center justify-center gap-3 text-muted">
+-        <div className="w-full max-w-[560px] px-5"><SetupChecklist /></div>
+-        <p>Start a session to chat with your agents.</p>
+-        <button className="btn btn-primary" onClick={() => sessionActions.create()}>New session</button>
+-      </div>
+-    );
+-  }
++  if (!session || composeNew) return <NewSession />;
+   const running = session.status === "running";
+   const visible = messages.filter((m) => !m.meta?.tool_results);
+   const firstLive = visible.findIndex((m) => !m.meta?.compacted);
+@@ -129,11 +123,11 @@ export function Chat() {
+   return (
+     <div className="h-full flex flex-col min-w-0">
+       <header className="flex items-center gap-2 px-4 h-11 border-b border-line surface shrink-0" data-tauri-drag-region>
+-        <h1 className="font-medium truncate">{session.title}</h1>
++        <h1 className="font-medium truncate min-w-0">{session.title}</h1>
+         <span className="chip whitespace-nowrap shrink-0"><ProviderDot model={session.model} />{modelLabel(session.model)} <EffortMeter effort={session.effort} /> {session.effort}</span>
+         <SessionTasks sessionId={session.id} />
+         {session.harness === "claude_code" && <ClaudeCodeChip s={session} />}
+-        <div className="ml-auto flex items-center gap-1">
++        <div className="ml-auto flex items-center gap-1 shrink-0">
+           {(running || backgroundBusy) && <button className="btn" title={running ? "Stop the agent and everything it started" : "Stop this session's background subagents and commands"} onClick={() => post(`/sessions/${sid}/stop`)}><Square size={12} /> Stop</button>}
+           <button className="btn btn-ghost px-1.5" title={sidePanelOpen ? "Hide side panel" : "Show side panel"} aria-label="Side panel" aria-pressed={sidePanelOpen} onClick={actions.toggleSidePanel}><PanelRight size={16} /></button>
+         </div>
+diff --git a/frontend/src/components/ClaudeCode.tsx b/frontend/src/components/ClaudeCode.tsx
+index 42b7074..4d52c01 100644
+--- a/frontend/src/components/ClaudeCode.tsx
++++ b/frontend/src/components/ClaudeCode.tsx
+@@ -15,6 +15,11 @@ export const HARNESS_HINT: Record<string, string> = {
+   claude_code: "Runs your own claude CLI with your own Claude login. API key logins count toward spend limits.",
+ };
+ 
++/** A harness's display name ("Claude Code (subscription)"); unknown ids come back as they are. */
++export function harnessName(v: string): string {
++  return HARNESSES.find(([k]) => k === v)?.[1] ?? v;
++}
++
+ export type ClaudeStatus = {
+   installed: boolean; path: string | null; version: string | null; logged_in: boolean; auth_method: string | null;
+   auth: Record<string, unknown> | null; bills_api: boolean; error: string | null; login_hint: string;
+@@ -70,16 +75,36 @@ export function ClaudeCodeChip({ s }: { s: Session }) {
+   const cmd = typeof id === "string" && /^[0-9a-f-]{36}$/i.test(id) ? `claude --resume ${id}` : null;
+   const ok = !!st?.installed && st.logged_in;
+   return (
+-    <span className="chip whitespace-nowrap shrink-0 gap-1" data-testid="claude-code-chip"
++    <span className="chip whitespace-nowrap min-w-0 overflow-hidden gap-1" data-testid="claude-code-chip"
+       title={cmd ? `Continue this conversation in a terminal: ${cmd}` : "Claude Code (your CLI login)"}>
+-      <TerminalSquare size={12} aria-hidden />
++      <TerminalSquare size={12} aria-hidden className="shrink-0" />
+       <span>Claude Code</span>
+       <span className={ok ? "text-ok" : "text-warn"}>· {loginLabel(st)}</span>
+-      {cmd && <><code className="font-mono text-[11.5px] text-muted hidden md:inline">{cmd}</code><CopyButton text={cmd} label="Copy the claude --resume command" /></>}
++      {cmd && <><code className="font-mono text-[11.5px] text-muted hidden md:inline truncate min-w-0">{cmd}</code><CopyButton text={cmd} label="Copy the claude --resume command" /></>}
+     </span>
+   );
+ }
+ 
++/** Why a Claude subscription session can't run yet (CLI missing or logged out), with Re-check; null when it can. */
++export function ClaudeStatusNotice({ st, onRefresh }: { st: ClaudeStatus | null; onRefresh?: () => void }) {
++  if (!st || (st.installed && st.logged_in)) return null;
++  return (
++    <div role="status" data-testid="claude-status-notice" className="flex items-start gap-2 rounded-md border border-line surface-raised px-3 py-2 text-[13px]">
++      <KeyRound size={15} className="text-warn mt-0.5 shrink-0" aria-hidden />
++      <div className="flex-1 min-w-0">
++        <div className="font-medium">{st.installed ? "Claude Code isn't logged in" : "The claude CLI isn't installed"}</div>
++        <div className="text-muted">
++          {st.installed
++            ? <>Run <code className="font-mono">claude auth login</code> in a terminal to use your Claude subscription.</>
++            : <>Install it from code.claude.com, or set its path in Settings → Claude Code. Until then new sessions use the built-in loop.</>}
++        </div>
++      </div>
++      {st.installed && <CopyButton text="claude auth login" label="Copy claude auth login" />}
++      {onRefresh && <button className="btn py-0.5 shrink-0" onClick={onRefresh} aria-label="Re-check Claude Code"><RefreshCw size={12} /> Re-check</button>}
++    </div>
++  );
++}
++
+ /** The reply when the claude CLI isn't logged in: how to log in, then Retry. */
+ export function ClaudeLoginNotice({ m, sessionId }: { m: Msg; sessionId?: string }) {
+   const current = useStore((x) => x.currentId);
+diff --git a/frontend/src/components/Composer.tsx b/frontend/src/components/Composer.tsx
+index 922dcf7..93617c3 100644
+--- a/frontend/src/components/Composer.tsx
++++ b/frontend/src/components/Composer.tsx
+@@ -109,10 +109,11 @@ export function Composer({ session, running }: { session: Session; running: bool
+   const [workflows, setWorkflows] = useState<ChainTemplate[]>([]);
+   const [workflow, setWorkflow] = useState<ChainTemplate | null>(null);
+   const loadWorkflows = () => {
+-    if (!session.folder) return setWorkflows([]);
++    // Workflows need the built-in loop (campaign tools, gates), so a Claude subscription session has none.
++    if (!session.folder || session.harness === "claude_code") return setWorkflows([]);
+     campaignsApi.chains(session.folder, "chain").then((r) => setWorkflows(r.templates.filter((t) => t.kinds.includes("chain")))).catch(() => setWorkflows([]));
+   };
+-  useEffect(() => { setWorkflow(null); loadWorkflows(); }, [session.id, session.folder]);
++  useEffect(() => { setWorkflow(null); loadWorkflows(); }, [session.id, session.folder, session.harness]);
+   const closeSkillMenu = useCallback(() => setSkillMenu(false), []);
+   const loadSkills = () => get("/skills").then((r) => {
+     const all: SkillInfo[] = r.skills;
+@@ -136,8 +137,8 @@ export function Composer({ session, running }: { session: Session; running: bool
+     { cmd: "/clear", hint: "Start fresh; history stays visible", args: [] },
+     { cmd: "/skill", hint: "Use a skill in this message", args: skills.map((s) => s.name) },
+     { cmd: "/task", hint: "Task board: new, <code>, move, done, list, link", args: TASK_SUBCOMMANDS.map(([s]) => s) },
+-    { cmd: "/workflow", hint: "Run a workflow (phases with checks) in this session", args: workflows.map((w) => w.id) },
+-  ], [modelChoices, skills, workflows]);
++    ...(session.harness === "claude_code" ? [] : [{ cmd: "/workflow", hint: "Run a workflow (phases with checks) in this session", args: workflows.map((w) => w.id) }]),
++  ], [modelChoices, skills, workflows, session.harness]);
+ 
+   // /task autocomplete: task codes from the board (matched by the backend) and its column names.
+   const [taskHits, setTaskHits] = useState<TaskHit[]>([]);
+diff --git a/frontend/src/components/NewSession.tsx b/frontend/src/components/NewSession.tsx
+new file mode 100644
+index 0000000..afd5b4f
+--- /dev/null
++++ b/frontend/src/components/NewSession.tsx
+@@ -0,0 +1,157 @@
++// The New session screen (⌘N): a greeting with the Mac account's first name, a large composer with
++// Chat only / Folder, the folder chip, Claude model, effort, mode and Tools (the harness), and pills for
++// recent folders. Nothing exists until Send: then the session is created and the first message sent.
++// A failed send keeps the text, so nothing typed is lost.
++import { ArrowUp, Folder, MessageSquare, Wrench, X } from "lucide-react";
++import { useEffect, useMemo, useState } from "react";
++import { get, post } from "../lib/api";
++import { pickFolder } from "../lib/native";
++import { actions, useStore, type Session } from "../lib/store";
++import { ClaudeStatusNotice, HarnessSelect, harnessName, useClaudeStatus } from "./ClaudeCode";
++import { SetupChecklist } from "./SetupChecklist";
++import { LEVELS, providerModels, useModelCatalog } from "./ui";
++
++const RECENT_MAX = 5;
++const MODES: [string, string][] = [["plan", "Plan"], ["ask", "Ask"], ["accept_edits", "Accept edits"]];
++
++/** The folders of the most recently active sessions, newest first, without repeats or Trash. */
++export function recentFolders(sessions: Session[], max = RECENT_MAX): string[] {
++  const out: string[] = [];
++  const order = [...sessions].filter((s) => s.folder && !s.deleted)
++    .sort((a, b) => (b.activity_at ?? b.updated_at ?? 0) - (a.activity_at ?? a.updated_at ?? 0));
++  for (const s of order) {
++    if (out.length >= max) break;
++    if (!out.includes(s.folder!)) out.push(s.folder!);
++  }
++  return out;
++}
++
++const baseName = (p: string) => p.replace(/\/+$/, "").split("/").pop() || p;
++
++function partOfDay(d = new Date()): string {
++  const h = d.getHours();
++  return h < 5 ? "Good evening" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
++}
++
++export function NewSession() {
++  useModelCatalog();
++  const sessions = useStore((s) => s.sessions);
++  const group_id = useStore((s) => s.composeGroup ?? null);
++  const models = providerModels("anthropic");
++  const [name, setName] = useState<string | null>(null);
++  const [env, setEnv] = useState<any>(null);
++  const [text, setText] = useState("");
++  const [folderMode, setFolderMode] = useState(false);
++  const [folder, setFolder] = useState<string | null>(null);
++  const [model, setModel] = useState("");
++  const [effort, setEffort] = useState("medium");
++  const [mode, setMode] = useState("ask");
++  const [harness, setHarness] = useState("claude_code");
++  const [picked, setPicked] = useState(false); // unpicked: the server's [sessions].default_harness
++  const [toolsOpen, setToolsOpen] = useState(false);
++  const [busy, setBusy] = useState(false);
++  const [st, refresh] = useClaudeStatus(harness === "claude_code");
++  const recent = useMemo(() => recentFolders(sessions), [sessions]);
++
++  useEffect(() => { get<{ name: string | null }>("/greeting").then((r) => setName(r?.name ?? null)).catch(() => setName(null)); }, []);
++  useEffect(() => {
++    get<any>("/environment").then((e) => {
++      setEnv(e);
++      if (e?.harnesses && !e.harnesses.claude_code) setHarness("builtin"); // no claude CLI: the built-in loop
++    }).catch(() => setEnv(null));
++  }, []);
++  useEffect(() => { if (!model && models.length) setModel(models[0].id); }, [models.length]);
++
++  const chooseFolder = async () => {
++    const f = await pickFolder(folder ?? undefined);
++    if (f) { setFolder(f); setFolderMode(true); }
++  };
++
++  const send = async () => {
++    const t = text.trim();
++    if (!t || busy) return;
++    if (folderMode && !folder) return actions.toast("Pick a folder first, or switch to Chat only.", "error");
++    setBusy(true);
++    let s: Session | null = null;
++    try {
++      s = await post<Session>("/sessions", {
++        ...(folderMode && folder ? { folder } : {}), ...(model ? { model } : {}), effort, mode,
++        ...(picked ? { harness } : {}), ...(group_id ? { group_id } : {}),
++      });
++      await post(`/sessions/${s.id}/messages`, { text: t, attachments: [] });
++      setText("");
++      await actions.openSession(s.id);
++    } catch (e: any) {
++      // Keep the text; a session already made opens so the message can be sent again from there.
++      actions.toast(e?.message ?? "Couldn't start the session", "error");
++      if (s) {
++        await actions.openSession(s.id);
++        actions.setComposerText(t);
++      }
++    } finally { setBusy(false); }
++  };
++
++  return (
++    <div className="h-full overflow-y-auto scroll-thin" data-testid="new-session">
++      <div className="max-w-[720px] mx-auto px-5 pt-[14vh] pb-10 flex flex-col gap-4">
++        <SetupChecklist />
++        <h1 className="text-[28px] font-serif text-center">{partOfDay()}{name ? `, ${name}` : ""}</h1>
++        <div className="rounded-xl border border-line surface-raised shadow-sm">
++          <textarea id="new-session-composer" className="w-full resize-none bg-transparent px-4 pt-4 pb-2 text-[15px] outline-none min-h-[110px]"
++            placeholder="How can I help you today?" aria-label="Message" value={text} disabled={busy}
++            onChange={(e) => setText(e.target.value)}
++            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }} />
++          <div className="flex flex-wrap items-center gap-1.5 px-3 pb-3 text-[12.5px]">
++            <div role="group" aria-label="Where it works" className="flex rounded-md border border-line overflow-hidden">
++              <button className={`px-2 py-0.5 flex items-center gap-1 ${!folderMode ? "bg-sunken" : ""}`} aria-pressed={!folderMode} onClick={() => setFolderMode(false)}>
++                <MessageSquare size={12} aria-hidden /> Chat only
++              </button>
++              <button className={`px-2 py-0.5 flex items-center gap-1 ${folderMode ? "bg-sunken" : ""}`} aria-pressed={folderMode}
++                onClick={() => (folder ? setFolderMode(true) : chooseFolder())}>
++                <Folder size={12} aria-hidden /> Folder
++              </button>
++            </div>
++            {folderMode && folder && (
++              <span className="chip gap-1 min-w-0 max-w-[220px]" title={folder} data-testid="folder-chip">
++                <button className="truncate" onClick={chooseFolder} aria-label="Change folder">{baseName(folder)}</button>
++                <button aria-label="Clear folder" onClick={() => { setFolder(null); setFolderMode(false); }}><X size={11} /></button>
++              </span>
++            )}
++            <select className="input py-0.5" aria-label="Model" value={model} onChange={(e) => setModel(e.target.value)}>
++              {models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
++            </select>
++            <select className="input py-0.5" aria-label="Effort" value={effort} onChange={(e) => setEffort(e.target.value)}>
++              {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
++            </select>
++            <select className="input py-0.5" aria-label="Mode" value={mode} onChange={(e) => setMode(e.target.value)}>
++              {MODES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
++            </select>
++            <button className="btn btn-ghost py-0.5" aria-expanded={toolsOpen} onClick={() => setToolsOpen(!toolsOpen)} title={harnessName(harness)}>
++              <Wrench size={12} aria-hidden /> Tools
++            </button>
++            <button className="btn btn-primary ml-auto px-2 py-1" aria-label="Send" disabled={busy || !text.trim()} onClick={send}>
++              <ArrowUp size={14} />
++            </button>
++          </div>
++          {toolsOpen && (
++            <div className="flex items-center gap-2 border-t border-line px-3 py-2 text-[12.5px]" data-testid="new-session-tools">
++              <span className="text-muted">Run with</span>
++              <HarnessSelect value={harness} available={env?.harnesses} onChange={(v) => { setHarness(v); setPicked(true); }} />
++            </div>
++          )}
++        </div>
++        {harness === "claude_code" && <ClaudeStatusNotice st={st} onRefresh={refresh} />}
++        {recent.length > 0 && (
++          <div className="flex flex-wrap justify-center gap-1.5" aria-label="Recent folders">
++            {recent.map((f) => (
++              <button key={f} className={`chip gap-1 ${folderMode && folder === f ? "border-action" : ""}`} title={f}
++                aria-pressed={folderMode && folder === f} onClick={() => { setFolder(f); setFolderMode(true); }}>
++                <Folder size={11} aria-hidden /> {baseName(f)}
++              </button>
++            ))}
++          </div>
++        )}
++      </div>
++    </div>
++  );
++}
+diff --git a/frontend/src/components/Sidebar.tsx b/frontend/src/components/Sidebar.tsx
+index 87ba059..94f6fdf 100644
+--- a/frontend/src/components/Sidebar.tsx
++++ b/frontend/src/components/Sidebar.tsx
+@@ -15,7 +15,7 @@ import { Menu, type MenuItem } from "./ui";
+ import { UpdateBanner } from "./Updates";
+ 
+ /** ⌘N and the "New session" buttons. Joins the current session's group. */
+-export const newSession = () => A.create();
++export const newSession = () => A.startNew();
+ 
+ type Hit = { session_id: string; title: string; archived: boolean; match: "title" | "message"; message_id: string | null; snippet: string | null };
+ 
+@@ -216,7 +216,7 @@ export function Sidebar() {
+     { label: "Delete group", icon: <Trash2 size={14} />, danger: true, hint: "Its sessions stay, ungrouped", onClick: () => A.deleteGroup(g) },
+   ];
+   const headerItems = (): MenuItem[] => [
+-    { label: "New session", icon: <Plus size={14} />, kbd: "⌘N", onClick: () => A.create() },
++    { label: "New session", icon: <Plus size={14} />, kbd: "⌘N", onClick: () => A.startNew() },
+     { label: "New group", icon: <FolderPlus size={14} />, onClick: () => A.newGroup() },
+     { heading: "Group by" },
+     ...([["groups", "Groups"], ["folder", "Folder"], ["date", "Date"], ["none", "None"]] as [GroupBy, string][]).map(([k, l]) => ({
+diff --git a/frontend/src/lib/sessions.ts b/frontend/src/lib/sessions.ts
+index 784cdc6..2e5eb60 100644
+--- a/frontend/src/lib/sessions.ts
++++ b/frontend/src/lib/sessions.ts
+@@ -193,7 +193,14 @@ export function isBlank(s: Session, messages: Record<string, unknown[]> = st().m
+ }
+ 
+ export const sessionActions = {
+-  /** ⌘N: a new session; it joins the current session's group. */
++  /** ⌘N: the New session screen; the session is created on Send and joins the current session's group. */
++  startNew(opts: { group_id?: string | null } = {}) {
++    const cur = find(st().currentId ?? "");
++    const group_id = opts.group_id !== undefined ? opts.group_id : cur && !cur.deleted && !cur.archived ? cur.group_id ?? null : null;
++    set({ composeNew: true, composeGroup: group_id, page: "chat", ...(st().sidebarView !== "active" ? { sidebarView: "active" } : {}) });
++    requestAnimationFrame(() => document.getElementById("new-session-composer")?.focus());
++  },
++  /** A new session right away (no New session screen); it joins the current session's group. */
+   async create(opts: { group_id?: string | null } = {}) {
+     if (creating) return creating; // a double click makes one session, not two
+     creating = (async () => {
+diff --git a/frontend/src/lib/store.ts b/frontend/src/lib/store.ts
+index 0fbf292..722c403 100644
+--- a/frontend/src/lib/store.ts
++++ b/frontend/src/lib/store.ts
+@@ -61,6 +61,10 @@ type State = {
+   sessions: Session[];
+   groups: Group[];
+   currentId: string | null;
++  /** The New session screen is showing (the session is created on Send). */
++  composeNew?: boolean;
++  /** The group a session made on the New session screen joins. */
++  composeGroup?: string | null;
+   sidebarView: SidebarView;
+   /** Multi-selection in the sidebar (⌘-click / ⇧-click). */
+   selection: string[];
+@@ -194,7 +198,7 @@ export const actions = {
+   },
+   async openSession(id: string) {
+     localStorage.setItem("currentSession", id);
+-    set({ currentId: id, page: "chat" });
++    set({ currentId: id, page: "chat", composeNew: false });
+     if (st().sessions.find((s) => s.id === id)?.unread) actions.markRead(id);
+     const showCompacted = st().paging[id]?.showCompacted ?? false;
+     const [page, jobs, subs] = await Promise.all([get<MsgPage>(pageUrl(id, { compacted: showCompacted })), get<Job[]>(`/jobs?session_id=${id}`), get<any[]>(`/subagents?session_id=${id}`)]);

@@ -1,0 +1,773 @@
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+new file mode 100644
+index 0000000..0d8d769
+--- /dev/null
++++ b/.github/workflows/release.yml
+@@ -0,0 +1,130 @@
++name: Release
++
++# When main carries a VERSION that has no GitHub Release yet, build the macOS app (zip + .dmg)
++# and the Windows installer and publish them as Release v<version>. These builds are on the
++# "github" update channel: they check this repo's latest release and update themselves from it.
++# The zip and installer names must match release_feed.asset_name().
++
++on:
++  push:
++    branches: [main]
++  workflow_dispatch:
++
++permissions:
++  contents: read
++
++concurrency:
++  group: release
++  cancel-in-progress: false
++
++env:
++  GDW_UPDATE_CHANNEL: github
++  GDW_UPDATE_REPO: ${{ github.repository }}
++
++jobs:
++  check:
++    name: Is there a new version?
++    runs-on: ubuntu-latest
++    outputs:
++      version: ${{ steps.v.outputs.version }}
++      release: ${{ steps.v.outputs.release }}
++    steps:
++      - uses: actions/checkout@v4
++      - id: v
++        env:
++          GH_TOKEN: ${{ github.token }}
++        run: |
++          v="$(tr -d '[:space:]' < VERSION)"
++          echo "version=$v" >> "$GITHUB_OUTPUT"
++          if gh release view "v$v" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
++            echo "v$v is already released"
++            echo "release=false" >> "$GITHUB_OUTPUT"
++          else
++            echo "v$v has no release yet; building it"
++            echo "release=true" >> "$GITHUB_OUTPUT"
++          fi
++
++  macos:
++    name: macOS app (zip + dmg)
++    needs: check
++    if: needs.check.outputs.release == 'true'
++    runs-on: macos-latest
++    timeout-minutes: 60
++    env:
++      UV_PYTHON: "3.13"
++      VERSION: ${{ needs.check.outputs.version }}
++    steps:
++      - uses: actions/checkout@v4
++      - uses: astral-sh/setup-uv@v6
++      - uses: actions/setup-node@v4
++        with:
++          node-version: 22
++          cache: npm
++          cache-dependency-path: frontend/package-lock.json
++      - uses: dtolnay/rust-toolchain@stable
++        with:
++          targets: aarch64-apple-darwin
++      - uses: Swatinem/rust-cache@v2
++        with:
++          workspaces: src-tauri
++      - name: Build
++        run: ./scripts/build_mac.sh
++      - name: Package
++        run: |
++          mkdir -p out
++          ditto -c -k --keepParent dist/GameDevWorkstation.app "out/GameDevWorkstation-$VERSION-macos-arm64.zip"
++          cp dist/GameDevWorkstation.dmg "out/GameDevWorkstation-$VERSION-macos-arm64.dmg"
++      - uses: actions/upload-artifact@v4
++        with:
++          name: release-macos
++          path: out/*
++          if-no-files-found: error
++
++  windows:
++    name: Windows installer
++    needs: check
++    if: needs.check.outputs.release == 'true'
++    runs-on: windows-latest
++    timeout-minutes: 60
++    env:
++      UV_PYTHON: "3.13"
++    steps:
++      - uses: actions/checkout@v4
++      - uses: astral-sh/setup-uv@v6
++      - uses: actions/setup-node@v4
++        with:
++          node-version: 22
++          cache: npm
++          cache-dependency-path: frontend/package-lock.json
++      - uses: dtolnay/rust-toolchain@stable
++      - uses: Swatinem/rust-cache@v2
++        with:
++          workspaces: src-tauri
++      - name: Build
++        shell: pwsh
++        run: ./scripts/build_windows.ps1
++      - uses: actions/upload-artifact@v4
++        with:
++          name: release-windows
++          path: dist/*-setup.exe
++          if-no-files-found: error
++
++  publish:
++    name: Publish v${{ needs.check.outputs.version }}
++    needs: [check, macos, windows]
++    runs-on: ubuntu-latest
++    permissions:
++      contents: write
++    env:
++      GH_TOKEN: ${{ github.token }}
++      VERSION: ${{ needs.check.outputs.version }}
++    steps:
++      - uses: actions/download-artifact@v4
++        with:
++          path: assets
++          merge-multiple: true
++      - name: Create the release
++        run: |
++          ls -l assets
++          gh release create "v$VERSION" assets/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
++            --title "GameDevWorkstation $VERSION" --generate-notes
+diff --git a/backend/gamedevworkstation/buildinfo.py b/backend/gamedevworkstation/buildinfo.py
+index 0760696..d637bf4 100644
+--- a/backend/gamedevworkstation/buildinfo.py
++++ b/backend/gamedevworkstation/buildinfo.py
+@@ -3,6 +3,10 @@
+ The app build writes `_build_info.json` next to this file (scripts/version.py build-info, run
+ by scripts/build_mac.sh); PyInstaller bundles it as package data. From source the commit
+ comes from git directly, so a stale file left by an earlier build never misleads.
++
++`channel` says where updates come from: "local" (the updates folder only) or "github" (builds
++made by the release workflow, which also fetch GitHub Releases of `repo`). From source it is
++always "local".
+ """
+ from __future__ import annotations
+ 
+@@ -29,6 +33,8 @@ def version_info() -> dict:
+         try:
+             data = json.loads(BUILD_INFO.read_text())
+             info.update({k: data.get(k) for k in ("git_commit", "git_dirty", "built_at")})
++            info["channel"] = str(data.get("channel") or "local")
++            info["repo"] = data.get("repo") or None
+         except (OSError, ValueError):
+             pass
+         return info
+diff --git a/backend/gamedevworkstation/default_config.toml b/backend/gamedevworkstation/default_config.toml
+index ccd9edb..22262f4 100644
+--- a/backend/gamedevworkstation/default_config.toml
++++ b/backend/gamedevworkstation/default_config.toml
+@@ -83,6 +83,8 @@ default_harness = "claude_code"
+ dir = "~/GameDevWorkstationUpdates"
+ check_interval_s = 30               # how often the app looks at latest.json (one stat call)
+ keep = 3                            # versions `make release` keeps; older ones are pruned
++auto_install = true                 # install a pending update by itself once no session is running (each version is tried once)
++github_interval_s = 3600            # builds from the release workflow: how often to check GitHub Releases (local builds never do)
+ 
+ [mcp.presets.unity]
+ # Built-in MCP servers. Each is added to Skills & MCP once (off by default for sessions); a
+diff --git a/backend/gamedevworkstation/features/release_feed.py b/backend/gamedevworkstation/features/release_feed.py
+new file mode 100644
+index 0000000..f5d4894
+--- /dev/null
++++ b/backend/gamedevworkstation/features/release_feed.py
+@@ -0,0 +1,206 @@
++"""Updates from GitHub Releases, for builds on the "github" update channel.
++
++The release workflow publishes every new version as GitHub Release v<version> with one asset
++per platform (see `asset_name`). A "github" build polls the repo's latest release now and then;
++when it's newer than the running version it downloads this platform's asset into the updates
++folder in the layout `make release` uses (`<dir>/<version>/` + `release.json`, then
++`latest.json` last), so the folder updater in updates.py takes it from there.
++
++- macOS: the asset is a zip of GameDevWorkstation.app, unpacked to `<dir>/<version>/`.
++- Windows: the asset is the NSIS installer, kept as `<dir>/<version>/<asset>`; release.json
++  points at it with "installer" instead of "app".
++
++Local builds (channel "local") never construct a ReleaseFeed, so they never call GitHub.
++"""
++from __future__ import annotations
++
++import json
++import logging
++import os
++import shutil
++import stat
++import subprocess
++import sys
++import time
++import urllib.request
++import zipfile
++from pathlib import Path
++from typing import Any, Callable
++
++from .. import __version__
++
++log = logging.getLogger(__name__)
++
++API = "https://api.github.com"
++APP_NAME = "GameDevWorkstation.app"
++DOWNLOADS = ".downloads"
++
++Fetch = Callable[[str], bytes]
++
++
++def _http_get(url: str) -> bytes:
++    req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json" if url.startswith(API) else "*/*",
++                                               "User-Agent": f"GameDevWorkstation/{__version__}"})
++    with urllib.request.urlopen(req, timeout=600) as r:  # noqa: S310 — fixed https URLs from GitHub
++        return r.read()
++
++
++def asset_name(version: str, platform: str | None = None) -> str | None:
++    """The release asset this platform installs from, or None where there is none."""
++    platform = platform or sys.platform
++    v = str(version).removeprefix("v")
++    if platform == "darwin":
++        return f"GameDevWorkstation-{v}-macos-arm64.zip"
++    if platform == "win32":
++        return f"GameDevWorkstation-{v}-x64-setup.exe"
++    return None
++
++
++def latest_release(repo: str, fetch: Fetch = _http_get) -> dict | None:
++    """The repo's latest published release as {version, tag, notes, published_at, assets}, or None
++    (no release, a draft or pre-release, the network is down, or the reply doesn't parse)."""
++    try:
++        data = json.loads(fetch(f"{API}/repos/{repo}/releases/latest"))
++    except Exception as e:  # noqa: BLE001 — offline or rate-limited is normal, not an error
++        log.info("couldn't read the latest release of %s: %s", repo, e)
++        return None
++    if not isinstance(data, dict) or data.get("draft") or data.get("prerelease"):
++        return None
++    tag = str(data.get("tag_name") or "")
++    if not tag:
++        return None
++    assets = {}
++    for a in data.get("assets") or []:
++        if isinstance(a, dict) and a.get("name") and a.get("browser_download_url"):
++            size = a.get("size")
++            assets[str(a["name"])] = {"url": str(a["browser_download_url"]),
++                                      "size": size if isinstance(size, int) else None}
++    return {"version": tag.removeprefix("v"), "tag": tag, "notes": str(data.get("body") or ""),
++            "published_at": data.get("published_at"), "assets": assets}
++
++
++def download(url: str, dest: Path, size: int | None, fetch: Fetch = _http_get) -> Path:
++    """Fetch `url` to `dest` via a .part file, so `dest` is only ever complete.
++    Raises ValueError when the size doesn't match what the release says."""
++    data = fetch(url)
++    if size is not None and len(data) != size:
++        raise ValueError(f"{dest.name}: got {len(data)} bytes, expected {size}")
++    dest.parent.mkdir(parents=True, exist_ok=True)
++    part = dest.with_name(dest.name + ".part")
++    try:
++        with part.open("wb") as f:
++            f.write(data)
++            f.flush()
++            os.fsync(f.fileno())
++        os.replace(part, dest)
++    except BaseException:
++        part.unlink(missing_ok=True)
++        raise
++    return dest
++
++
++def _unzip(archive: Path, dest: Path) -> None:
++    """Unpack keeping symlinks, permissions and the code signature: ditto when there, else zipfile
++    with the unix mode bits applied by hand. Entries may not leave `dest`."""
++    dest.mkdir(parents=True, exist_ok=True)
++    if shutil.which("ditto"):
++        r = subprocess.run(["ditto", "-x", "-k", str(archive), str(dest)], capture_output=True, text=True, timeout=600)
++        if r.returncode != 0:
++            raise OSError(f"ditto couldn't unpack {archive.name}: {r.stderr.strip()[:300]}")
++        return
++    root = dest.resolve()
++    with zipfile.ZipFile(archive) as z:
++        for info in z.infolist():
++            target = (dest / info.filename).resolve()
++            if target != root and root not in target.parents:
++                raise ValueError(f"{archive.name} has an entry outside the folder: {info.filename}")
++            mode = info.external_attr >> 16
++            if info.is_dir():
++                target.mkdir(parents=True, exist_ok=True)
++            elif stat.S_ISLNK(mode):
++                target.parent.mkdir(parents=True, exist_ok=True)
++                os.symlink(z.read(info).decode(), target)
++            else:
++                target.parent.mkdir(parents=True, exist_ok=True)
++                with z.open(info) as src, target.open("wb") as out:
++                    shutil.copyfileobj(src, out)
++                if mode & 0o777:
++                    os.chmod(target, mode & 0o777)
++
++
++class ReleaseFeed:
++    """Polls one repo's latest release at most every `interval_s` seconds."""
++
++    def __init__(self, repo: str, interval_s: float = 3600.0, fetch: Fetch = _http_get):
++        self.repo, self.interval_s, self.fetch = repo, max(60.0, float(interval_s)), fetch
++        self.last_check: float | None = None
++        self.last_error: str | None = None
++
++    def due(self, now: float | None = None) -> bool:
++        now = time.time() if now is None else now
++        return self.last_check is None or now - self.last_check >= self.interval_s
++
++    def poll(self, d: Path, current: str, *, is_newer: Callable[[Any, Any], bool],
++             platform: str | None = None, now: float | None = None, force: bool = False) -> dict | None:
++        """When due (or forced): download a newer release into `d` and advertise it in latest.json.
++        Returns the release.json written (or already there), else None. Never raises."""
++        if not force and not self.due(now):
++            return None
++        self.last_check = time.time() if now is None else now
++        try:
++            rel = self._poll(d, current, is_newer=is_newer, platform=platform)
++            self.last_error = None
++            return rel
++        except Exception as e:  # noqa: BLE001 — a bad download must never take the app down
++            log.warning("GitHub release update failed: %s", e)
++            self.last_error = str(e)
++            return None
++
++    def _poll(self, d: Path, current: str, *, is_newer: Callable[[Any, Any], bool],
++              platform: str | None) -> dict | None:
++        from .updates import read_json, validate_release, write_json_atomic
++
++        rel = latest_release(self.repo, self.fetch)
++        if not rel or not is_newer(rel["version"], current):
++            return None
++        version = rel["version"]
++        name = asset_name(version, platform)
++        asset = rel["assets"].get(name) if name else None
++        if not asset:
++            log.info("release %s has no %s asset", rel["tag"], name or "asset for this platform")
++            return None
++        folder = d / version
++        record = read_json(folder / "release.json")
++        if not validate_release(d, record):
++            record = self._fetch_into(d, folder, version, name, asset, rel, platform or sys.platform)
++            write_json_atomic(folder / "release.json", record)
++        latest = validate_release(d, read_json(d / "latest.json"))
++        if not latest or is_newer(version, latest["version"]):  # never hide a newer `make release` build
++            write_json_atomic(d / "latest.json", record)
++        return record
++
++    def _fetch_into(self, d: Path, folder: Path, version: str, name: str, asset: dict, rel: dict,
++                    platform: str) -> dict:
++        downloads = d / DOWNLOADS
++        if folder.exists() and not (folder / "release.json").exists():
++            shutil.rmtree(folder)  # a half-finished earlier attempt of ours (release.json is written last)
++        record: dict = {"version": version, "built_at": rel.get("published_at"), "git_commit": None,
++                        "notes": rel.get("notes") or "", "source": f"github:{self.repo}"}
++        if platform == "win32":
++            download(asset["url"], folder / name, asset["size"], self.fetch)
++            record["installer"] = f"{version}/{name}"
++            return record
++        archive = download(asset["url"], downloads / name, asset["size"], self.fetch)
++        tmp = downloads / f"{version}.unpack"
++        shutil.rmtree(tmp, ignore_errors=True)
++        try:
++            _unzip(archive, tmp)
++            if not (tmp / APP_NAME / "Contents" / "Info.plist").is_file():
++                raise ValueError(f"{name} doesn't contain {APP_NAME}")
++            folder.mkdir(parents=True, exist_ok=True)
++            os.replace(tmp / APP_NAME, folder / APP_NAME)
++        finally:
++            shutil.rmtree(tmp, ignore_errors=True)
++            archive.unlink(missing_ok=True)
++        record["app"] = f"{version}/{APP_NAME}"
++        return record
+diff --git a/backend/gamedevworkstation/features/updates.py b/backend/gamedevworkstation/features/updates.py
+index aadbd77..a1a810f 100644
+--- a/backend/gamedevworkstation/features/updates.py
++++ b/backend/gamedevworkstation/features/updates.py
+@@ -12,6 +12,12 @@ build is never advertised. This module:
+   a small shell helper that runs outside the app's process group (the app kills its whole
+   backend group on quit). The helper quits the app, swaps the bundles, keeps the old one in
+   `<dir>/.previous/` and opens the new one; if anything fails it puts the old one back.
++  On Windows a release is an NSIS installer instead (release.json "installer"); a PowerShell
++  helper stops the app, runs the installer silently and starts the app again.
++
++Builds on the "github" update channel also fill the folder from GitHub Releases
++(release_feed.py). With `[updates] auto_install` (on by default) a pending update installs by
++itself once no session is running; each version is tried once, so a failed install never loops.
+ """
+ from __future__ import annotations
+ 
+@@ -35,6 +41,7 @@ from fastapi import APIRouter, Body, FastAPI, HTTPException
+ from .. import __version__
+ from ..buildinfo import frozen, version_info
+ from ..config import data_dir, logs_dir
++from .release_feed import ReleaseFeed
+ 
+ if TYPE_CHECKING:
+     from ..app import AppState
+@@ -126,10 +133,28 @@ def release_app(d: Path, rel: dict) -> Path | None:
+     return p
+ 
+ 
++def release_installer(d: Path, rel: dict) -> Path | None:
++    """The Windows installer a release points at; must stay inside the updates folder."""
++    try:
++        p = (d / str(rel["installer"])).resolve()
++        if d.resolve() not in p.parents:
++            return None
++    except (OSError, KeyError):
++        return None
++    return p
++
++
+ def validate_release(d: Path, rel: dict | None) -> dict | None:
+     """A usable release record (latest.json or release.json), or None."""
+     if not rel or parse_version(rel.get("version")) is None:
+         return None
++    if rel.get("installer"):
++        inst = release_installer(d, rel)
++        if inst is None or not inst.is_file():
++            return None
++        return {"version": str(rel["version"]).removeprefix("v"), "built_at": rel.get("built_at"),
++                "git_commit": rel.get("git_commit"), "notes": str(rel.get("notes") or ""), "app_path": None,
++                "installer_path": str(inst)}
+     app = release_app(d, rel)
+     if app is None or not (app / "Contents" / "Info.plist").is_file():
+         return None
+@@ -295,9 +320,27 @@ def app_pid() -> int | None:
+     return int(v) if v.isdigit() else None
+ 
+ 
++def app_exe() -> Path | None:
++    """Windows: the app's own .exe, found walking up from the frozen backend
++    (…/GameDevWorkstation/resources/backend/gamedevworkstation-backend.exe)."""
++    if not frozen():
++        return None
++    for p in Path(sys.executable).resolve().parents:
++        for name in ("GameDevWorkstation.exe", "gamedevworkstation.exe"):
++            if (p / name).is_file():
++                return p / name
++    return None
++
++
+ def install_support() -> tuple[bool, str | None]:
++    if sys.platform == "win32":
++        if not frozen():
++            return False, FROM_SOURCE
++        if app_pid() is None:
++            return False, "The backend was started without --parent-pid, so it can't restart the app."
++        return True, None
+     if sys.platform != "darwin":
+-        return False, "Install & restart works in the macOS app only."
++        return False, "Install & restart works in the macOS and Windows apps only."
+     if not frozen():
+         return False, FROM_SOURCE
+     bundle = running_bundle()
+@@ -462,6 +505,69 @@ exit 1
+ """
+ 
+ 
++def windows_helper_script(*, app_pid: int, backend_pid: int, installer: Path, app_exe: Path | None) -> str:
++    """The Windows install-and-relaunch script (PowerShell). Values are baked in as single-quoted
++    literals. It stops the app (close, then kill), waits for the backend, runs the installer
++    silently and starts the app again, also when the installer failed (the old version is
++    then still in place)."""
++    def ps(s: str) -> str:
++        return "'" + s.replace("'", "''") + "'"
++
++    exe = ps(str(app_exe)) if app_exe else "''"
++    return f"""# GameDevWorkstation update helper (generated by the backend). Runs detached from the app.
++$ErrorActionPreference = 'Continue'
++$AppPid = {int(app_pid)}
++$BackendPid = {int(backend_pid)}
++$Installer = {ps(str(installer))}
++$AppExe = {exe}
++function Log($m) {{ Write-Output "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $m" }}
++
++Log "update: $Installer (app pid $AppPid)"
++if (-not (Test-Path -LiteralPath $Installer)) {{ Log "ERROR: the installer is missing; nothing changed"; exit 1 }}
++Start-Sleep -Seconds 1  # let the backend answer the request first
++
++# 1. Stop the app: ask its window to close, then kill it (with its children).
++$p = Get-Process -Id $AppPid -ErrorAction SilentlyContinue
++if ($p) {{
++  Log "asking the app to quit"
++  $null = $p.CloseMainWindow()
++  if (-not $p.WaitForExit(15000)) {{
++    Log "still running; stopping it"
++    & taskkill.exe /PID $AppPid /T /F | Out-Null
++    $null = $p.WaitForExit(10000)
++  }}
++}}
++if ($BackendPid -gt 0) {{
++  $b = Get-Process -Id $BackendPid -ErrorAction SilentlyContinue
++  if ($b -and -not $b.WaitForExit(15000)) {{
++    Log "the old backend (pid $BackendPid) is still running; stopping it"
++    & taskkill.exe /PID $BackendPid /T /F | Out-Null
++  }}
++}}
++Start-Sleep -Milliseconds 500
++
++# 2. Run the installer silently (NSIS: /S).
++Log "running the installer"
++$code = 1
++try {{
++  $r = Start-Process -FilePath $Installer -ArgumentList '/S' -Wait -PassThru
++  $code = $r.ExitCode
++}} catch {{
++  Log "ERROR: couldn't run the installer: $_"
++}}
++if ($code -eq 0) {{ Log "installed" }} else {{ Log "ERROR: the installer exited with $code" }}
++
++# 3. Start the app again (the new version, or the old one if the install failed).
++if ($AppExe -and (Test-Path -LiteralPath $AppExe)) {{
++  Log "starting the app"
++  Start-Process -FilePath $AppExe
++}} else {{
++  Log "note: couldn't find the app to start it; open GameDevWorkstation from the Start menu"
++}}
++if ($code -eq 0) {{ exit 0 }} else {{ exit 1 }}
++"""
++
++
+ def _clean_env() -> dict[str, str]:
+     """The helper must not inherit PyInstaller's loader variables."""
+     drop = ("_PYI", "_MEI", "DYLD_", "PYTHONHOME", "PYTHONPATH", "LD_LIBRARY_PATH")
+@@ -483,6 +589,24 @@ def launch_helper(script: str, log_path: Path) -> int:
+     return p.pid
+ 
+ 
++def launch_windows_helper(script: str, log_path: Path) -> int:
++    """Start the PowerShell helper detached and outside the app's job, so stopping the app
++    doesn't stop it."""
++    d = data_dir() / "updates-tmp"
++    d.mkdir(parents=True, exist_ok=True)
++    path = d / f"install-{int(time.time())}.ps1"
++    path.write_text(script, encoding="utf-8-sig")  # the BOM makes Windows PowerShell read it as UTF-8
++    log_path.parent.mkdir(parents=True, exist_ok=True)
++    flags = 0
++    for name in ("DETACHED_PROCESS", "CREATE_NEW_PROCESS_GROUP", "CREATE_BREAKAWAY_FROM_JOB"):
++        flags |= getattr(subprocess, name, 0)
++    with log_path.open("a") as out:
++        p = subprocess.Popen(["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
++                              "-File", str(path)], stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
++                             creationflags=flags, close_fds=True, env=_clean_env())
++    return p.pid
++
++
+ def notify_native(title: str, text: str) -> None:
+     """macOS notification via osascript; strings go in as argv, so no quoting issues."""
+     if sys.platform != "darwin" or not frozen():
+@@ -506,16 +630,61 @@ class Updater:
+         self._latest: dict | None = None
+         self._task: asyncio.Task | None = None
+         self.installing: dict | None = None
++        info = version_info()
++        # Only builds from the release workflow ("github" channel) ever call GitHub.
++        self.feed: ReleaseFeed | None = None
++        if info.get("channel") == "github" and info.get("repo"):
++            self.feed = ReleaseFeed(str(info["repo"]), self._float("github_interval_s", 3600.0))
+ 
+     @property
+     def dir(self) -> Path:
+         return updates_dir(self.app.config)
+ 
++    def _float(self, key: str, default: float) -> float:
++        try:
++            return float((self.app.config.updates or {}).get(key, default))
++        except (TypeError, ValueError, AttributeError):
++            return default
++
+     def interval(self) -> float:
++        return max(5.0, self._float("check_interval_s", 30.0))
++
++    def auto_install_enabled(self) -> bool:
++        conf = getattr(self.app.config, "updates", None) or {}
++        return bool(conf.get("auto_install", True))
++
++    def busy(self) -> int:
++        """How many sessions are running right now; an automatic install waits for zero."""
++        return len(getattr(self.app.runner, "running", {}) or {})
++
++    def poll_feed(self, force: bool = False) -> dict | None:
++        """GitHub channel only: fetch a newer release into the updates folder (blocking)."""
++        if self.feed is None:
++            return None
++        return self.feed.poll(self.dir, __version__, is_newer=is_newer, force=force)
++
++    async def maybe_auto_install(self) -> dict | None:
++        """Install the pending update when allowed and nothing is running. Each version is tried
++        once (remembered before trying), so a failing install never loops."""
++        if not self.auto_install_enabled() or self.installing or self.busy():
++            return None
++        upd = self.pending_update()
++        if not upd or not upd.get("install_supported"):
++            return None
++        version = upd["latest"]
++        tried = list(self.app.db.kv_get("updates.auto_tried", []) or [])
++        if version in tried:
++            return None
++        self.app.db.kv_set("updates.auto_tried", (tried + [version])[-50:])
++        log.info("installing update %s automatically", version)
+         try:
+-            return max(5.0, float(self.app.config.updates.get("check_interval_s", 30)))
+-        except (TypeError, ValueError):
+-            return 30.0
++            res = await self.install(version)
++        except Exception as e:  # noqa: BLE001 — reported, never retried
++            detail = getattr(e, "detail", None) or str(e)
++            log.warning("automatic install of %s failed: %s", version, detail)
++            self.app.bus.publish("update.failed", {"version": version, "error": str(detail), "auto": True})
++            return None
++        return {**res, "auto": True}
+ 
+     def check(self, force: bool = False) -> dict | None:
+         """Cheap: one stat(); latest.json is read only when its path, mtime or size changed,
+@@ -570,16 +739,31 @@ class Updater:
+             "previous": previous_bundle(d), "install_supported": ok, "reason": reason,
+             "bundle_path": str(bundle) if bundle else None, "installing": self.installing,
+             "installed": read_installs(d).get(str(bundle)) if bundle else None,  # this bundle's own entry
+-            "busy_sessions": len(getattr(self.app.runner, "running", {}) or {}),
++            "busy_sessions": self.busy(), "auto_install": self.auto_install_enabled(),
++            "channel": version_info().get("channel", "local"),
++            "feed": None if self.feed is None else {"repo": self.feed.repo, "last_check": self.feed.last_check,
++                                                    "last_error": self.feed.last_error},
+             "log_path": str(logs_dir() / "update.log"),
+         }
+ 
+     # -- install / rollback (blocking parts run in a thread)
+ 
++    def _prepare_windows(self, installer: Path, version: str | None) -> dict:
++        pid = app_pid()
++        assert pid is not None
++        if installer.suffix.lower() != ".exe" or not installer.is_file():
++            raise HTTPException(400, f"{installer} isn't an installer.")
++        script = windows_helper_script(app_pid=pid, backend_pid=os.getpid(), installer=installer, app_exe=app_exe())
++        helper_pid = launch_windows_helper(script, logs_dir() / "update.log")
++        return {"ok": True, "version": version, "from": __version__, "helper_pid": helper_pid,
++                "installer": str(installer), "log": str(logs_dir() / "update.log")}
++
+     def _prepare(self, src: Path, version: str | None) -> dict:
+         ok, reason = self.support()
+         if not ok:
+             raise HTTPException(400, reason)
++        if sys.platform == "win32":
++            return self._prepare_windows(src, version)
+         bundle, pid = running_bundle(), app_pid()
+         assert bundle is not None and pid is not None
+         try:
+@@ -614,6 +798,8 @@ class Updater:
+         if not ok:
+             raise HTTPException(400, reason)
+         if rollback:
++            if sys.platform == "win32":
++                raise HTTPException(400, "Rollback isn't available on Windows; install the older installer instead.")
+             prev = previous_bundle(self.dir)
+             if not prev:
+                 raise HTTPException(404, "There's no previous version to roll back to.")
+@@ -626,7 +812,11 @@ class Updater:
+             version = version or (self._latest or {}).get("version")
+             if not version or version not in rels:
+                 raise HTTPException(404, f"Version {version} isn't in {self.dir}." if version else "No update to install.")
+-            src = Path(rels[version]["app_path"])
++            rel = rels[version]
++            installer = rel.get("installer_path")
++            if (sys.platform == "win32") != bool(installer):
++                raise HTTPException(400, f"Version {version} in {self.dir} isn't built for this platform.")
++            src = Path(installer or rel["app_path"])
+         self.installing = {"version": version, "rollback": rollback, "started_at": time.time(), "launched_at": None}
+         try:
+             res = await asyncio.to_thread(self._prepare, src, version)
+@@ -652,7 +842,10 @@ class Updater:
+         async def loop() -> None:
+             while True:
+                 try:
++                    if self.feed is not None and self.feed.due():
++                        await asyncio.to_thread(self.poll_feed)
+                     self.check()
++                    await self.maybe_auto_install()
+                 except Exception:  # noqa: BLE001 — a bad folder must never take the app down
+                     log.exception("update check failed")
+                 await asyncio.sleep(self.interval())
+@@ -674,6 +867,7 @@ def register(app_: FastAPI, api: APIRouter, S: "AppState") -> None:
+ 
+     @api.post("/updates/check")
+     async def check_now() -> dict:
++        await asyncio.to_thread(up.poll_feed, True)
+         up.check(force=True)
+         return up.status()
+ 
+diff --git a/config.example.toml b/config.example.toml
+index b4eb0f3..5842611 100644
+--- a/config.example.toml
++++ b/config.example.toml
+@@ -83,6 +83,8 @@ default_harness = "claude_code"
+ dir = "~/GameDevWorkstationUpdates"
+ check_interval_s = 30               # how often the app looks at latest.json (one stat call)
+ keep = 3                            # versions `make release` keeps; older ones are pruned
++auto_install = true                 # install a pending update by itself once no session is running (each version is tried once)
++github_interval_s = 3600            # builds from the release workflow: how often to check GitHub Releases (local builds never do)
+ 
+ [mcp.presets.unity]
+ # Built-in MCP servers. Each is added to Skills & MCP once (off by default for sessions); a
+diff --git a/docs/GUIDE.md b/docs/GUIDE.md
+index fc409ab..9a7bcce 100644
+--- a/docs/GUIDE.md
++++ b/docs/GUIDE.md
+@@ -1283,6 +1283,22 @@ it. The log is `~/Library/Logs/GameDevWorkstation/update.log`.
+ again goes forward. Install only works in the built app; when you run from source, the page
+ says so.
+ 
++**Automatic install.** With `[updates] auto_install = true` (the default) a pending update
++installs by itself as soon as no session is running. Each version is tried once: if that install
++fails, the app doesn't retry it, and you can still click **Install & restart**. Set
++`auto_install = false` to install only when you click.
++
++**GitHub Releases.** When `main` has a `VERSION` with no release yet, the Release workflow
++(`.github/workflows/release.yml`) builds the macOS app (zip and `.dmg`) and the Windows
++installer and publishes them as GitHub Release `v<version>`. Those builds are on the `github`
++update channel: every `[updates] github_interval_s` seconds (default 3600, and on **Check now**) they look
++at the repo's latest release. When it is newer, they download the asset for their platform into
++the updates folder, and the folder updater above takes it from there. Builds you make locally
++(`make app`, `make release`) are on the `local` channel and never call GitHub.
++
++On Windows a release is the installer. To install it, a PowerShell helper stops the app, runs
++the installer silently (`/S`) and starts the app again. Rollback isn't available there.
++
+ **First install.** An app built before this feature can't update itself. Install once by
+ hand, then updates arrive in-app:
+ 
+diff --git a/scripts/version.py b/scripts/version.py
+index b11da74..0bed2d3 100755
+--- a/scripts/version.py
++++ b/scripts/version.py
+@@ -11,6 +11,9 @@ that carries the version in step with it:
+     python scripts/version.py check          # exit 1 if any file disagrees with VERSION
+     python scripts/version.py build-info     # write backend/gamedevworkstation/_build_info.json
+ 
++build-info records the update channel from $GDW_UPDATE_CHANNEL ("local" when unset) and, for
++the "github" channel, the repository from $GDW_UPDATE_REPO or $GITHUB_REPOSITORY.
++
+ `--root DIR` runs it against another checkout (the tests use a temp copy).
+ Standard library only, so it runs with any Python 3.11+.
+ """
+@@ -19,6 +22,7 @@ from __future__ import annotations
+ import argparse
+ import datetime as dt
+ import json
++import os
+ import re
+ import subprocess
+ import sys
+@@ -190,6 +194,8 @@ def build_info(root: Path) -> dict:
+         "git_commit": _git(root, "rev-parse", "--short", "HEAD") or None,
+         "git_dirty": bool(_git(root, "status", "--porcelain")),
+         "built_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(),
++        "channel": os.environ.get("GDW_UPDATE_CHANNEL") or "local",
++        "repo": os.environ.get("GDW_UPDATE_REPO") or os.environ.get("GITHUB_REPOSITORY") or None,
+     }
+     out = root / "backend" / "gamedevworkstation" / "_build_info.json"
+     out.write_text(json.dumps(info, indent=2) + "\n")

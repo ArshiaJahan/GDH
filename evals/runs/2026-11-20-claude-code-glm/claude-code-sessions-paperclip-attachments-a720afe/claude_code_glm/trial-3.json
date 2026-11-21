@@ -1,0 +1,48 @@
+{
+ "task": "claude-code-sessions-paperclip-attachments-a720afe",
+ "agent": "claude_code_glm",
+ "trial": 3,
+ "passed": false,
+ "blame": "agent",
+ "reason": "failed command 'tests' (its own versions of frontend/src/components/NewSession.test.tsx, tests/fixtures/fake_claude.py, tests/test_claude_code.py were replaced by the hidden tests)",
+ "wall_s": 639.2,
+ "cost_usd": 1.1835,
+ "tool_calls": 29,
+ "input_tokens": 1979181,
+ "output_tokens": 12078,
+ "agent_error": "",
+ "timed_out": false,
+ "tampered": [
+  "frontend/src/components/NewSession.test.tsx",
+  "tests/fixtures/fake_claude.py",
+  "tests/test_claude_code.py"
+ ],
+ "failed_steps": [
+  "tests"
+ ],
+ "diff_lines": 98,
+ "started_at": "2026-11-20T22:50:10Z",
+ "helper_calls": 0,
+ "model": "claude-opus-5-5",
+ "grade": {
+  "passed": false,
+  "tampered": [
+   "frontend/src/components/NewSession.test.tsx",
+   "tests/fixtures/fake_claude.py",
+   "tests/test_claude_code.py"
+  ],
+  "environment_failure": false,
+  "steps": [
+   {
+    "name": "tests",
+    "kind": "command",
+    "passed": false,
+    "exit": 1,
+    "duration_s": 42.97040016623214,
+    "output": "........................................................................ [ 61%]\n............................................FF                           [100%]\n=================================== FAILURES ===================================\n__________________ test_attachments_reach_claude_code_inline ___________________\n\nlive = <tests.test_claude_code.Live object at 0x1680f36b0>\ntmp_path = PosixPath('/private/var/folders/07/xyyrk2p92jnblsq7j428mt5h0000gn/T/pytest-of-arshiajahan/pytest-1331/test_attachments_reach_claude_0')\n\n    def test_attachments_reach_claude_code_inline(live, tmp_path):\n        \"\"\"The paperclip: images, PDFs and text files go in the CLI user message as API content blocks,\n        each after a label with its name; Claude Code never has to read a path outside its folder.\"\"\"\n        sid = live.session(_project(tmp_path))\n        ups = []\n        for name, data, mime in [(\"shot.png\", _PNG, \"image/png\"), (\"notes.txt\", b\"level 3 needs a door\", \"text/plain\"),\n                                 (\"spec.pdf\", b\"%PDF-1.4\\n%%EOF\\n\", \"application/pdf\")]:\n            r = live.c.post(\"/api/uploads\", params={\"session_id\": sid}, files={\"file\": (name, data, mime)})\n            assert r.status_code == 200, r.text\n            ups.append(r.json())\n        r = live.c.post(f\"/api/sessions/{sid}/messages\", json={\"text\": \"hello, look at these\", \"attachments\": ups})\n        assert r.status_code == 200, r.text\n        live.wait_idle(sid)\n        ev = live.events(\"user\")[-1]\n>       assert [b[\"type\"] for b in ev[\"blocks\"]] == [\"text\", \"text\", \"image\", \"text\", \"document\", \"text\", \"document\"]\nE       AssertionError: assert ['text', 'ima...', 'document'] == ['text', 'tex..., 'text', ...]\nE         \nE         At index 1 diff: 'image' != 'text'\nE         Right contains one more item: 'document'\nE         Use -v to get more diff\n\ntests/test_claude_code.py:1455: AssertionError\n______________ test_attachments_over_the_turn_limit_become_a_note ______________\n\ntmp_path = PosixPath('/private/var/folders/07/xyyrk2p92jnblsq7j428mt5h0000gn/T/pytest-of-arshiajahan/pytest-1331/test_attachments_over_the_turn0')\n\n    def test_attachments_over_the_turn_limit_become_a_note(tmp_path):\n        from gamedevworkstation.core.types import FileBlock, Message, TextBlock\n    \n        big = tmp_path / \"big.pdf\"\n        big.write_bytes(b\"%PDF-1.4\\n\" + b\"x\" * 2000)\n        small = tmp_path / \"small.pdf\"\n        small.write_bytes(b\"%PDF-1.4\\n%%EOF\\n\")\n        m = Message(role=\"user\", content=[TextBlock(text=\"read these\"),\n                                          FileBlock(media_type=\"application/pdf\", path=str(big), name=\"big.pdf\"),\n                                          FileBlock(media_type=\"application/pdf\", path=str(small), name=\"small.pdf\")])\n        import gamedevworkstation.features.claude_code as ccm2\n    \n        out = ccm2._user_content([m], \"Earlier in this conversation:\\nhi\\n\\nNow: \")\n        full = len(json.dumps(out))\n>       assert out[0][\"text\"].startswith(\"Earlier in this conversation:\") and out[1][\"text\"] == \"read these\"\n                                                                              ^^^^^^^^^^^^^^\nE       KeyError: 'text'\n\ntests/test_claude_code.py:1480: KeyError\n=========================== short test summary info ============================\nFAILED tests/test_claude_code.py::test_attachments_reach_claude_code_inline\nFAILED tests/test_claude_code.py::test_attachments_over_the_turn_limit_become_a_note\n2 failed, 116 passed in 40.17s\n",
+    "environment": false,
+    "detail": {}
+   }
+  ]
+ }
+}

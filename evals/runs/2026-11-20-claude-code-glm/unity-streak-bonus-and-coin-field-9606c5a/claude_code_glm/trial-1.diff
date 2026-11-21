@@ -1,0 +1,103 @@
+diff --git a/examples/unity-sample/Assets/Scenes/Main.unity b/examples/unity-sample/Assets/Scenes/Main.unity
+index df4a2c5..346c66e 100644
+--- a/examples/unity-sample/Assets/Scenes/Main.unity
++++ b/examples/unity-sample/Assets/Scenes/Main.unity
+@@ -413,7 +413,7 @@ MonoBehaviour:
+   m_Script: {fileID: 11500000, guid: d52a594746e2940a696b32ce39f1218a, type: 3}
+   m_Name: 
+   m_EditorClassIdentifier: CoinDash::CoinDash.GameState
+-  coinCount: 8
++  coinCount: 10
+ --- !u!4 &963870474
+ Transform:
+   m_ObjectHideFlags: 0
+diff --git a/examples/unity-sample/Assets/Scripts/ScoreBoard.cs b/examples/unity-sample/Assets/Scripts/ScoreBoard.cs
+index d711e01..7d8f6ec 100644
+--- a/examples/unity-sample/Assets/Scripts/ScoreBoard.cs
++++ b/examples/unity-sample/Assets/Scripts/ScoreBoard.cs
+@@ -4,6 +4,9 @@ namespace CoinDash
+     public sealed class ScoreBoard
+     {
+         public const int PointsPerCoin = 10;
++        /// <summary>Every StreakLength-th coin collected (5th, 10th, ...) is worth StreakMultiplier times as much.</summary>
++        public const int StreakLength = 5;
++        public const int StreakMultiplier = 2;
+ 
+         public int Score { get; private set; }
+         public int CoinsCollected { get; private set; }
+@@ -16,7 +19,7 @@ namespace CoinDash
+         {
+             if (Won) return;
+             CoinsCollected++;
+-            Score += PointsPerCoin;
++            Score += CoinsCollected % StreakLength == 0 ? PointsPerCoin * StreakMultiplier : PointsPerCoin;
+         }
+     }
+ }
+diff --git a/examples/unity-sample/Assets/Tests/Editor/ScoreBoardTests.cs b/examples/unity-sample/Assets/Tests/Editor/ScoreBoardTests.cs
+index c8d6c83..2eaf4c7 100644
+--- a/examples/unity-sample/Assets/Tests/Editor/ScoreBoardTests.cs
++++ b/examples/unity-sample/Assets/Tests/Editor/ScoreBoardTests.cs
+@@ -26,5 +26,29 @@ namespace CoinDash.Tests
+             Assert.AreEqual(2, board.CoinsCollected);
+             Assert.AreEqual(2 * ScoreBoard.PointsPerCoin, board.Score);
+         }
++
++        [Test]
++        public void M0_S02_EveryFifthCoinScoresDouble()
++        {
++            var board = new ScoreBoard(12);
++            for (int i = 0; i < 4; i++) board.Collect();
++            Assert.AreEqual(4 * ScoreBoard.PointsPerCoin, board.Score);
++            board.Collect();
++            Assert.AreEqual(4 * 10 + 20, board.Score);
++            for (int i = 0; i < 5; i++) board.Collect();
++            Assert.AreEqual(2 * (4 * 10 + 20), board.Score);
++            board.Collect();
++            Assert.AreEqual(2 * (4 * 10 + 20) + 10, board.Score);
++        }
++
++        [Test]
++        public void M0_S02_StreakBonusStopsAfterWin()
++        {
++            var board = new ScoreBoard(4);
++            for (int i = 0; i < 5; i++) board.Collect();
++            Assert.IsTrue(board.Won);
++            Assert.AreEqual(4, board.CoinsCollected);
++            Assert.AreEqual(4 * ScoreBoard.PointsPerCoin, board.Score);
++        }
+     }
+ }
+diff --git a/examples/unity-sample/BACKLOG.md b/examples/unity-sample/BACKLOG.md
+index 1490ecc..afbbf68 100644
+--- a/examples/unity-sample/BACKLOG.md
++++ b/examples/unity-sample/BACKLOG.md
+@@ -18,6 +18,15 @@ Status: done
+ | M0-S01-AC1 | Given 3 coins, When 2 are collected, Then the score is 2 coins' worth | EditMode | test:ScoreBoardTests.M0_S01_CollectAddsPointsPerCoin |
+ | M0-S01-AC2 | Given 2 coins, When all are collected and one more pickup fires, Then the game is won and the score stops | EditMode | test:ScoreBoardTests.M0_S01_CollectingEveryCoinWinsAndStopsScoring |
+ 
++### M0-S02 Streak bonus
++- Status: done
++- Owner skill: architecture-patterns
++
++| AC | Given / When / Then | Test | Signal |
++|---|---|---|---|
++| M0-S02-AC1 | Given 12 coins, When coins are collected, Then the 5th and 10th score 20 points and the rest 10 | EditMode | test:ScoreBoardTests.M0_S02_EveryFifthCoinScoresDouble |
++| M0-S02-AC2 | Given 4 coins, When all are collected and a 5th pickup fires, Then the game is won and no bonus is scored | EditMode | test:ScoreBoardTests.M0_S02_StreakBonusStopsAfterWin |
++
+ ## M1 Movement feel
+ Goal: Movement has a dash that feels quick and can't be spammed.
+ Exit: All M1 criteria pass; a recorded run replays with every checkpoint hash matching.
+diff --git a/examples/unity-sample/README.md b/examples/unity-sample/README.md
+index 0e88b1d..6bf6f08 100644
+--- a/examples/unity-sample/README.md
++++ b/examples/unity-sample/README.md
+@@ -1,7 +1,7 @@
+ # Coin Dash: a sample Unity project
+ 
+ A tiny Unity 6000.3 project for trying GameDevWorkstation and for its Unity eval tasks. It isn't a game
+-anyone should ship: one scene, a capsule you move with WASD or the arrow keys, and eight coins placed
++anyone should ship: one scene, a capsule you move with WASD or the arrow keys, and ten coins placed
+ from a seeded random stream.
+ 
+ - `Assets/Scripts/ScoreBoard.cs`: the rules, kept out of MonoBehaviours so EditMode tests can check them.

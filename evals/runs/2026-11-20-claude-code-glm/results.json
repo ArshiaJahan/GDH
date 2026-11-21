@@ -1,0 +1,1076 @@
+{
+ "trials": [
+  {
+   "task": "automatic-updates-from-github-releases-04bcf2d",
+   "agent": "claude_code_glm",
+   "trial": 1,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests'",
+   "wall_s": 740.9,
+   "cost_usd": 1.7105,
+   "tool_calls": 24,
+   "input_tokens": 2073971,
+   "output_tokens": 28568,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 593,
+   "started_at": "2026-11-20T22:35:23Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "automatic-updates-from-github-releases-04bcf2d",
+   "agent": "claude_code_glm",
+   "trial": 2,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests'",
+   "wall_s": 1022.1,
+   "cost_usd": 1.6438,
+   "tool_calls": 38,
+   "input_tokens": 2439860,
+   "output_tokens": 25378,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 565,
+   "started_at": "2026-11-20T22:35:23Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "automatic-updates-from-github-releases-04bcf2d",
+   "agent": "claude_code_glm",
+   "trial": 3,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests'",
+   "wall_s": 579.3,
+   "cost_usd": 1.4218,
+   "tool_calls": 23,
+   "input_tokens": 1591998,
+   "output_tokens": 23244,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 683,
+   "started_at": "2026-11-20T22:35:23Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "claude-code-sessions-paperclip-attachments-a720afe",
+   "agent": "claude_code_glm",
+   "trial": 1,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of frontend/src/components/NewSession.test.tsx, tests/fixtures/fake_claude.py, tests/test_claude_code.py were replaced by the hidden tests)",
+   "wall_s": 307.9,
+   "cost_usd": 1.3437,
+   "tool_calls": 44,
+   "input_tokens": 2244359,
+   "output_tokens": 14033,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 119,
+   "started_at": "2026-11-20T22:45:03Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "claude-code-sessions-paperclip-attachments-a720afe",
+   "agent": "claude_code_glm",
+   "trial": 2,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of frontend/src/components/NewSession.test.tsx, tests/fixtures/fake_claude.py, tests/test_claude_code.py were replaced by the hidden tests)",
+   "wall_s": 279.2,
+   "cost_usd": 1.3289,
+   "tool_calls": 35,
+   "input_tokens": 2385556,
+   "output_tokens": 13880,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 137,
+   "started_at": "2026-11-20T22:47:44Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "claude-code-sessions-paperclip-attachments-a720afe",
+   "agent": "claude_code_glm",
+   "trial": 3,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of frontend/src/components/NewSession.test.tsx, tests/fixtures/fake_claude.py, tests/test_claude_code.py were replaced by the hidden tests)",
+   "wall_s": 639.2,
+   "cost_usd": 1.1835,
+   "tool_calls": 29,
+   "input_tokens": 1979181,
+   "output_tokens": 12078,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 98,
+   "started_at": "2026-11-20T22:50:10Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "claude-code-sessions-verified-against-the-live-c-153be82",
+   "agent": "claude_code_glm",
+   "trial": 1,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of tests/fixtures/fake_claude.py, tests/test_claude_code.py, tests/test_rv3_data.py were replaced by the hidden tests)",
+   "wall_s": 624.9,
+   "cost_usd": 1.4721,
+   "tool_calls": 47,
+   "input_tokens": 2679312,
+   "output_tokens": 18844,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+    "tests/test_rv3_data.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 242,
+   "started_at": "2026-11-20T22:52:23Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "claude-code-sessions-verified-against-the-live-c-153be82",
+   "agent": "claude_code_glm",
+   "trial": 2,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of tests/fixtures/fake_claude.py, tests/test_claude_code.py, tests/test_rv3_data.py were replaced by the hidden tests)",
+   "wall_s": 741.3,
+   "cost_usd": 1.5893,
+   "tool_calls": 51,
+   "input_tokens": 2773372,
+   "output_tokens": 22623,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+    "tests/test_rv3_data.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 271,
+   "started_at": "2026-11-20T22:52:25Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "claude-code-sessions-verified-against-the-live-c-153be82",
+   "agent": "claude_code_glm",
+   "trial": 3,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of tests/fixtures/fake_claude.py, tests/test_claude_code.py, tests/test_rv3_data.py were replaced by the hidden tests)",
+   "wall_s": 991.2,
+   "cost_usd": 1.4236,
+   "tool_calls": 27,
+   "input_tokens": 2182520,
+   "output_tokens": 18762,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "tests/fixtures/fake_claude.py",
+    "tests/test_claude_code.py",
+    "tests/test_rv3_data.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 298,
+   "started_at": "2026-11-20T23:00:50Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "fix-claude-code-login-detection-on-windows-ba5862a",
+   "agent": "claude_code_glm",
+   "trial": 1,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of tests/test_claude_cli_windows.py, tests/test_claude_code.py were replaced by the hidden tests)",
+   "wall_s": 204.2,
+   "cost_usd": 0.649,
+   "tool_calls": 17,
+   "input_tokens": 560231,
+   "output_tokens": 9920,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "tests/test_claude_cli_windows.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 145,
+   "started_at": "2026-11-20T23:02:48Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "fix-claude-code-login-detection-on-windows-ba5862a",
+   "agent": "claude_code_glm",
+   "trial": 2,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of tests/test_claude_cli_windows.py, tests/test_claude_code.py were replaced by the hidden tests)",
+   "wall_s": 806.7,
+   "cost_usd": 0.6601,
+   "tool_calls": 15,
+   "input_tokens": 699934,
+   "output_tokens": 10570,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "tests/test_claude_cli_windows.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 150,
+   "started_at": "2026-11-20T23:04:47Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "fix-claude-code-login-detection-on-windows-ba5862a",
+   "agent": "claude_code_glm",
+   "trial": 3,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of tests/test_claude_cli_windows.py, tests/test_claude_code.py were replaced by the hidden tests)",
+   "wall_s": 235.1,
+   "cost_usd": 0.7445,
+   "tool_calls": 23,
+   "input_tokens": 665662,
+   "output_tokens": 11045,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "tests/test_claude_cli_windows.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 142,
+   "started_at": "2026-11-20T23:06:12Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "fix-what-the-unity-demo-run-turned-up-9157a0f",
+   "agent": "claude_code_glm",
+   "trial": 1,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of frontend/src/components/Chat.test.tsx, tests/test_claude_code.py were replaced by the hidden tests)",
+   "wall_s": 435.4,
+   "cost_usd": 1.6133,
+   "tool_calls": 59,
+   "input_tokens": 3128426,
+   "output_tokens": 19326,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "frontend/src/components/Chat.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 174,
+   "started_at": "2026-11-20T23:10:08Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "fix-what-the-unity-demo-run-turned-up-9157a0f",
+   "agent": "claude_code_glm",
+   "trial": 2,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of frontend/src/components/Chat.test.tsx, tests/test_claude_code.py were replaced by the hidden tests)",
+   "wall_s": 564.2,
+   "cost_usd": 1.602,
+   "tool_calls": 49,
+   "input_tokens": 2955206,
+   "output_tokens": 20955,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "frontend/src/components/Chat.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 249,
+   "started_at": "2026-11-20T23:17:21Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "fix-what-the-unity-demo-run-turned-up-9157a0f",
+   "agent": "claude_code_glm",
+   "trial": 3,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of frontend/src/components/Chat.test.tsx, tests/test_claude_code.py were replaced by the hidden tests)",
+   "wall_s": 604.2,
+   "cost_usd": 1.5736,
+   "tool_calls": 46,
+   "input_tokens": 2858835,
+   "output_tokens": 21148,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "frontend/src/components/Chat.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 253,
+   "started_at": "2026-11-20T23:18:13Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "new-session-screen-claude-style-composer-claude-a0b6e5f",
+   "agent": "claude_code_glm",
+   "trial": 1,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of frontend/src/components/ClaudeCode.test.tsx, frontend/src/components/Composer.test.tsx, frontend/src/lib/mdlite.test.tsx, tests/conftest.py, tests/test_campaigns.py, tests/test_claude_code.py were replaced by the hidden tests)",
+   "wall_s": 552.1,
+   "cost_usd": 1.9054,
+   "tool_calls": 42,
+   "input_tokens": 3447950,
+   "output_tokens": 24234,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "frontend/src/components/ClaudeCode.test.tsx",
+    "frontend/src/components/Composer.test.tsx",
+    "frontend/src/lib/mdlite.test.tsx",
+    "tests/conftest.py",
+    "tests/test_campaigns.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 405,
+   "started_at": "2026-11-20T23:18:13Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "new-session-screen-claude-style-composer-claude-a0b6e5f",
+   "agent": "claude_code_glm",
+   "trial": 2,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of frontend/src/components/ClaudeCode.test.tsx, frontend/src/components/Composer.test.tsx, frontend/src/lib/mdlite.test.tsx, tests/conftest.py, tests/test_campaigns.py, tests/test_claude_code.py were replaced by the hidden tests)",
+   "wall_s": 297.3,
+   "cost_usd": 1.7852,
+   "tool_calls": 36,
+   "input_tokens": 2646170,
+   "output_tokens": 24869,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "frontend/src/components/ClaudeCode.test.tsx",
+    "frontend/src/components/Composer.test.tsx",
+    "frontend/src/lib/mdlite.test.tsx",
+    "tests/conftest.py",
+    "tests/test_campaigns.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 415,
+   "started_at": "2026-11-20T23:26:45Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "new-session-screen-claude-style-composer-claude-a0b6e5f",
+   "agent": "claude_code_glm",
+   "trial": 3,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of frontend/src/components/ClaudeCode.test.tsx, frontend/src/components/Composer.test.tsx, frontend/src/lib/mdlite.test.tsx, tests/conftest.py, tests/test_campaigns.py, tests/test_claude_code.py were replaced by the hidden tests)",
+   "wall_s": 311.2,
+   "cost_usd": 1.7958,
+   "tool_calls": 42,
+   "input_tokens": 2808096,
+   "output_tokens": 26919,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "frontend/src/components/ClaudeCode.test.tsx",
+    "frontend/src/components/Composer.test.tsx",
+    "frontend/src/lib/mdlite.test.tsx",
+    "tests/conftest.py",
+    "tests/test_campaigns.py",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 450,
+   "started_at": "2026-11-20T23:27:26Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "read-and-write-text-as-utf-8-on-windows-6347020",
+   "agent": "claude_code_glm",
+   "trial": 1,
+   "passed": true,
+   "blame": "",
+   "reason": "passed",
+   "wall_s": 350.6,
+   "cost_usd": 0.9741,
+   "tool_calls": 22,
+   "input_tokens": 1345913,
+   "output_tokens": 13022,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "tests/test_text_encoding.py"
+   ],
+   "failed_steps": [],
+   "diff_lines": 318,
+   "started_at": "2026-11-20T23:28:17Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "read-and-write-text-as-utf-8-on-windows-6347020",
+   "agent": "claude_code_glm",
+   "trial": 2,
+   "passed": true,
+   "blame": "",
+   "reason": "passed",
+   "wall_s": 341.4,
+   "cost_usd": 0.8446,
+   "tool_calls": 23,
+   "input_tokens": 1221177,
+   "output_tokens": 11473,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "tests/test_text_encoding.py"
+   ],
+   "failed_steps": [],
+   "diff_lines": 344,
+   "started_at": "2026-11-20T23:31:42Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "read-and-write-text-as-utf-8-on-windows-6347020",
+   "agent": "claude_code_glm",
+   "trial": 3,
+   "passed": true,
+   "blame": "",
+   "reason": "passed",
+   "wall_s": 371.5,
+   "cost_usd": 1.0748,
+   "tool_calls": 28,
+   "input_tokens": 1710314,
+   "output_tokens": 12053,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [],
+   "failed_steps": [],
+   "diff_lines": 283,
+   "started_at": "2026-11-20T23:32:37Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "replay-live-recordings-verify-and-render-writes-b4264b2",
+   "agent": "claude_code_glm",
+   "trial": 1,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs were replaced by the hidden tests)",
+   "wall_s": 295.1,
+   "cost_usd": 1.8933,
+   "tool_calls": 33,
+   "input_tokens": 3111072,
+   "output_tokens": 21170,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 371,
+   "started_at": "2026-11-20T23:34:08Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "replay-live-recordings-verify-and-render-writes-b4264b2",
+   "agent": "claude_code_glm",
+   "trial": 2,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs were replaced by the hidden tests)",
+   "wall_s": 256.0,
+   "cost_usd": 1.9395,
+   "tool_calls": 36,
+   "input_tokens": 3513268,
+   "output_tokens": 19604,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 288,
+   "started_at": "2026-11-20T23:37:24Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "replay-live-recordings-verify-and-render-writes-b4264b2",
+   "agent": "claude_code_glm",
+   "trial": 3,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs were replaced by the hidden tests)",
+   "wall_s": 270.8,
+   "cost_usd": 1.7015,
+   "tool_calls": 31,
+   "input_tokens": 2621705,
+   "output_tokens": 20633,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 250,
+   "started_at": "2026-11-20T23:38:48Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "replay-make-live-recording-work-end-to-end-7ece383",
+   "agent": "claude_code_glm",
+   "trial": 1,
+   "passed": true,
+   "blame": "",
+   "reason": "passed",
+   "wall_s": 200.2,
+   "cost_usd": 1.3658,
+   "tool_calls": 28,
+   "input_tokens": 2146494,
+   "output_tokens": 16081,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [],
+   "failed_steps": [],
+   "diff_lines": 289,
+   "started_at": "2026-11-20T23:39:03Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "replay-make-live-recording-work-end-to-end-7ece383",
+   "agent": "claude_code_glm",
+   "trial": 2,
+   "passed": true,
+   "blame": "",
+   "reason": "passed",
+   "wall_s": 205.4,
+   "cost_usd": 1.2631,
+   "tool_calls": 23,
+   "input_tokens": 1691145,
+   "output_tokens": 17835,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [],
+   "failed_steps": [],
+   "diff_lines": 288,
+   "started_at": "2026-11-20T23:41:40Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "replay-make-live-recording-work-end-to-end-7ece383",
+   "agent": "claude_code_glm",
+   "trial": 3,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests'",
+   "wall_s": 191.6,
+   "cost_usd": 1.2023,
+   "tool_calls": 22,
+   "input_tokens": 1560114,
+   "output_tokens": 16260,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 278,
+   "started_at": "2026-11-20T23:42:23Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "skipper-mode-and-central-doc-for-folder-sessions-2447f98",
+   "agent": "claude_code_glm",
+   "trial": 1,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of frontend/src/components/NewSession.test.tsx, tests/test_claude_code.py were replaced by the hidden tests)",
+   "wall_s": 614.1,
+   "cost_usd": 1.8105,
+   "tool_calls": 43,
+   "input_tokens": 3275520,
+   "output_tokens": 23114,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 286,
+   "started_at": "2026-11-20T23:43:19Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "skipper-mode-and-central-doc-for-folder-sessions-2447f98",
+   "agent": "claude_code_glm",
+   "trial": 2,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of frontend/src/components/NewSession.test.tsx, tests/test_claude_code.py were replaced by the hidden tests)",
+   "wall_s": 647.9,
+   "cost_usd": 1.877,
+   "tool_calls": 46,
+   "input_tokens": 3180069,
+   "output_tokens": 27700,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 479,
+   "started_at": "2026-11-20T23:45:05Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "skipper-mode-and-central-doc-for-folder-sessions-2447f98",
+   "agent": "claude_code_glm",
+   "trial": 3,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of frontend/src/components/NewSession.test.tsx, tests/test_claude_code.py were replaced by the hidden tests)",
+   "wall_s": 784.0,
+   "cost_usd": 1.7533,
+   "tool_calls": 38,
+   "input_tokens": 2968546,
+   "output_tokens": 23175,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "frontend/src/components/NewSession.test.tsx",
+    "tests/test_claude_code.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 314,
+   "started_at": "2026-11-20T23:45:35Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "trailer-maker-skill-workflow-edit-list-renderer-e077cb4",
+   "agent": "claude_code_glm",
+   "trial": 1,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of tests/test_skills.py were replaced by the hidden tests)",
+   "wall_s": 400.0,
+   "cost_usd": 1.8487,
+   "tool_calls": 35,
+   "input_tokens": 2378248,
+   "output_tokens": 33472,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "tests/test_skills.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 823,
+   "started_at": "2026-11-20T23:53:33Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "trailer-maker-skill-workflow-edit-list-renderer-e077cb4",
+   "agent": "claude_code_glm",
+   "trial": 2,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of tests/test_skills.py were replaced by the hidden tests)",
+   "wall_s": 354.2,
+   "cost_usd": 1.8845,
+   "tool_calls": 38,
+   "input_tokens": 2892145,
+   "output_tokens": 29608,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "tests/test_skills.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 658,
+   "started_at": "2026-11-20T23:55:53Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "trailer-maker-skill-workflow-edit-list-renderer-e077cb4",
+   "agent": "claude_code_glm",
+   "trial": 3,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of tests/test_skills.py were replaced by the hidden tests)",
+   "wall_s": 448.9,
+   "cost_usd": 1.6889,
+   "tool_calls": 38,
+   "input_tokens": 2439963,
+   "output_tokens": 29443,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "tests/test_skills.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 703,
+   "started_at": "2026-11-20T23:58:39Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "tune-the-prompt-improver-against-a-real-model-18689d1",
+   "agent": "claude_code_glm",
+   "trial": 1,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of tests/test_pi_contracts.py, tests/test_prompt_improver.py were replaced by the hidden tests)",
+   "wall_s": 226.6,
+   "cost_usd": 1.4199,
+   "tool_calls": 28,
+   "input_tokens": 1946351,
+   "output_tokens": 14848,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "tests/test_pi_contracts.py",
+    "tests/test_prompt_improver.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 201,
+   "started_at": "2026-11-21T00:00:13Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "tune-the-prompt-improver-against-a-real-model-18689d1",
+   "agent": "claude_code_glm",
+   "trial": 2,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of tests/test_pi_contracts.py, tests/test_prompt_improver.py were replaced by the hidden tests)",
+   "wall_s": 469.8,
+   "cost_usd": 1.4429,
+   "tool_calls": 25,
+   "input_tokens": 424015,
+   "output_tokens": 734,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "tests/test_pi_contracts.py",
+    "tests/test_prompt_improver.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 184,
+   "started_at": "2026-11-21T00:01:47Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "tune-the-prompt-improver-against-a-real-model-18689d1",
+   "agent": "claude_code_glm",
+   "trial": 3,
+   "passed": false,
+   "blame": "agent",
+   "reason": "failed command 'tests' (its own versions of tests/test_pi_contracts.py, tests/test_prompt_improver.py were replaced by the hidden tests)",
+   "wall_s": 198.7,
+   "cost_usd": 1.1356,
+   "tool_calls": 23,
+   "input_tokens": 1461253,
+   "output_tokens": 10997,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "tests/test_pi_contracts.py",
+    "tests/test_prompt_improver.py"
+   ],
+   "failed_steps": [
+    "tests"
+   ],
+   "diff_lines": 141,
+   "started_at": "2026-11-21T00:04:00Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "unity-dash-with-cooldown-c1e0f9b",
+   "agent": "claude_code_glm",
+   "trial": 1,
+   "passed": true,
+   "blame": "",
+   "reason": "passed",
+   "wall_s": 49.8,
+   "cost_usd": 0.3063,
+   "tool_calls": 6,
+   "input_tokens": 224502,
+   "output_tokens": 2833,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [],
+   "failed_steps": [],
+   "diff_lines": 46,
+   "started_at": "2026-11-21T00:06:08Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "unity-dash-with-cooldown-c1e0f9b",
+   "agent": "claude_code_glm",
+   "trial": 2,
+   "passed": true,
+   "blame": "",
+   "reason": "passed",
+   "wall_s": 48.3,
+   "cost_usd": 0.2987,
+   "tool_calls": 8,
+   "input_tokens": 264018,
+   "output_tokens": 2927,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [],
+   "failed_steps": [],
+   "diff_lines": 45,
+   "started_at": "2026-11-21T00:06:58Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "unity-dash-with-cooldown-c1e0f9b",
+   "agent": "claude_code_glm",
+   "trial": 3,
+   "passed": true,
+   "blame": "",
+   "reason": "passed",
+   "wall_s": 53.3,
+   "cost_usd": 0.3134,
+   "tool_calls": 8,
+   "input_tokens": 189452,
+   "output_tokens": 3897,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "examples/unity-sample/Assets/Tests/Editor/DashTests.cs",
+    "examples/unity-sample/Assets/Tests/Editor/DashTests.cs.meta"
+   ],
+   "failed_steps": [],
+   "diff_lines": 93,
+   "started_at": "2026-11-21T00:07:19Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "unity-streak-bonus-and-coin-field-9606c5a",
+   "agent": "claude_code_glm",
+   "trial": 1,
+   "passed": true,
+   "blame": "",
+   "reason": "passed",
+   "wall_s": 46.2,
+   "cost_usd": 0.3285,
+   "tool_calls": 6,
+   "input_tokens": 272085,
+   "output_tokens": 2418,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "examples/unity-sample/Assets/Tests/Editor/ScoreBoardTests.cs"
+   ],
+   "failed_steps": [],
+   "diff_lines": 42,
+   "started_at": "2026-11-21T00:07:46Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "unity-streak-bonus-and-coin-field-9606c5a",
+   "agent": "claude_code_glm",
+   "trial": 2,
+   "passed": true,
+   "blame": "",
+   "reason": "passed",
+   "wall_s": 52.1,
+   "cost_usd": 0.3242,
+   "tool_calls": 6,
+   "input_tokens": 272889,
+   "output_tokens": 3009,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "examples/unity-sample/Assets/Tests/Editor/ScoreBoardTests.cs"
+   ],
+   "failed_steps": [],
+   "diff_lines": 44,
+   "started_at": "2026-11-21T00:08:12Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  },
+  {
+   "task": "unity-streak-bonus-and-coin-field-9606c5a",
+   "agent": "claude_code_glm",
+   "trial": 3,
+   "passed": true,
+   "blame": "",
+   "reason": "passed",
+   "wall_s": 52.6,
+   "cost_usd": 0.3231,
+   "tool_calls": 9,
+   "input_tokens": 275680,
+   "output_tokens": 3057,
+   "agent_error": "",
+   "timed_out": false,
+   "tampered": [
+    "examples/unity-sample/Assets/Tests/Editor/ScoreBoardTests.cs"
+   ],
+   "failed_steps": [],
+   "diff_lines": 33,
+   "started_at": "2026-11-21T00:08:32Z",
+   "helper_calls": 0,
+   "model": "claude-opus-5-5"
+  }
+ ],
+ "summary": [
+  {
+   "agent": "claude_code_glm",
+   "tasks": 14,
+   "trials": 42,
+   "passed": 11,
+   "pass@1": 0.262,
+   "pass@3": 0.286,
+   "mean_cost_usd": 1.2967,
+   "mean_wall_s": 401.6,
+   "mean_tool_calls": 29.8,
+   "mean_helper_calls": 0.0,
+   "models": [
+    "claude-opus-5-5"
+   ],
+   "blame": {
+    "agent": 31,
+    "environment": 0,
+    "grader": 0
+   }
+  }
+ ]
+}

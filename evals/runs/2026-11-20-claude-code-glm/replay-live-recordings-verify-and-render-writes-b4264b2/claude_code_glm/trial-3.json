@@ -1,0 +1,44 @@
+{
+ "task": "replay-live-recordings-verify-and-render-writes-b4264b2",
+ "agent": "claude_code_glm",
+ "trial": 3,
+ "passed": false,
+ "blame": "agent",
+ "reason": "failed command 'tests' (its own versions of skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs were replaced by the hidden tests)",
+ "wall_s": 270.8,
+ "cost_usd": 1.7015,
+ "tool_calls": 31,
+ "input_tokens": 2621705,
+ "output_tokens": 20633,
+ "agent_error": "",
+ "timed_out": false,
+ "tampered": [
+  "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+ ],
+ "failed_steps": [
+  "tests"
+ ],
+ "diff_lines": 250,
+ "started_at": "2026-11-20T23:38:48Z",
+ "helper_calls": 0,
+ "model": "claude-opus-5-5",
+ "grade": {
+  "passed": false,
+  "tampered": [
+   "skills/replay/templates/com.gdw.replay/Tests/PlayMode/ReplayVerificationTests.cs"
+  ],
+  "environment_failure": false,
+  "steps": [
+   {
+    "name": "tests",
+    "kind": "command",
+    "passed": false,
+    "exit": 1,
+    "duration_s": 0.6295319576747715,
+    "output": "st-of-arshiajahan/pytest-1401/test_a_render_without_frames_i0')\n\n    def test_a_render_without_frames_is_reported_not_passed(tmp_path):\n        _run_dir(tmp_path)\n        out = replay._export_capture(tmp_path, \"rr_0123456789abcdef\", {\"capture\": CAPTURE})\n>       assert out == {\"ok\": False, \"outputs\": [], \"error\": \"the render wrote no frames\"}\nE       AssertionError: assert None == {'ok': False, 'outputs': [], 'error': 'the render wrote no frames'}\n\ntests/test_replay_render_export.py:37: AssertionError\n------------------------------ Captured log call -------------------------------\nWARNING  gamedevworkstation.features.replay:replay.py:887 replay: render rr_0123456789abcdef captured no frames in Logs/harness/replay/rr_0123456789abcdef/capture/frames; nothing to export\n__________________ test_export_failure_keeps_the_ffmpeg_error __________________\n\ntmp_path = PosixPath('/private/var/folders/07/xyyrk2p92jnblsq7j428mt5h0000gn/T/pytest-of-arshiajahan/pytest-1401/test_export_failure_keeps_the_0')\nmonkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x107057ac0>\n\n    def test_export_failure_keeps_the_ffmpeg_error(tmp_path, monkeypatch):\n        run = _run_dir(tmp_path)\n        (run / \"capture\" / \"frames\").mkdir(parents=True)\n        (run / \"capture\" / \"frames\" / \"frame-000000.png\").write_bytes(b\"png\")\n        monkeypatch.setattr(replay_media, \"_ffmpeg_paths\", lambda *a, **k: (\"ffmpeg\", \"ffprobe\"))\n        monkeypatch.setattr(replay_media, \"execute_steps\", lambda plan, **kw: {\n            \"ok\": False, \"results\": [{\"step\": 0, \"output\": plan.outputs[0], \"ok\": False, \"error\": \"no encoder\"}],\n            \"warnings\": []})\n        out = replay._export_capture(tmp_path, \"rr_0123456789abcdef\", {\"capture\": CAPTURE})\n        assert out[\"ok\"] is False and out[\"outputs\"] == [] and out[\"error\"] == \"no encoder\"\n        text = replay._tool_output(\"render\", \"rr_0123456789abcdef\", None, {\"status\": \"pass\", \"message\": \"ok\"}, out).text\n>       assert \"Export failed: no encoder\" in text\nE       assert 'Export failed: no encoder' in 'Replay render: pass. ok; export failed: no encoder\\n{\\n \"op\": \"render\",\\n \"run_id\": \"rr_0123456789abcdef\",\\n \"route\":... },\\n \"export\": {\\n  \"ok\": false,\\n  \"outputs\": [],\\n  \"frames\": 1,\\n  \"warnings\": [],\\n  \"error\": \"no encoder\"\\n }\\n}'\n\ntests/test_replay_render_export.py:77: AssertionError\n________ test_the_verification_test_captures_frames_for_render_requests ________\n\n    def test_the_verification_test_captures_frames_for_render_requests():\n        test = _src(\"Tests/PlayMode/ReplayVerificationTests.cs\")\n        assert \"ReplayCaptureHooks.Start(framesDir\" in test\n        assert \"ReplayLoop.AfterCheckpoint = () => ReplayCaptureHooks.CaptureFrame()\" in test\n        assert re.search(r'Path\\.Combine\\([^;]*\"capture\", \"frames\"\\)', test)\n        assert \"ReplayCaptureHooks.Start = Start;\" in _src(\"Editor/ReplayCapture.cs\")\n>       assert \"AfterCheckpoint?.Invoke();\" in _src(\"Runtime/ReplayLoop.cs\")\nE       AssertionError: assert 'AfterCheckpoint?.Invoke();' in 'using System;\\nusing System.Collections.Generic;\\nusing UnityEngine;\\nusing UnityEngine.LowLevel;\\nusing UnityEngine....d, out var a);\\n                if (e != a) return id;\\n            }\\n            return null;\\n        }\\n    }\\n}\\n'\nE        +  where 'using System;\\nusing System.Collections.Generic;\\nusing UnityEngine;\\nusing UnityEngine.LowLevel;\\nusing UnityEngine....d, out var a);\\n                if (e != a) return id;\\n            }\\n            return null;\\n        }\\n    }\\n}\\n' = _src('Runtime/ReplayLoop.cs')\n\ntests/test_replay_render_export.py:86: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_replay_render_export.py::test_a_render_without_frames_is_reported_not_passed\nFAILED tests/test_replay_render_export.py::test_export_failure_keeps_the_ffmpeg_error\nFAILED tests/test_replay_render_export.py::test_the_verification_test_captures_frames_for_render_requests\n3 failed, 5 passed in 0.27s\n",
+    "environment": false,
+    "detail": {}
+   }
+  ]
+ }
+}

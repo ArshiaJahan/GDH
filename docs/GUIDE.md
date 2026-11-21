@@ -54,7 +54,7 @@ Every feature at a glance; the sections below have the details. The README lists
 | **New session screen** | "What should we work on?": type a task, pick **Chat only** or a **Folder** (or a recent one), the Claude model, effort and mode, and send. New sessions from this screen use your Claude subscription; scheduled tasks, campaigns, fleet and subagents keep the built-in loop. Existing sessions keep their harness. |
 | **Claude Code sessions** | Run your own `claude` CLI and login (checked against claude 2.1.308 on a claude.ai subscription), with GDW tools, approvals, Plan mode and `--resume`. Subscription estimates stay outside spend limits; API key logins record `billing='api'` and check spend limits before each turn. See [Claude Code sessions](docs/GUIDE.md#claude-code-sessions). |
 | **CI failure triage** | `gdw triage <run-id\|log>` sorts a failed CI run's failures into compile, test, flaky, infra, dependency and timeout, and names the file and line. It reads GitHub Actions, pytest, vitest, tsc, cargo, npm and uv logs, plus Unity Editor.log and NUnit XML. Rules come first, and a model handles only what the rules can't place. A GitHub Action posts the report on failed PRs. On 26 labelled failed logs the rules got 24/26 categories right before tuning and 26/26 after. See [CI failure triage](docs/GUIDE.md#ci-failure-triage). |
-| **Eval Forge** | `gdw eval forge <commit>` turns a merged commit or PR into an agent task: the start state, a leak-filtered prompt and the commit's tests as hidden graders, plus differential, Unity (EditMode tests, scene asserts, replay hashes) and rubric graders. `gdw eval validate` checks each grader: the reference must pass and generated flawed solutions (mutants, partial fixes, test tampering) must fail. `gdw eval run` runs Claude Code, Codex and the built-in agent for pass@k, cost, time and tool calls, and blames each failure on the agent, the environment or the grader. Tasks export to the Harbor / Terminal-Bench 2.0 format. On the 13-task seed suite every reference passes and 111 of 168 flawed solutions are caught. See [Eval Forge](docs/GUIDE.md#eval-forge). |
+| **Eval Forge** | `gdw eval forge <commit>` turns a merged commit or PR into an agent task: the start state, a leak-filtered prompt and the commit's tests as hidden graders, plus differential, Unity (EditMode tests, scene asserts, replay hashes) and rubric graders. `gdw eval validate` checks each grader: the reference must pass and generated flawed solutions (mutants, partial fixes, test tampering) must fail. `gdw eval run` runs Claude Code, Codex and the built-in agent for pass@k, cost, time and tool calls, and blames each failure on the agent, the environment or the grader. Tasks export to the Harbor / Terminal-Bench 2.0 format. On the 13-task seed suite every reference passes and 111 of 168 flawed solutions are caught. A first Claude Code run (Opus 5.5, k=3, 2026-11-20) scored 28% pass@1 and 31% pass@3, and its failures exposed three under-specified tasks, now fixed or dropped. See [Eval Forge](docs/GUIDE.md#eval-forge). |
 | **Cost control** | Daily and per-session spend limits, job budgets, approval for high effort, and a My usage page per model. |
 | **Trailer maker** | Brief → beat sheet → scripted Play Mode capture (Unity Recorder) → ffmpeg edit from a JSON edit list → ElevenLabs music cut to the beat sheet → three reviewers → Steam, YouTube and vertical exports. |
 | **Record and replay** | Record instrumented Unity sessions in the open Editor, replay them with frame-by-frame checkpoint verification (SHA-256 state hashes), and export silent gameplay GIF/MP4. Input System only; the guarantee is same-environment repeatability for the state you register, and a mismatch is reported, not refused. |
@@ -1511,8 +1511,36 @@ Grader validation of the seed suite, run on 2026-11-20 (macOS, Apple M4; the Uni
 | `unity-streak-bonus-and-coin-field-9606c5a` | unity | pass | 7/7 (100%) |
 | **All 13** | | **13/13 pass** | **111/168 (66%)** |
 
-No agent results are published yet: a run uses real model time, so it happens only when asked, and the table
-will carry the date, models, k and raw logs.
+**First agent run** (2026-11-20, UTC 22:35 to 00:22 the next day; macOS, Apple M4). The agent was `claude_code_glm`:
+Claude Code 2.1.308 in print mode on Claude Opus 5.5 (`claude-opus-5-5`, read from the CLI's own init event), told that it
+may hand easy, high-token side work to GLM-5.3-Flash through `arkcli +chat`. It ran with k=3 on the 13-task suite and
+used the account's own `~/.claude` settings, so it measures that Claude Code setup, not a clean install.
+
+| Agent | Tasks | pass@1 | pass@3 | Mean cost | Mean wall | Mean tool calls | Mean helper calls | Failures: agent / env / grader |
+|---|---|---|---|---|---|---|---|---|
+| claude_code_glm | 13 | 28% | 31% | $1.204 | 388s | 28 | 0.0 | 28 / 0 / 0 |
+
+Passed 11 of 39 trials: both Unity tasks 3/3, UTF-8 3/3 and the live-recording task 2/3. The other nine GDH tasks
+were 0/3, so 5 of the 33 GDH trials passed. Costs are the CLI's API-equivalent `total_cost_usd`. All 48 trials in the
+run cost $62.65 and took 5.5 hours of agent time, including the six re-runs and the dropped task. Claude never called
+the GLM helpers: 0 helper calls in every trial.
+
+What the run showed about the suite, not the agent:
+
+- Three tasks hid things their tests need: one test imported a new module the prompt never named, one needed
+  `@functools.cache` on a function whose declaration was listed without it, and one task was a one-line title in
+  front of 71 tests. Forge now names the files, keeps decorators and refuses title-only tasks. The two fixable tasks
+  were re-forged and re-run (those six trials are in the table). The third was dropped.
+- The new-session re-run used the prompt from before the decorator fix, so its 0/3 still includes that gap.
+- Tests taken from a real commit check that commit's design, not only the behaviour the task asks for. The
+  automatic-updates tests read `Updater.feed` and a `"github"` key in `status()`. A live-recording test greps the
+  source for `EditorApplication.EnterPlaymode()`, where `isPlaying = true` does the same job. Other failures were
+  real misses: paperclip attachments dropped the `[Attached …]` label blocks the prompt asks for in 3/3 trials.
+- A per-failure fairness audit by GLM Flash agreed with a hand check on only one of three sampled cases, so it isn't
+  published. Read these scores as a floor for this kind of task, not a measure of the model.
+
+Raw evidence is in `evals/runs/2026-11-20-claude-code-glm/` and `-refix/`: every trial's JSON (grade, blame, cost,
+tool calls) and the agent's diff. The stream logs stay local because they're large and carry the machine's setup.
 
 ## Building the app
 

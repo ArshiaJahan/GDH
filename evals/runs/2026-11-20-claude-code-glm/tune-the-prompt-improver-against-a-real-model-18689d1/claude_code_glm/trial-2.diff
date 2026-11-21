@@ -1,0 +1,428 @@
+diff --git a/backend/gamedevworkstation/default_config.toml b/backend/gamedevworkstation/default_config.toml
+index 3d76f79..97e84e4 100644
+--- a/backend/gamedevworkstation/default_config.toml
++++ b/backend/gamedevworkstation/default_config.toml
+@@ -247,7 +247,7 @@ builtin_enabled = true              # Built-in sessions
+ claude_code_enabled = true          # Claude Code (subscription) sessions
+ max_calls = 2                       # model calls per message (1 or 2)
+ max_input_tokens = 4096
+-max_output_tokens = 1024
++max_output_tokens = 2048
+ timeout_s = 30
+ budget_usd = 0.03                   # per message, at most 1
+ breaker_failures = 2                # consecutive failed runs (outage, bad model) before the improver pauses
+diff --git a/backend/gamedevworkstation/features/claude_code.py b/backend/gamedevworkstation/features/claude_code.py
+index d4604cc..db7522e 100644
+--- a/backend/gamedevworkstation/features/claude_code.py
++++ b/backend/gamedevworkstation/features/claude_code.py
+@@ -739,7 +739,7 @@ HELPER_DENY = ("Bash", "BashOutput", "KillShell", "Edit", "MultiEdit", "Write",
+ HELPER_SYSTEM = ("You are a text-only helper for GameDevWorkstation. You have no tools. Answer with the text asked for "
+                  "in the single reply and nothing else.")
+ HELPER_DEFAULTS = {"model": "claude.fast", "effort": "low", "timeout_s": 30, "budget_usd": 0.03,
+-                   "max_input_tokens": 4096, "max_output_tokens": 1024}
++                   "max_input_tokens": 4096, "max_output_tokens": 2048}
+ 
+ 
+ def _est_tokens(text: str) -> int:
+diff --git a/backend/gamedevworkstation/features/pi_contracts.py b/backend/gamedevworkstation/features/pi_contracts.py
+index e8d8570..c735e63 100644
+--- a/backend/gamedevworkstation/features/pi_contracts.py
++++ b/backend/gamedevworkstation/features/pi_contracts.py
+@@ -9,7 +9,7 @@ from typing import Annotated, Any, Literal
+ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, field_validator, model_validator
+ 
+ SCHEMA_VERSION = 1
+-TEMPLATE_VERSION = "pi-eval-1"
++TEMPLATE_VERSION = "pi-eval-2"
+ COLLECTOR_VERSION = "pi-facts-1"
+ MAX_QUESTIONS = 3
+ UNKNOWN = "unknown"
+@@ -176,11 +176,12 @@ class TaskCard(_M):
+ 
+ 
+ class EvalResult(_M):
+-    """The evaluator's whole output. PROCEED has no questions; ASK has 1..3."""
++    """The evaluator's whole output. PROCEED has no questions and a task card; ASK has 1..3 questions and may omit the
++    card (the coordinator synthesizes it after the answers)."""
+     decision: Decision
+     cited_facts: list[str] = Field(default_factory=list, max_length=20)  # Fact sources
+     questions: list[Question] = Field(default_factory=list, max_length=MAX_QUESTIONS)
+-    task_card: TaskCard
++    task_card: TaskCard | None = None
+     routing: Routing = Field(default_factory=Routing)
+     assumptions: list[str] = Field(default_factory=list, max_length=8)
+ 
+@@ -190,6 +191,8 @@ class EvalResult(_M):
+             raise ValueError("PROCEED must not carry questions")
+         if self.decision == "ASK" and not self.questions:
+             raise ValueError("ASK needs at least one question")
++        if self.decision == "PROCEED" and self.task_card is None:
++            raise ValueError("PROCEED needs a task card")
+         ids = [q.id for q in self.questions]
+         if len(set(ids)) != len(ids):
+             raise ValueError("duplicate question ids")
+@@ -213,10 +216,36 @@ class ImproverOutcome(_M):
+ 
+ 
+ _FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.I)
++_FACT_KEYS = ("source", "path", "fact", "value")
++
++
++def _fact_ref(x: Any) -> Any:
++    """A cited fact given as an object ({"source": ..., "value": ...}) becomes its source string."""
++    if isinstance(x, dict):
++        for k in _FACT_KEYS:
++            if isinstance(x.get(k), str) and x[k].strip():
++                return x[k].strip()[:300]
++        return None
++    return x
++
++
++def _normalize(data: dict) -> dict:
++    """Tolerated real-model drift, fixed before validation: object cited facts and questions on invented topics."""
++    if isinstance(data.get("cited_facts"), list):
++        data["cited_facts"] = [r for r in (_fact_ref(x) for x in data["cited_facts"]) if r is not None]
++    if isinstance(data.get("questions"), list):
++        qs = [q for q in data["questions"] if not (isinstance(q, dict) and q.get("topic") not in TOPICS)]
++        for q in qs:
++            for o in (q.get("options") if isinstance(q, dict) and isinstance(q.get("options"), list) else []):
++                if isinstance(o, dict) and isinstance(o.get("cited_fact"), dict):
++                    o["cited_fact"] = _fact_ref(o["cited_fact"])
++        data["questions"] = qs
++    return data
+ 
+ 
+ def parse_eval(text: str) -> EvalResult:
+-    """Parse the evaluator's reply (one JSON object, optional code fence) or raise PiFormatError."""
++    """Parse the evaluator's reply (one JSON object, optional code fence) or raise PiFormatError. Questions on a topic
++    outside TOPICS are dropped (an ASK left with none is still an error)."""
+     if not isinstance(text, str) or not text.strip():
+         raise PiFormatError("empty evaluator output")
+     body = _FENCE.sub("", text.strip())
+@@ -227,6 +256,6 @@ def parse_eval(text: str) -> EvalResult:
+     if not isinstance(data, dict):
+         raise PiFormatError("expected a JSON object")
+     try:
+-        return EvalResult.model_validate(data)
++        return EvalResult.model_validate(_normalize(data))
+     except ValidationError as e:
+         raise PiFormatError(f"schema: {e.errors()[0].get('loc')}: {e.errors()[0].get('msg')}") from e
+diff --git a/backend/gamedevworkstation/features/prompt_improver.py b/backend/gamedevworkstation/features/prompt_improver.py
+index 1996827..2bb1b12 100644
+--- a/backend/gamedevworkstation/features/prompt_improver.py
++++ b/backend/gamedevworkstation/features/prompt_improver.py
+@@ -49,7 +49,7 @@ CRITICAL_TOPICS = ("target", "multiplayer")
+ # Config defaults ([prompt_improver]).
+ DEFAULTS: dict[str, Any] = {
+     "enabled": True, "max_questions": 3, "model": "claude.fast", "effort": "low", "builtin_enabled": True,
+-    "claude_code_enabled": True, "max_calls": 2, "max_input_tokens": 4096, "max_output_tokens": 1024,
++    "claude_code_enabled": True, "max_calls": 2, "max_input_tokens": 4096, "max_output_tokens": 2048,
+     "timeout_s": 30, "budget_usd": 0.03,
+     "breaker_failures": 2, "breaker_pause_s": 600,  # circuit breaker: consecutive failures, then pause seconds
+ }
+@@ -62,23 +62,39 @@ FIELD_MAX = 300  # one card line (goal, bullet, route reason) in the injected co
+ SCOPE_MAX = 200
+ _CTRL = re.compile(r"[\x00-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2060-\u2064\ufeff]+")
+ 
++# Tuned on a live run (Claude Haiku 5.5, the 48-prompt corpus): vague ask-rate 0.62 -> 0.83, clear false-asks 0.08 -> 0.04.
++DECISION_RULES = """Decision rules, in order:
++1. ASK when success is subjective (feel, "better", "nicer", "smoother", "more fun", "polish") and neither the request
++   nor the facts give a numeric target, a reference or a documented TASTE/GDD value.
++2. ASK when the request opens a set of variants without naming them ("some enemies", "a few levels", "more weapons",
++   "power-ups") and the facts do not list them.
++3. ASK about a bug that has no repro: no steps, no scene, no recorded input and no matching console error in the facts.
++4. Never assume what the user wants in order to define done. If you cannot state an observable completion check from
++   the request, the conversation or the facts, ASK the acceptance question instead of writing one yourself.
++5. Otherwise PROCEED: a request naming its target and an observable result is clear even when it is terse, and a short
++   follow-up inherits what the recent conversation already settled. Never ask what the facts already answer.
++Use only the listed question topics."""
++
++CARD_SPEC = """{"goal": str, "scope": [project-relative paths/systems], "out_of_scope": [str],
++   "acceptance_criteria": [{"id": "AC1", "expected": str, "verification": "compile|editmode_test|playmode_test|play_signal|screenshot|replay|manual", "reference": str}],
++   "quality_ladder_level": "L1|L2|L3|L4|manual", "quality_rationale": str, "effort": "none|low|medium|high",
++   "assumptions": [str], "risks": [str], "blockers": [str]}"""
++
+ FORMAT_SPEC = """Reply with exactly one JSON object and nothing else:
+-{"decision": "PROCEED" | "ASK", "cited_facts": [fact sources], "assumptions": [str],
++{"decision": "PROCEED" | "ASK", "cited_facts": [fact source strings], "assumptions": [str],
+  "questions": [] for PROCEED, else 1-3 of {"id": "q1", "topic": "target|platform_input|acceptance|feel|assets|performance|multiplayer|bug_replay",
+    "text": str, "options": [2-4 of {"id": "o1", "label": str, "detail": str, "cited_fact": str|null}], "recommended": option id, "rationale": str}],
+- "task_card": {"goal": str, "scope": [project-relative paths/systems], "out_of_scope": [str],
+-   "acceptance_criteria": [{"id": "AC1", "expected": str, "verification": "compile|editmode_test|playmode_test|play_signal|screenshot|replay|manual", "reference": str}],
+-   "quality_ladder_level": "L1|L2|L3|L4|manual", "quality_rationale": str, "effort": "none|low|medium|high",
+-   "assumptions": [str], "risks": [str], "blockers": [str]},
++ "task_card": """ + CARD_SPEC + """ (required for PROCEED; omit it for ASK, it is written after the answers),
+  "routing": {"skills": [<=3], "unity_route": "mcp|cli|none|unknown", "harness": "builtin|claude_code|unchanged", "reasons": [str]}}
+ Ids match ^[a-z0-9][a-z0-9_-]{0,39}$. Unknown project facts stay unknown; never invent them."""
+ 
+ SYNTH_SPEC = """The user answered the clarifying questions. Update the task card with their answers: fold each answer into
+ goal, scope, acceptance criteria, risks and assumptions. Never invent facts or numeric targets beyond the answers.
+-Reply with exactly one JSON object, the task card itself (same fields as task_card above), and nothing else."""
++Reply with exactly one JSON object, the task card itself, and nothing else:
++""" + CARD_SPEC
+ 
+ 
+-EVAL_SYSTEM = pi_research.EVAL_TEMPLATE + "\n\n" + FORMAT_SPEC
++EVAL_SYSTEM = pi_research.EVAL_TEMPLATE + "\n\n" + DECISION_RULES + "\n\n" + FORMAT_SPEC
+ 
+ 
+ def _cfg(app: "AppState") -> dict[str, Any]:
+@@ -403,7 +419,8 @@ class PromptImprover:
+         except PiFormatError as e:
+             raise _Stop("malformed", str(e)) from e
+         eval_item = self._add_item(run, "evaluation", "Prompt improver: evaluation", reply[:20000])
+-        card = ev.task_card.model_copy(deep=True)
++        # an ASK may leave the card out: start from the request and synthesize it after the answers
++        card = ev.task_card.model_copy(deep=True) if ev.task_card else TaskCard(goal=_clean(user_text, 500) or "unspecified")
+         answers: list[Answer] = []
+         assumptions: list[str] = list(ev.assumptions)
+         asked = 0
+diff --git a/config.example.toml b/config.example.toml
+index 272fb2e..e4cf009 100644
+--- a/config.example.toml
++++ b/config.example.toml
+@@ -215,7 +215,7 @@ mcp_server = "unity"                # the MCP for Unity server the cli backend k
+ # claude_code_enabled = true        # Claude Code (subscription) sessions
+ # max_calls = 2                     # 1 or 2
+ # max_input_tokens = 4096
+-# max_output_tokens = 1024
++# max_output_tokens = 2048
+ # timeout_s = 30
+ # budget_usd = 0.03                 # per message, at most 1
+ # breaker_failures = 2              # consecutive failed runs before the improver pauses
+diff --git a/docs/GUIDE.md b/docs/GUIDE.md
+index 106f7b6..7acb671 100644
+--- a/docs/GUIDE.md
++++ b/docs/GUIDE.md
+@@ -916,7 +916,7 @@ overwritten. In Plan only mode, or with the task-board tools off, only the draft
+ | `model` | `claude.fast` | alias; Claude Code accepts only a model your login lists, no silent fallback |
+ | `effort` | `low` | `none`, `low`, `medium` or `high` (above high is refused) |
+ | `max_calls` | `2` | 1-2: one evaluation plus at most one synthesis |
+-| `max_input_tokens`, `max_output_tokens` | `4096`, `1024` | per call |
++| `max_input_tokens`, `max_output_tokens` | `4096`, `2048` | per call |
+ | `timeout_s` | `30` | per call |
+ | `budget_usd` | `0.03` | per-prompt cap, 0-1 |
+ | `breaker_failures`, `breaker_pause_s` | `2`, `600` | after this many failures in a row (per session, or per model), the improver pauses for this long and shows one notice; a success resets it |
+@@ -941,8 +941,21 @@ uv run --frozen python scripts/eval_prompt_improver.py --live --yes --out pi-liv
+ It reports the vague ask-rate, clear false-ask rate, bypass accuracy, mean and p95 added input/output
+ tokens, calls and cards per prompt. `--fake` uses a scripted FakeProvider with a small cue heuristic
+ (missing target, number or acceptance cues), so its results test orchestration and the regression gates in
+-`tests/test_pi_eval.py`, not model intelligence. No real-model accuracy numbers have been measured yet;
+-none are claimed here. A real run only happens after you approve its cost.
++`tests/test_pi_eval.py`, not model intelligence. Each prompt starts with a reset circuit breaker, so one
++failed call does not skip the prompts after it. A real run only happens after you approve its cost.
++
++Measured on Claude Haiku 5.5 (`--live`, all 48 prompts), template `pi-eval-1` to `pi-eval-2`:
++
++| Metric | `pi-eval-1` | `pi-eval-2` |
++|---|---|---|
++| Vague ask-rate | 0.62 | 0.83 |
++| Clear false-ask rate | 0.08 | 0.04 |
++
++`pi-eval-2` adds explicit decision rules (ask when success is subjective, when variants are left open and
++for a bug with no repro; never assume what the user wants in order to define done), lets an ASK reply
++leave the task card out (it is written after your answers), accepts cited facts given as objects, drops
++questions on topics outside the list, and raises the output cap to 2048 tokens. These numbers hold for
++this corpus and model only.
+ 
+ ## Keyboard shortcuts
+ 
+diff --git a/docs/plans/prompt-improver-contracts.md b/docs/plans/prompt-improver-contracts.md
+index 1ecc94e..eb5315b 100644
+--- a/docs/plans/prompt-improver-contracts.md
++++ b/docs/plans/prompt-improver-contracts.md
+@@ -10,9 +10,9 @@ Source of truth for A-E. Code stubs: `backend/gamedevworkstation/features/{pi_co
+ - `Question`: `id`, `topic` in `TOPICS` (`target, platform_input, acceptance, feel, assets, performance, multiplayer, bug_replay`), `text` ≤300, `options` 2-4 (unique ids), `recommended` (an option id), `rationale` ≤300, `allow_free_text=True`.
+ - `Answer`: `question_id`, `option_id|None`, `free_text` ≤1000, `skipped`, `answered_at`. Skipped carries no choice; otherwise option or text required. A skipped optional question becomes an explicit assumption.
+ - `TaskCard` (`schema_version=1`, the plan table): Identity `session_id, message_id, run_id, task_code, task_link, facts_fingerprint, citations` (≤20; service fills them); Intent `goal` (1-500), `scope` ≤20, `out_of_scope` ≤10; Acceptance `acceptance_criteria` ≤8 of `AcceptanceCriterion{id ^AC\d{1,2}$, expected ≤300, verification compile|editmode_test|playmode_test|play_signal|screenshot|replay|manual, reference, target: float|None, unit}`; Quality `quality_ladder_level` L1-L4|manual, `quality_rationale`, `backlog_story`; Resources `effort` none|low|medium|high, `budget: Budget{usd_estimate, usd_cap, max_tokens, max_calls, billing_basis api|subscription|unknown, uncertainty}`; Decisions `answers` ≤3, `assumptions` ≤8, `risks` ≤8, `blockers` ≤5; Route `route: Routing{skills ≤3, unity_route mcp|cli|none|unknown, harness builtin|claude_code|unchanged, reasons ≤4}`.
+-- `EvalResult`: `decision` `PROCEED|ASK`, `cited_facts` ≤20, `questions` ≤3, `task_card`, `routing`, `assumptions` ≤8. PROCEED with questions, ASK without, or duplicate question ids are invalid.
++- `EvalResult`: `decision` `PROCEED|ASK`, `cited_facts` ≤20, `questions` ≤3, `task_card` (required for PROCEED, optional for ASK: the coordinator synthesizes it after the answers), `routing`, `assumptions` ≤8. PROCEED with questions or without a card, ASK without questions, or duplicate question ids are invalid.
+ - `ImproverOutcome`: `status` `proceeded|asked|bypassed|unavailable|paused`, `reason` (bypass or failure code), `context_text` ≤6000 (appended to this turn's request only; "" when none), `execution_text` (the text to execute, `*` stripped; "" = use stored text), `message_id`, `run_id`, `item_ids`, `task_code|None`, `questions_asked`, `calls`, `estimated_tokens`. `asked` = questions were shown and answered; the context then carries the answers.
+-- `parse_eval(text) -> EvalResult`: accepts one JSON object with an optional code fence; raises `PiFormatError(ValueError)` for empty, non-JSON, non-object or schema failure (never partial). Constants: `SCHEMA_VERSION=1`, `TEMPLATE_VERSION="pi-eval-1"`, `COLLECTOR_VERSION="pi-facts-1"`, `MAX_QUESTIONS=3`.
++- `parse_eval(text) -> EvalResult`: accepts one JSON object with an optional code fence; accepts cited facts given as objects (their `source`/`path` string is kept) and drops questions on a topic outside `TOPICS` before validation; raises `PiFormatError(ValueError)` for empty, non-JSON, non-object or schema failure (never partial). Constants: `SCHEMA_VERSION=1`, `TEMPLATE_VERSION="pi-eval-2"`, `COLLECTOR_VERSION="pi-facts-1"`, `MAX_QUESTIONS=3`.
+ 
+ ## 2. Eligibility (`features/prompt_improver.py`)
+ 
+@@ -45,7 +45,7 @@ Policy per plan decisions: always persist the card as an indexed item (`items.ad
+ 
+ **Approval card** kind `prompt_improver_question`, via `approvals.ask(sid, kind, payload)`. Payload: `{"subject": str (<=80, "Prompt improver: <topic>"), "markdown": str (question, option detail lines, rationale), "buttons": [{"id": option_id, "label", "decision": "approve", "style": "primary" for the recommended else "ghost"}, {"id": "skip", "label": "Skip (assume)", "decision": "deny", "style": "ghost"}], "note": {"label": "Or type an answer", "placeholder": "Optional"} (only if allow_free_text), "meta": {"run_id", "message_id", "question_id", "index": 1..n, "total": n, "topic"}}`. Answer: `{"status": "approved"|"denied", "choice": option_id, "note": str}`; `approved` with `note` and no choice is free text (a typed note wins over `choice`). `denied` on a critical question -> `paused`; on an optional one -> assumption. `timed_out`/expired after restart -> never inferred; re-ask or pause. This kind is separate from `claude_code_question` (cap four) and capped at `max_questions`.
+ 
+-**Config `[prompt_improver]`** (add to `default_config.toml`, `Config.prompt_improver: dict`, `TYPED_SECTIONS`, `settings_routes.EDITABLE` and `NO_PROVIDER_RESET`): `enabled=true, max_questions=3, model="claude.fast", effort="low", builtin_enabled=true, claude_code_enabled=true, max_calls=2, max_input_tokens=4096, max_output_tokens=1024, timeout_s=30, budget_usd=0.03, breaker_failures=2, breaker_pause_s=600` (circuit breaker: after `breaker_failures` consecutive outage-type failures in a session, or for the same model, the improver is skipped with reason `cooling_down` for `breaker_pause_s`, one notice "Prompt improver paused for 10 minutes after repeated failures."; a success resets it; positive ints, validated like `timeout_s`). Validation on load and PATCH (HTTP 400 on PATCH): booleans are bool; `model` non-empty str resolving via `config.resolve` (Claude helper: only a model that login lists, no silent fallback); `effort` in `none|low|medium|high` (xhigh/max rejected); `max_questions` int 1-3; `max_calls` int 1-2; `max_input_tokens`, `max_output_tokens`, `timeout_s` positive int; `budget_usd` number >0 and ≤1. GET `/api/settings` returns `"prompt_improver": {...all keys}`; PATCH body `{"prompt_improver": {"enabled": false}}` (partial) returns the full settings. Changes apply to the next unsent turn; read config per turn.
++**Config `[prompt_improver]`** (add to `default_config.toml`, `Config.prompt_improver: dict`, `TYPED_SECTIONS`, `settings_routes.EDITABLE` and `NO_PROVIDER_RESET`): `enabled=true, max_questions=3, model="claude.fast", effort="low", builtin_enabled=true, claude_code_enabled=true, max_calls=2, max_input_tokens=4096, max_output_tokens=2048, timeout_s=30, budget_usd=0.03, breaker_failures=2, breaker_pause_s=600` (circuit breaker: after `breaker_failures` consecutive outage-type failures in a session, or for the same model, the improver is skipped with reason `cooling_down` for `breaker_pause_s`, one notice "Prompt improver paused for 10 minutes after repeated failures."; a success resets it; positive ints, validated like `timeout_s`). Validation on load and PATCH (HTTP 400 on PATCH): booleans are bool; `model` non-empty str resolving via `config.resolve` (Claude helper: only a model that login lists, no silent fallback); `effort` in `none|low|medium|high` (xhigh/max rejected); `max_questions` int 1-3; `max_calls` int 1-2; `max_input_tokens`, `max_output_tokens`, `timeout_s` positive int; `budget_usd` number >0 and ≤1. GET `/api/settings` returns `"prompt_improver": {...all keys}`; PATCH body `{"prompt_improver": {"enabled": false}}` (partial) returns the full settings. Changes apply to the next unsent turn; read config per turn.
+ 
+ **UI** `frontend/src/components/PromptImprover.tsx`: `export function PromptImprover(props: { outcome: PromptImproverOutcome; card?: TaskCardView | null; itemId?: string | null; taskCode?: string | null; sessionId: string; onSaved?: (r: {task_code: string; task_link: string}) => void })`. Types: `PromptImproverOutcome = {status: "proceeded"|"asked"|"bypassed"|"unavailable"|"paused"; reason: string; questions_asked: number; calls: number; estimated_tokens: number; item_ids: string[]; task_code: string|null}`; `TaskCardView` = the TaskCard JSON. Renders: status line with reason text, goal, acceptance list, route chips, a "Save to Tasks" button (POST save; disabled with the code shown once `task_code` is set; error inline), a `*` hint when bypassed. Rendered from messages with `meta.notice=="prompt_improver"` (`meta.outcome`, `meta.item_id` = the card item for proceeded/asked, else null; `meta.failure_item_id` = the failure diagnostics item for unavailable/paused, else null; `ImproverOutcome.failure_item_id` carries the same id). Settings section "Prompt improver": enabled toggle (autosave), builtin/claude_code switches, model, effort (≤high), max questions 1-3, default-on text and the `*` hint.
+ 
+diff --git a/docs/plans/prompt-improver.md b/docs/plans/prompt-improver.md
+index 612dfd9..0c2a97e 100644
+--- a/docs/plans/prompt-improver.md
++++ b/docs/plans/prompt-improver.md
+@@ -85,7 +85,7 @@ Recommend L2 for behaviour changes, L3 for gameplay/visual changes and L4 only w
+ 
+ ## Configuration and Settings
+ 
+-`[prompt_improver]` defaults: `enabled=true`, `max_questions=3`, `model="claude.fast"`, `effort="low"`, `builtin_enabled=true`, `claude_code_enabled=true`, `max_calls=2`, `max_input_tokens=4096`, `max_output_tokens=1024`, `timeout_s=30`, `budget_usd=0.03`. Other harnesses are unsupported initially. Resolve model aliases normally; Claude helper accepts only a model supported by that login. No silent API fallback or model upgrade.
++`[prompt_improver]` defaults: `enabled=true`, `max_questions=3`, `model="claude.fast"`, `effort="low"`, `builtin_enabled=true`, `claude_code_enabled=true`, `max_calls=2`, `max_input_tokens=4096`, `max_output_tokens=2048`, `timeout_s=30`, `budget_usd=0.03`. Other harnesses are unsupported initially. Resolve model aliases normally; Claude helper accepts only a model supported by that login. No silent API fallback or model upgrade.
+ 
+ Validate booleans, model, effort at most high, `max_questions` integer 1–3 and positive bounds on load/PATCH. Settings gets an autosaving enabled toggle plus harness switches, model, effort and question limit, default-on explanation and per-turn `*` hint. Changes affect the next unsent turn. Document helper subscription usage and indexed drafts.
+ 
+@@ -109,6 +109,8 @@ Create 48 independently labelled realistic prompts: 24 vague/24 clear across mec
+ 
+ CI uses FakeProvider scripted predictions independent of label lookup and fake CLI captures. Report vague ask-rate, clear false-ask rate and added input/output tokens per prompt, including research, synthesis and injected context. Initial regression gates: ≥80% vague ask-rate, ≤10% clear false-asks, ≤2 calls, ≤3 cards, mean clear overhead ≤2,500 estimated tokens. These test fixture orchestration, not real-model intelligence. Optional real runs use the same frozen corpus, record raw outputs/model/template/version/actual usage, and publish measured rates and p50/p95 tokens/latency only after execution. No invented real-model results.
+ 
++**Measured (live, Claude Haiku 5.5, 48 prompts):** template `pi-eval-1` scored vague ask-rate 0.62 and clear false-asks 0.08; `pi-eval-2` (decision rules, card-optional ASK, tolerant cited facts, invented-topic questions dropped, 2048 output tokens, breaker reset per eval prompt) scored 0.83 and 0.04.
++
+ Tests cover every bypass, default/toggle validation, no-key subscription, resumed/Skipper turns, attachment preservation, fact invalidation, prompt injection/path escape, schema failure, effort refusal, usage/item provenance, cancellation, stale approvals, restart/idempotency, concurrent submits, Plan only drafts and unchanged ladder gates. Risks: slow helper startup, stale facts, unwanted questions, board clutter and opaque CLI accounting; mitigate through bounds, timestamps, bypasses and explicit drafts.
+ 
+ In THIRD_PARTY_NOTICES.md credit the pinned upstream pattern/template adaptation and include the complete [MIT license and copyright, © 2025 severity1](https://raw.githubusercontent.com/severity1/claude-code-prompt-improver/50aae187bb4f08b852f318234b654df3332726a4/LICENSE).
+diff --git a/scripts/eval_prompt_improver.py b/scripts/eval_prompt_improver.py
+index 93babf3..e6196b0 100644
+--- a/scripts/eval_prompt_improver.py
++++ b/scripts/eval_prompt_improver.py
+@@ -33,7 +33,7 @@ sys.path.insert(0, str(REPO / "backend"))
+ from gamedevworkstation.agent.context import est  # noqa: E402
+ from gamedevworkstation.core.types import ChatRequest, Message, TextBlock  # noqa: E402
+ from gamedevworkstation.features import pi_research  # noqa: E402
+-from gamedevworkstation.features.pi_contracts import ProjectFacts  # noqa: E402
++from gamedevworkstation.features.pi_contracts import TEMPLATE_VERSION, ProjectFacts  # noqa: E402
+ from gamedevworkstation.features.pi_research import QUESTION_BANK  # noqa: E402
+ from gamedevworkstation.providers.fake import FakeProvider, text_response  # noqa: E402
+ 
+@@ -263,6 +263,8 @@ async def improve_one(app: Any, imp: Any, rec_provider: Recorder, folder: Path,
+     rec = {"id": entry["id"], "label": entry["label"], "calls": 0, "cards": 0, "input_tokens": 0, "output_tokens": 0,
+            "context_tokens": 0, "decision": None, "topics": [], "error": None, "raw": []}
+     rec_provider.reset()
++    imp._fails.clear()  # every prompt starts with a closed circuit breaker: one failure must not skip the next prompts
++    imp._until.clear()
+     try:
+         session = app.store.create(folder=str(folder), mode="ask")
+         for h in ctx.get("history", []):
+@@ -345,6 +347,8 @@ async def _bypass_async(cases: list[dict]) -> list[dict]:
+                        "settings": dict(s["settings"])}
+             msg = Message(role="user", content=[TextBlock(text=c["prompt"])], meta=dict(c["message_meta"]))
+             rec.reset()
++            imp._fails.clear()
++            imp._until.clear()
+             seen: list[dict] = []
+             answerer = asyncio.create_task(answer_cards(app, session["id"], seen))
+             try:
+@@ -438,7 +442,7 @@ def run_fake(corpus: dict | None = None) -> dict:
+ 
+     recs = asyncio.run(go())
+     bypass = run_bypass(corpus["bypass"])
+-    return {"mode": "fake", "template_version": "pi-eval-2", "summary": summarize(recs, bypass, corpus), "prompts": recs,
++    return {"mode": "fake", "template_version": TEMPLATE_VERSION, "summary": summarize(recs, bypass, corpus), "prompts": recs,
+             "bypass": bypass}
+ 
+ 
+@@ -461,7 +465,7 @@ def run_live(corpus: dict, model: str) -> dict:
+ 
+     recs, resolved = asyncio.run(go())
+     bypass = run_bypass(corpus["bypass"])
+-    return {"mode": "live", "model": resolved, "template_version": "pi-eval-2",
++    return {"mode": "live", "model": resolved, "template_version": TEMPLATE_VERSION,
+             "ran_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+             "summary": summarize(recs, bypass, corpus), "prompts": recs, "bypass": bypass}
+ 
+diff --git a/tests/test_pi_contracts.py b/tests/test_pi_contracts.py
+index 46925e5..5a6ed27 100644
+--- a/tests/test_pi_contracts.py
++++ b/tests/test_pi_contracts.py
+@@ -106,3 +106,24 @@ def test_outcome_text_fields_keep_their_spaces():
+     o = ImproverOutcome(status="bypassed", execution_text="  keep me  ", context_text=" ctx ")
+     assert o.execution_text == "  keep me  " and o.context_text == " ctx "
+     assert ImproverOutcome(status="unavailable", failure_item_id="it_1").failure_item_id == "it_1"
++
++
++def test_ask_may_omit_the_task_card_but_proceed_may_not():
++    r = parse_eval(json.dumps({"decision": "ASK", "questions": [q()]}))
++    assert r.task_card is None
++    with pytest.raises(PiFormatError):
++        parse_eval(json.dumps({"decision": "PROCEED"}))
++
++
++def test_parse_eval_accepts_object_cited_facts():
++    data = {**result(), "cited_facts": [{"source": "Assets/Player.prefab", "value": "player"}, "ProjectSettings/ProjectVersion.txt",
++                                        {"path": "TASTE.md"}, {"note": 3}]}
++    data["questions"][0]["options"][0]["cited_fact"] = {"source": "Assets/Scenes/Main.unity"}
++    r = parse_eval(json.dumps(data))
++    assert r.cited_facts == ["Assets/Player.prefab", "ProjectSettings/ProjectVersion.txt", "TASTE.md"]
++    assert r.questions[0].options[0].cited_fact == "Assets/Scenes/Main.unity"
++
++
++def test_parse_eval_drops_invented_topic_questions():
++    r = parse_eval(json.dumps(result(questions=[q("q1", topic="graphics"), q("q2", topic="feel")])))
++    assert [x.id for x in r.questions] == ["q2"]
+diff --git a/tests/test_pi_eval.py b/tests/test_pi_eval.py
+index 7496c50..bb7603a 100644
+--- a/tests/test_pi_eval.py
++++ b/tests/test_pi_eval.py
+@@ -119,3 +119,23 @@ def test_every_bypass_returns_its_reason(report):
+     bad = [b for b in report["bypass"] if not b["ok"]]
+     assert not bad, bad
+     assert report["summary"]["bypass_accuracy"] == 1.0
++
++
++def test_each_prompt_starts_with_a_closed_breaker(corpus):
++    mod = _load_script()
++
++    async def go():
++        base = Path(tempfile.mkdtemp(prefix="pi-eval-test-"))
++        app, imp, rec = mod.build_app(base, mod.ScriptedProvider())
++        imp._until["m:claude.fast"] = imp._until["m:" + str(app.config.resolve("claude.fast"))] = 9e12  # left open
++        holder: dict = {}
++        with mod.corpus_facts(holder):
++            return await mod.improve_one(app, imp, rec, mod.make_project(base), corpus["prompts"][0], holder)
++
++    r = asyncio.run(go())
++    assert r["error"] is None and r["calls"] >= 1
++
++
++def test_report_carries_the_contract_template_version(report):
++    from gamedevworkstation.features.pi_contracts import TEMPLATE_VERSION
++    assert report["template_version"] == TEMPLATE_VERSION == "pi-eval-2"
+diff --git a/tests/test_prompt_improver.py b/tests/test_prompt_improver.py
+index c35c329..09a10a5 100644
+--- a/tests/test_prompt_improver.py
++++ b/tests/test_prompt_improver.py
+@@ -229,6 +229,28 @@ async def test_all_skipped_is_a_draft_only_with_assumptions(app, folder):
+     assert {i["meta"]["pi"] for i in app.items.list(session_id=s["id"], source="prompt_improver")} == {"evaluation", "card"}
+ 
+ 
++async def test_ask_without_a_card_is_synthesized_after_the_answers(app, folder):
++    s = sess(app, folder)
++    m = user_msg(app, s["id"])
++    app.fake.script = [text_response(json.dumps({"decision": "ASK", "questions": [question()]})), synth()]
++    out, _ = await asyncio.gather(app.pi.improve(s, m), answer_cards(app, s["id"], ["o2"]))
++    assert out.status == "asked" and out.calls == 2 and "Snappy jump, apex 0.4s" in out.context_text
++    assert "make jumping better" in app.fake.calls[1].messages[0].text()  # the synthesis starts from the request
++
++
++async def test_ask_without_a_card_all_skipped_keeps_the_request_as_goal(app, folder):
++    s = sess(app, folder)
++    m = user_msg(app, s["id"])
++    app.fake.script = [text_response(json.dumps({"decision": "ASK", "questions": [question()]}))]
++    out, _ = await asyncio.gather(app.pi.improve(s, m), answer_cards(app, s["id"], ["skip"]))
++    assert out.status == "asked" and out.calls == 1 and "Goal: make jumping better" in out.context_text
++
++
++def test_eval_system_has_the_decision_rules_and_output_cap():
++    assert PI.DECISION_RULES in PI.EVAL_SYSTEM and "omit it for ASK" in PI.EVAL_SYSTEM
++    assert PI.CARD_SPEC in PI.SYNTH_SPEC and PI.DEFAULTS["max_output_tokens"] == 2048
++
++
+ async def test_declined_critical_question_pauses_and_is_not_stored(app, folder):
+     s = sess(app, folder)
+     m = user_msg(app, s["id"])
+diff --git a/tests/test_settings.py b/tests/test_settings.py
+index 52c2da6..5e397cf 100644
+--- a/tests/test_settings.py
++++ b/tests/test_settings.py
+@@ -79,7 +79,7 @@ def test_appearance_patch_keeps_provider_clients(env):
+ 
+ 
+ PI_DEFAULTS = {"enabled": True, "max_questions": 3, "model": "claude.fast", "effort": "low", "builtin_enabled": True,
+-               "claude_code_enabled": True, "max_calls": 2, "max_input_tokens": 4096, "max_output_tokens": 1024,
++               "claude_code_enabled": True, "max_calls": 2, "max_input_tokens": 4096, "max_output_tokens": 2048,
+                "timeout_s": 30, "budget_usd": 0.03, "breaker_failures": 2, "breaker_pause_s": 600}
+ 
+ 

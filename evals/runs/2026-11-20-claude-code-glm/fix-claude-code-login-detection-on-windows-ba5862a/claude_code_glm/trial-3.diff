@@ -1,0 +1,234 @@
+diff --git a/%APPDATA%/npm/claude.cmd b/%APPDATA%/npm/claude.cmd
+new file mode 100644
+index 0000000..e69de29
+diff --git a/%LOCALAPPDATA%/Programs/claude/claude.exe b/%LOCALAPPDATA%/Programs/claude/claude.exe
+new file mode 100644
+index 0000000..e69de29
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 87c9afc..7bd010d 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -77,7 +77,7 @@ jobs:
+         run: |
+           uv sync --frozen --all-extras
+           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+-          uv run --frozen pytest -q -p no:cacheprovider tests/test_procs.py tests/test_release_feed.py
++          uv run --frozen pytest -q -p no:cacheprovider tests/test_procs.py tests/test_release_feed.py tests/test_claude_cli_windows.py
+       - name: Build the installer
+         shell: pwsh
+         run: ./scripts/build_windows.ps1
+diff --git a/backend/gamedevworkstation/default_config.toml b/backend/gamedevworkstation/default_config.toml
+index 97e84e4..a695ff5 100644
+--- a/backend/gamedevworkstation/default_config.toml
++++ b/backend/gamedevworkstation/default_config.toml
+@@ -224,7 +224,8 @@ warn_total_mb = 2048                # warn when replay output exceeds this total
+ # "Claude Code (subscription)" sessions: your own `claude` CLI, logged in with your own Claude
+ # account (`claude auth login` in a terminal). GameDevWorkstation never reads your tokens and
+ # passes no API key: usage counts against your Claude plan, not the API spend limits.
+-cli_path = ""                       # "" = find it (PATH, ~/.local/bin, ~/.claude/local, /opt/homebrew/bin)
++cli_path = ""                       # "" = find it (PATH, ~/.local/bin, ~/.claude/local, /opt/homebrew/bin;
++                                    #   Windows: %APPDATA%/npm, %LOCALAPPDATA%/Programs/claude too)
+ # load_user_mcp: false = only GameDevWorkstation's own tools (task board, unity, items, ...) reach the
+ #   session (--strict-mcp-config); true = also your ~/.claude MCP servers and the folder's .mcp.json.
+ load_user_mcp = false
+diff --git a/backend/gamedevworkstation/features/claude_cli.py b/backend/gamedevworkstation/features/claude_cli.py
+index 1a54d71..1986d00 100644
+--- a/backend/gamedevworkstation/features/claude_cli.py
++++ b/backend/gamedevworkstation/features/claude_cli.py
+@@ -5,9 +5,13 @@ with the user's own Claude login (subscription or CLI-managed API key). It never
+ from ~/.claude or the Keychain: login happens when the user runs `claude auth login` in a terminal.
+ 
+ - `find_cli(config)`: [claude_code].cli_path, else PATH, ~/.local/bin, ~/.claude/local,
+-  /opt/homebrew/bin. GDW_CLAUDE_CLI_SEARCH=0 (tests) turns the search off: only cli_path.
++  /opt/homebrew/bin (Windows: claude.exe / claude.cmd in ~/.local/bin, ~/.claude/local,
++  %APPDATA%/npm, %LOCALAPPDATA%/Programs/claude). GDW_CLAUDE_CLI_SEARCH=0 (tests) turns the search
++  off: only cli_path.
+ - `child_env()`: an allowlist of shell, locale, proxy and desktop environment variables, plus
+-  MCP_TOOL_TIMEOUT. Provider credentials and arbitrary application secrets never reach the child.
++  MCP_TOOL_TIMEOUT. On Windows also the profile and system variables (USERPROFILE, APPDATA,
++  SystemRoot, ComSpec, ...), matched case-insensitively: without them claude can't find the login
++  `claude auth login` saved. Provider credentials and arbitrary application secrets never reach the child.
+ - `probe(config)`: path, `claude --version` and the JSON of `claude auth status` (run with
+   child_env(), so what it reports is what a session will use). Cached for CACHE_S.
+ """
+@@ -26,12 +30,21 @@ from ..procs import NEW_GROUP
+ 
+ ENV_NAMES = {"PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TERM", "TMPDIR", "TZ",
+              "SSH_AUTH_SOCK", "__CF_USER_TEXT_ENCODING"}
++# Windows names, upper-cased: Windows environment names are case-insensitive (Path, SystemRoot, windir).
++WINDOWS_ENV_NAMES = {"PATH", "PATHEXT", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA",
++                     "PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432", "COMMONPROGRAMFILES",
++                     "COMMONPROGRAMFILES(X86)", "COMMONPROGRAMW6432", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR",
++                     "COMSPEC", "TEMP", "TMP", "USERNAME", "USERDOMAIN", "COMPUTERNAME", "OS",
++                     "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS"}
+ PROXY_NAMES = {"http_proxy", "https_proxy", "no_proxy", "all_proxy"}
+ # A GDW tool call or approval card can wait on the user for a long time; the CLI's MCP tool timeout
+ # (MCP_TOOL_TIMEOUT, milliseconds [docs]) must not cut that short.
+ MCP_TOOL_TIMEOUT_MS = 24 * 3600 * 1000
+ CACHE_S = 60.0
+ SEARCH_DIRS = ("~/.local/bin", "~/.claude/local", "/opt/homebrew/bin")
++WINDOWS_SEARCH_DIRS = ("~/.local/bin", "~/.claude/local", "%APPDATA%/npm", "%LOCALAPPDATA%/Programs/claude")
++WINDOWS_NAMES = ("claude.exe", "claude.cmd")
++_WIN_VAR = re.compile(r"%(\w+)%")
+ LOGIN_HINT = "Run `claude auth login` in a terminal, then retry."
+ _SECRETISH = re.compile(r"token|secret|key|password|credential", re.I)
+ # Account details `claude auth status` reports when logged in [live]; GDW has no use for them.
+@@ -46,14 +59,25 @@ def redact(text: str, token: str = "") -> str:
+     return _ERROR_SECRET.sub("[REDACTED]", text)
+ 
+ 
++def _windows() -> bool:
++    return os.name == "nt"
++
++
+ def child_env(base: dict[str, str] | None = None) -> dict[str, str]:
+     """The environment for every `claude` process GDW starts (sessions and probes)."""
++    win = _windows()
+     env = {k: v for k, v in (os.environ if base is None else base).items()
+-           if k in ENV_NAMES or k.startswith(("LC_", "XDG_")) or k.lower() in PROXY_NAMES}
++           if k in ENV_NAMES or k.startswith(("LC_", "XDG_")) or k.lower() in PROXY_NAMES
++           or (win and k.upper() in WINDOWS_ENV_NAMES)}
+     env["MCP_TOOL_TIMEOUT"] = str(MCP_TOOL_TIMEOUT_MS)
+     return env
+ 
+ 
++def _runnable(p: Path) -> bool:
++    # Windows has no execute bit: a claude.exe / claude.cmd that exists is runnable.
++    return p.is_file() and (_windows() or os.access(p, os.X_OK))
++
++
+ def _cfg(config: Any) -> dict:
+     return dict(getattr(config, "claude_code", None) or {})
+ 
+@@ -63,15 +87,20 @@ def find_cli(config: Any) -> str | None:
+     want = str(_cfg(config).get("cli_path") or "").strip()
+     if want:
+         p = Path(want).expanduser()
+-        return str(p) if p.is_file() and os.access(p, os.X_OK) else None
++        return str(p) if _runnable(p) else None
+     if os.environ.get("GDW_CLAUDE_CLI_SEARCH") == "0":
+         return None
+     if found := shutil.which("claude"):
+         return found
+-    for d in SEARCH_DIRS:
+-        p = Path(d).expanduser() / "claude"
+-        if p.is_file() and os.access(p, os.X_OK):
+-            return str(p)
++    win = _windows()
++    for d in WINDOWS_SEARCH_DIRS if win else SEARCH_DIRS:
++        d = _WIN_VAR.sub(lambda m: os.environ.get(m.group(1)) or m.group(0), d)
++        if "%" in d:  # APPDATA / LOCALAPPDATA unset
++            continue
++        for name in WINDOWS_NAMES if win else ("claude",):
++            p = Path(d).expanduser() / name
++            if _runnable(p):
++                return str(p)
+     return None
+ 
+ 
+@@ -153,8 +182,9 @@ class CliProbe:
+                                "checked_at": time.time(), "login_hint": LOGIN_HINT}
+         if not path:
+             want = str(_cfg(self.config).get("cli_path") or "").strip()
++            where = ", ".join(("PATH", *(WINDOWS_SEARCH_DIRS if _windows() else SEARCH_DIRS)))
+             out["error"] = (f"[claude_code].cli_path {want} isn't an executable file." if want else
+-                            "The claude CLI wasn't found (PATH, ~/.local/bin, ~/.claude/local, /opt/homebrew/bin).")
++                            f"The claude CLI wasn't found ({where}).")
+             return out
+         try:
+             code, so, se = await _run([path, "--version"])
+diff --git a/tests/test_claude_cli_windows.py b/tests/test_claude_cli_windows.py
+new file mode 100644
+index 0000000..8066490
+--- /dev/null
++++ b/tests/test_claude_cli_windows.py
+@@ -0,0 +1,89 @@
++"""claude_cli on Windows: the profile/system environment and the claude.exe / claude.cmd search.
++(This file also runs on the Windows CI job; the last test runs a real probe there.)"""
++import asyncio
++import os
++import sys
++from pathlib import Path
++
++import pytest
++
++from gamedevworkstation.features import claude_cli
++from gamedevworkstation.features.claude_cli import CliProbe, child_env, find_cli
++
++WIN_ENV = {"USERPROFILE": r"C:\Users\x", "APPDATA": r"C:\Users\x\AppData\Roaming",
++           "LOCALAPPDATA": r"C:\Users\x\AppData\Local", "SystemRoot": r"C:\Windows", "windir": r"C:\Windows",
++           "ComSpec": r"C:\Windows\system32\cmd.exe", "Path": r"C:\Windows", "PATHEXT": ".COM;.EXE;.CMD",
++           "TEMP": r"C:\t", "HOMEDRIVE": "C:", "HOMEPATH": r"\Users\x", "ProgramFiles": r"C:\Program Files"}
++LEAKY = {"ANTHROPIC_API_KEY": "sk-ant-x", "CLAUDE_CODE_USE_BEDROCK": "1", "AWS_SECRET_ACCESS_KEY": "s",
++         "GITHUB_TOKEN": "t"}
++
++
++class _Cfg:
++    def __init__(self, cli_path=""):
++        self.claude_code = {"cli_path": cli_path}
++
++
++def test_child_env_keeps_windows_names_case_insensitively(monkeypatch):
++    monkeypatch.setattr(claude_cli, "_windows", lambda: True)
++    env = child_env({**WIN_ENV, **LEAKY, "systemdrive": "C:"})
++    assert env == {**WIN_ENV, "systemdrive": "C:", "MCP_TOOL_TIMEOUT": str(claude_cli.MCP_TOOL_TIMEOUT_MS)}
++
++
++def test_child_env_drops_windows_names_elsewhere(monkeypatch):
++    monkeypatch.setattr(claude_cli, "_windows", lambda: False)
++    assert set(child_env({**WIN_ENV, **LEAKY, "HOME": "/h"})) == {"HOME", "MCP_TOOL_TIMEOUT"}
++
++
++@pytest.mark.parametrize("where,name", [("~/.local/bin", "claude.exe"), ("~/.claude/local", "claude.cmd"),
++                                        ("%APPDATA%/npm", "claude.cmd"),
++                                        ("%LOCALAPPDATA%/Programs/claude", "claude.exe")])
++def test_find_cli_searches_the_windows_install_dirs(tmp_path, monkeypatch, where, name):
++    monkeypatch.setattr(claude_cli, "_windows", lambda: True)
++    monkeypatch.delenv("GDW_CLAUDE_CLI_SEARCH")
++    monkeypatch.setattr(claude_cli.shutil, "which", lambda *a, **k: None)
++    home, appdata, local = tmp_path / "home", tmp_path / "roaming", tmp_path / "local"
++    for k, v in (("HOME", home), ("USERPROFILE", home), ("APPDATA", appdata), ("LOCALAPPDATA", local)):
++        monkeypatch.setenv(k, str(v))
++    d = Path(claude_cli._WIN_VAR.sub(lambda m: os.environ[m.group(1)], where)).expanduser()
++    d.mkdir(parents=True)
++    (d / name).write_text("")  # no execute bit: Windows has none
++    assert find_cli(_Cfg()) == str(d / name)
++
++
++def test_find_cli_skips_unset_windows_dirs(tmp_path, monkeypatch):
++    monkeypatch.setattr(claude_cli, "_windows", lambda: True)
++    monkeypatch.delenv("GDW_CLAUDE_CLI_SEARCH")
++    monkeypatch.setattr(claude_cli.shutil, "which", lambda *a, **k: None)
++    monkeypatch.setenv("HOME", str(tmp_path))
++    monkeypatch.setenv("USERPROFILE", str(tmp_path))
++    monkeypatch.delenv("APPDATA", raising=False)
++    monkeypatch.delenv("LOCALAPPDATA", raising=False)
++    assert find_cli(_Cfg()) is None
++
++
++FAKE = r'''import json, os, sys
++if sys.argv[1:] == ["--version"]:
++    print("9.9.9 (Claude Code)")
++elif sys.argv[1:] == ["auth", "status"]:
++    have = all(os.environ.get(k) for k in ("USERPROFILE", "APPDATA", "SystemRoot", "ComSpec"))
++    login = os.path.join(os.environ.get("USERPROFILE", ""), ".claude", "login")
++    ok = have and os.path.isfile(login) and "SECRET_FOR_TEST" not in os.environ
++    print(json.dumps({"loggedIn": ok, "authMethod": "claude.ai" if ok else "none"}))
++'''
++
++
++@pytest.mark.skipif(sys.platform != "win32", reason="runs claude.cmd through cmd.exe")
++def test_windows_probe_through_a_fake_claude_cmd(tmp_path, monkeypatch):
++    profile = tmp_path / "profile"
++    (profile / ".claude").mkdir(parents=True)
++    (profile / ".claude" / "login").write_text("")
++    monkeypatch.setenv("USERPROFILE", str(profile))
++    monkeypatch.setenv("SECRET_FOR_TEST", "x")
++    script = tmp_path / "fake_claude.py"
++    script.write_text(FAKE)
++    exe = tmp_path / "claude.cmd"
++    exe.write_text(f'@"{sys.executable}" "{script}" %*\r\n')
++    st = asyncio.run(CliProbe(_Cfg(str(exe))).status())
++    assert st["error"] is None, st
++    assert st["installed"] and st["version"] == "9.9.9 (Claude Code)"
++    assert st["logged_in"] is True and st["auth_method"] == "claude.ai"

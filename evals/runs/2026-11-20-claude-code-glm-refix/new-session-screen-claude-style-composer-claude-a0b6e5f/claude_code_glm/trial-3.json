@@ -1,0 +1,54 @@
+{
+ "task": "new-session-screen-claude-style-composer-claude-a0b6e5f",
+ "agent": "claude_code_glm",
+ "trial": 3,
+ "passed": false,
+ "blame": "agent",
+ "reason": "failed command 'tests' (its own versions of frontend/src/components/ClaudeCode.test.tsx, frontend/src/components/Composer.test.tsx, frontend/src/lib/mdlite.test.tsx, tests/conftest.py, tests/test_campaigns.py, tests/test_claude_code.py were replaced by the hidden tests)",
+ "wall_s": 523.7,
+ "cost_usd": 1.5336,
+ "tool_calls": 42,
+ "input_tokens": 2771297,
+ "output_tokens": 20492,
+ "agent_error": "",
+ "timed_out": false,
+ "tampered": [
+  "frontend/src/components/ClaudeCode.test.tsx",
+  "frontend/src/components/Composer.test.tsx",
+  "frontend/src/lib/mdlite.test.tsx",
+  "tests/conftest.py",
+  "tests/test_campaigns.py",
+  "tests/test_claude_code.py"
+ ],
+ "failed_steps": [
+  "tests"
+ ],
+ "diff_lines": 345,
+ "started_at": "2026-11-21T00:22:07Z",
+ "helper_calls": 0,
+ "model": "claude-opus-5-5",
+ "grade": {
+  "passed": false,
+  "tampered": [
+   "frontend/src/components/ClaudeCode.test.tsx",
+   "frontend/src/components/Composer.test.tsx",
+   "frontend/src/lib/mdlite.test.tsx",
+   "tests/conftest.py",
+   "tests/test_campaigns.py",
+   "tests/test_claude_code.py"
+  ],
+  "environment_failure": false,
+  "steps": [
+   {
+    "name": "tests",
+    "kind": "command",
+    "passed": false,
+    "exit": 1,
+    "duration_s": 39.81157954223454,
+    "output": "/folders/07/xyyrk2p92jnblsq7j428mt5h0000gn/T/gdw-eval-i69lz8ja/tree/tests/test_new_session.py:46: PytestUnknownMarkWarning: Unknown pytest.mark.shipped_harness_default - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html\n    @pytest.mark.shipped_harness_default\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nFAILED tests/test_campaigns.py::test_workflows_unavailable_in_claude_subscription_sessions[True]\nFAILED tests/test_campaigns.py::test_workflows_unavailable_in_claude_subscription_sessions[False]\nFAILED tests/test_claude_code.py::test_turn_flags_env_and_event_mapping - Ass...\nFAILED tests/test_claude_code.py::test_session_patch_rejects_invalid_uuid_and_store_drops_it\nFAILED tests/test_claude_code.py::test_chat_only_session_works_in_its_scratch_folder\nFAILED tests/test_claude_code.py::test_chat_only_gate_scopes_to_the_scratch_folder\nFAILED tests/test_claude_code.py::test_legacy_chat_only_cwd_gate_and_resume_command[True-False]\nFAILED tests/test_claude_code.py::test_legacy_chat_only_cwd_gate_and_resume_command[False-True]\nFAILED tests/test_claude_code.py::test_legacy_chat_only_cwd_gate_and_resume_command[True-True]\nFAILED tests/test_claude_code.py::test_new_chat_keeps_its_work_dir_after_saving_the_transcript\nFAILED tests/test_claude_code.py::test_chat_only_cli_restarts_and_resumes_in_the_same_cwd[True]\nFAILED tests/test_claude_code.py::test_resume_command_shell_quotes_the_project_folder\nFAILED tests/test_claude_code.py::test_work_dir_rejects_invalid_session_ids[]\nFAILED tests/test_claude_code.py::test_work_dir_rejects_invalid_session_ids[.]\nFAILED tests/test_claude_code.py::test_work_dir_rejects_invalid_session_ids[..]\nFAILED tests/test_claude_code.py::test_work_dir_rejects_invalid_session_ids[../escape]\nFAILED tests/test_claude_code.py::test_work_dir_rejects_invalid_session_ids[a/b]\nFAILED tests/test_claude_code.py::test_work_dir_rejects_invalid_session_ids[/absolute]\nFAILED tests/test_claude_code.py::test_work_dir_rejects_invalid_session_ids[white space]\nFAILED tests/test_claude_code.py::test_work_dir_rejects_invalid_session_ids[\\xe9]\nFAILED tests/test_claude_code.py::test_work_dir_rejects_invalid_session_ids[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]\nFAILED tests/test_claude_code.py::test_work_dir_rejects_invalid_session_ids[bad\\n]\nERROR tests/test_new_session.py::test_new_sessions_default_to_claude_code - A...\nERROR tests/test_new_session.py::test_internal_creators_keep_the_builtin_loop\nERROR tests/test_new_session.py::test_default_harness_setting - AttributeErro...\nERROR tests/test_new_session.py::test_modes_have_no_bypass - AttributeError: ...\nERROR tests/test_new_session.py::test_greeting_name_format[Arshia Jahan-Arshia J.]\nERROR tests/test_new_session.py::test_greeting_name_format[  arshia   jahan-smith -arshia J.]\nERROR tests/test_new_session.py::test_greeting_name_format[Mary Ann van der Berg-Mary B.]\nERROR tests/test_new_session.py::test_greeting_name_format[Arshia-Arshia] - A...\nERROR tests/test_new_session.py::test_greeting_name_format[\\xc9lodie \\xd1\\xfa\\xf1ez-\\xc9lodie \\xd1.]\nERROR tests/test_new_session.py::test_greeting_name_format[-None] - Attribute...\nERROR tests/test_new_session.py::test_greeting_name_format[   -None] - Attrib...\nERROR tests/test_new_session.py::test_greeting_name_format[arshia@example.com-None]\nERROR tests/test_new_session.py::test_greeting_name_format[Arshia Jahan <arshia@example.com>-None]\nERROR tests/test_new_session.py::test_greeting_name_format[1234 5678-None] - ...\nERROR tests/test_new_session.py::test_greeting_endpoint - AttributeError: 'fu...\nERROR tests/test_new_session.py::test_account_full_name_reads_only_the_local_account\nERROR tests/test_new_session.py::test_account_full_name_is_cached_for_repeated_greetings\n22 failed, 116 passed, 3 warnings, 17 errors in 37.67s\n",
+    "environment": false,
+    "detail": {}
+   }
+  ]
+ }
+}
