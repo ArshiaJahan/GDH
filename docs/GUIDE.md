@@ -26,6 +26,7 @@ transcription, sound and music. Everything runs locally; the backend listens on 
 - [Built-in skills](#built-in-skills) (and [Record and replay](#record-and-replay), [Unity: MCP or CLI](#unity-mcp-or-cli))
 - [CI failure triage](#ci-failure-triage)
 - [Eval Forge](#eval-forge)
+- [Agent Review Desk](#agent-review-desk)
 - [Building the app](#building-the-app)
 - [Versions & updates](#versions--updates)
 - [Upgrading from Workspace 0.4](#upgrading-from-workspace-04) <!-- rename:keep -->
@@ -55,6 +56,7 @@ Every feature at a glance; the sections below have the details. The README lists
 | **Claude Code sessions** | Run your own `claude` CLI and login (checked against claude 2.1.308 on a claude.ai subscription), with GDW tools, approvals, Plan mode and `--resume`. Subscription estimates stay outside spend limits; API key logins record `billing='api'` and check spend limits before each turn. See [Claude Code sessions](docs/GUIDE.md#claude-code-sessions). |
 | **CI failure triage** | `gdw triage <run-id\|log>` sorts a failed CI run's failures into compile, test, flaky, infra, dependency and timeout, and names the file and line. It reads GitHub Actions, pytest, vitest, tsc, cargo, npm and uv logs, plus Unity Editor.log and NUnit XML. Rules come first, and a model handles only what the rules can't place. A GitHub Action posts the report on failed PRs. On 26 labelled failed logs the rules got 24/26 categories right before tuning and 26/26 after. See [CI failure triage](docs/GUIDE.md#ci-failure-triage). |
 | **Eval Forge** | `gdw eval forge <commit>` turns a merged commit or PR into an agent task: the start state, a leak-filtered prompt and the commit's tests as hidden graders, plus differential, Unity (EditMode tests, scene asserts, replay hashes) and rubric graders. `gdw eval validate` checks each grader: the reference must pass and generated flawed solutions (mutants, partial fixes, test tampering) must fail. `gdw eval run` runs Claude Code, Codex and the built-in agent for pass@k, cost, time and tool calls, and blames each failure on the agent, the environment or the grader. Tasks export to the Harbor / Terminal-Bench 2.0 format. On the 13-task seed suite every reference passes and 111 of 168 flawed solutions are caught. A first Claude Code run (Opus 5.5, k=3, 2026-11-20) scored 28% pass@1 and 31% pass@3, and its failures exposed three under-specified tasks, now fixed or dropped. See [Eval Forge](docs/GUIDE.md#eval-forge). |
+| **Agent Review Desk** | Review an Eval Forge trial like a teammate's PR: the agent's steps (Claude Code or Codex log), its diff and the hidden-test results side by side. Score it on a rubric (correctness, maintainability, test quality, 1-5), tag a failure mode from a fixed taxonomy, prefer one trial over another, and export a labelled JSONL dataset of reviews and chosen/rejected preference pairs. An optional model pre-review proposes a verdict, and `gdw review agreement` measures how often it matches the human. See [Agent Review Desk](#agent-review-desk). |
 | **Cost control** | Daily and per-session spend limits, job budgets, approval for high effort, and a My usage page per model. |
 | **Trailer maker** | Brief → beat sheet → scripted Play Mode capture (Unity Recorder) → ffmpeg edit from a JSON edit list → ElevenLabs music cut to the beat sheet → three reviewers → Steam, YouTube and vertical exports. |
 | **Record and replay** | Record instrumented Unity sessions in the open Editor, replay them with frame-by-frame checkpoint verification (SHA-256 state hashes), and export silent gameplay GIF/MP4. Input System only; the guarantee is same-environment repeatability for the state you register, and a mismatch is reported, not refused. |
@@ -1541,6 +1543,59 @@ What the run showed about the suite, not the agent:
 
 Raw evidence is in `evals/runs/2026-11-20-claude-code-glm/` and `-refix/`: every trial's JSON (grade, blame, cost,
 tool calls) and the agent's diff. The stream logs stay local because they're large and carry the machine's setup.
+
+## Agent Review Desk
+
+The Review desk page (sidebar: **Review desk**) is for reviewing what an agent did in an Eval Forge run, the way
+you'd review a teammate's pull request. Pick a runs folder (default `evals/runs`) and a run, then a trial. Three panels
+sit side by side:
+
+- **Trajectory**: the agent's steps from its CLI log: messages, tool calls with their input and output, errors in red,
+  and the final turn count and cost. It reads Claude Code `stream-json` and Codex `--json` logs. Paths are shown
+  relative to the agent's working folder.
+- **Diff**: the agent's change.
+- **Tests**: the task prompt the agent saw and each grading step's result and output.
+
+Below them is the review form:
+
+| Field | What it records |
+|---|---|
+| Verdict | Accept or reject, as you would a PR |
+| Correctness, Maintainability, Test quality | 1-5, each with anchors for 1, 3 and 5 shown under the buttons |
+| Failure mode | One of: no failure, missed requirement, wrong behaviour, incomplete, broke existing code, tests weakened, ignored instructions, overreach, environment, grader overreach, other |
+| Tags | Any other failure modes that also apply |
+| Notes | Free text |
+
+**Compare** opens a second trial of the same task next to the first, so you can choose "Prefer A", "Prefer B" or
+"Tie" with a reason. **Ask the model** has a model propose a review from the prompt, the test results, the steps and
+the diff, through the effort gate and recorded in usage. The proposal fills the form, marked with its source, and is
+saved as that model's review. Saving the form always records a human review under your name.
+
+Everything is stored next to the run's evidence, in two append-only files: `reviews.jsonl` and `preferences.jsonl`.
+Nothing changes a trial's own files. `gdw eval run` now also saves the exact prompt each trial saw
+(`trial-N.prompt.md`); older runs fall back to the suite's `prompt.md`.
+
+```bash
+gdw review export evals/runs/<run> [--out data.jsonl]   # the labelled dataset
+gdw review prereview evals/runs/<run> --model <model>  # a model review for every trial without one
+gdw review agreement evals/runs/<run>                  # how often it matches the human reviews
+```
+
+**The dataset** (`dataset.jsonl`, also from **Export dataset**) has one JSON object per line:
+
+- `"type": "review"`: the latest human review per trial and reviewer, with the task prompt, the diff, whether the
+  hidden tests passed, the verdict, scores, failure mode, tags and notes. Model reviews are never exported as labels.
+- `"type": "preference"`: both trials' diffs and test results, the winner and the reason, plus `chosen` and
+  `rejected` diffs when it isn't a tie (the usual shape for preference training).
+
+**Agreement** pairs the latest human and the latest model review of each trial and reports:
+- verdict agreement and Cohen's kappa
+- the mean absolute score difference per dimension, and how often the scores are within 1
+- failure-mode agreement
+- the confusion counts
+
+The page header shows the verdict agreement and kappa once any trial has both reviews. No agreement number is published
+here yet: it needs human reviews of a real run first.
 
 ## Building the app
 

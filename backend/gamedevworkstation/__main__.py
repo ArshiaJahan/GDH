@@ -87,6 +87,10 @@ def main() -> None:
         from .features import eval_cli
 
         raise SystemExit(eval_cli.cli(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "review":  # `gdw review ...`: Agent Review Desk export/agreement
+        from .features import review_desk
+
+        raise SystemExit(review_desk.cli(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "triage":  # `gdw triage ...`: CI failure triage, no server
         from .features import ci_triage
 

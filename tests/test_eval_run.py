@@ -76,6 +76,7 @@ async def test_a_suite_run_scores_and_attributes(task, tmp_path):
     t1 = out / "scores-task" / "solver"
     assert (t1 / "trial-1.log").read_text(encoding="utf-8") == "solved"
     assert "def clamp_score" in (t1 / "trial-1.diff").read_text(encoding="utf-8")
+    assert (t1 / "trial-1.prompt.md").read_text(encoding="utf-8") == task.prompt  # what the agent saw (Review Desk)
     md = eval_run.render_markdown(results, 2)
     assert "| solver | 1 | 100% | 100% | $0.010 |" in md
 

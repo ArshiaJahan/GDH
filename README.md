@@ -135,7 +135,7 @@ Code reply is a real run.</sub>
 
 ## Highlights
 
-The eight that matter most; [all 20 features](docs/GUIDE.md#all-features) are in the guide.
+The eight that matter most; [all 21 features](docs/GUIDE.md#all-features) are in the guide.
 
 | | |
 |---|---|

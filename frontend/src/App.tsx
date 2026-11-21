@@ -43,6 +43,7 @@ const SkillsPage = lazy(() => import("./pages/Skills").then((m) => ({ default: m
 const BoardPage = lazy(() => import("./pages/Board").then((m) => ({ default: m.BoardPage })));
 const SchedulePage = lazy(() => import("./pages/Schedule").then((m) => ({ default: m.SchedulePage })));
 const CampaignsPage = lazy(() => import("./pages/Campaigns").then((m) => ({ default: m.CampaignsPage })));
+const ReviewPage = lazy(() => import("./pages/Review").then((m) => ({ default: m.ReviewPage })));
 const UsagePage = lazy(() => import("./pages/Usage").then((m) => ({ default: m.UsagePage })));
 const SettingsPage = lazy(() => import("./pages/Settings").then((m) => ({ default: m.SettingsPage })));
 function useTheme() {
@@ -152,7 +153,7 @@ export default function App() {
   if (!ready) return <div className="h-full flex items-center justify-center text-muted">Starting GameDevWorkstation…</div>;
 
   const main = page === "chat" ? <Chat /> : page === "artifacts" ? <ArtifactsPage /> : page === "elevenlabs" ? <ElevenLabsPage />
-    : page === "board" ? <BoardPage /> : page === "schedule" ? <SchedulePage /> : page === "campaigns" ? <CampaignsPage /> : page === "skills" ? <SkillsPage /> : page === "usage" ? <UsagePage /> : <SettingsPage />;
+    : page === "board" ? <BoardPage /> : page === "schedule" ? <SchedulePage /> : page === "campaigns" ? <CampaignsPage /> : page === "skills" ? <SkillsPage /> : page === "review" ? <ReviewPage /> : page === "usage" ? <UsagePage /> : <SettingsPage />;
 
   return (
     <>

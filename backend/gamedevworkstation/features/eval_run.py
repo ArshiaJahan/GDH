@@ -298,6 +298,7 @@ async def run_trial(task: LoadedTask, agent_name: str, agent: AgentFn, n: int, o
                                                        indent=1), encoding="utf-8")
     (logdir / f"trial-{n}.log").write_text(res.log, encoding="utf-8")
     (logdir / f"trial-{n}.diff").write_text(diff, encoding="utf-8")
+    (logdir / f"trial-{n}.prompt.md").write_text(task.prompt, encoding="utf-8")  # what the agent saw (Review Desk)
     return trial
 
 
