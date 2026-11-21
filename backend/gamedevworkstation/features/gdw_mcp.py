@@ -37,7 +37,9 @@ from fastapi.responses import JSONResponse, Response
 
 from .. import __version__
 from ..agent.tools import ToolContext, ToolOutput
+from ..usage import UsageScope
 from .hookbus import run_post_tool, run_pre_tool
+from .tracing import SpanKind
 
 if TYPE_CHECKING:
     from ..app import AppState
@@ -96,6 +98,7 @@ class GdwMcp:
         self.app = app
         self._tokens: dict[str, str] = {}  # token -> session id
         self.approver: Approver | None = None  # set by features/claude_code.py
+        self.usage_scope_for: Callable[[str], UsageScope | None] | None = None
 
     # ------------------------------------------------------------- tokens
 
@@ -158,6 +161,11 @@ class GdwMcp:
 
     async def call(self, sid: str, name: str, args: dict) -> dict:
         """One tools/call as an MCP CallToolResult."""
+        scope = self.usage_scope_for(sid) if self.usage_scope_for else None
+        with self.app.usage.scope(sid, captured=scope):
+            return await self._call(sid, name, args)
+
+    async def _call(self, sid: str, name: str, args: dict) -> dict:
         app = self.app
         session = app.store.get(sid)
         if not session:
@@ -257,7 +265,16 @@ class GdwMcp:
                 args = params.get("arguments") or {}
                 if not isinstance(args, dict):
                     return _err(rid, -32602, "arguments must be an object")
-                return {"jsonrpc": "2.0", "id": rid, "result": await self.call(sid, name, args)}
+                with self.app.tracing.span(
+                    "tools/call", category="mcp", kind=SpanKind.SERVER, parent=None, session_id=sid,
+                    attrs={"mcp.method.name": "tools/call", "gdw.mcp.direction": "inbound",
+                           "gdw.mcp.transport": "streamable_http", "gen_ai.tool.name": name},
+                ) as span:
+                    result = await self.call(sid, name, args)
+                    if result.get("isError"):
+                        span.set_attribute("error.type", "tool_error")
+                        span.end("error")
+                return {"jsonrpc": "2.0", "id": rid, "result": result}
             if method in ("resources/list", "resources/templates/list", "prompts/list"):
                 key = {"resources/list": "resources", "resources/templates/list": "resourceTemplates",
                        "prompts/list": "prompts"}[method]

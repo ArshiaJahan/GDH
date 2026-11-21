@@ -50,6 +50,37 @@ spend_cap_usd = 0.50                # per request
 [limits]
 global_daily_usd = 25.00
 session_usd = 10.00
+task_usd = 0.0                     # lifetime cap per attributed task; 0 = off
+
+[tracing]
+# Capture local spans. Export stays off until a full OTLP/HTTP signal URL is set.
+enabled = true
+sample_rate = 1.0                   # root sampling probability; children inherit it
+retention_days = 7
+max_spans = 100000                  # hard ceiling on retained spans
+otlp_endpoint = ""                 # empty = export off; HTTPS or loopback HTTP
+otlp_timeout_s = 2.0
+
+[tracing.otlp_headers_env]
+# Optional header name = environment variable name; values are resolved only by the exporter.
+
+[model_routing]
+# Automatic selection applies to callers requesting tier = "auto"; explicit tiers stay pinned.
+enabled = true
+max_escalations = 1
+revision = "1"
+
+[model_routing.rules.extract]
+candidates = ["claude.fast", "claude.standard"]
+check = "json_object"
+
+[model_routing.rules.mechanical_edit]
+candidates = ["codex.fast", "codex.standard"]
+check = "non_empty"
+
+[model_routing.rules.implement_feature]
+candidates = ["codex.standard"]
+check = "non_empty"
 
 [elevenlabs]
 voice_id = ""                       # empty = first voice in your account

@@ -7,15 +7,20 @@ Routes:
 Concurrency: `max_parallel.claude_codex` API subagents and `max_parallel.codex_cli` CLI runs
 at once (defaults 4 and 2 for a fanless M4 Air); extra units queue.
 Every finished unit writes a delegation_stats row.
+
+Routing: `tier="auto"` asks features/routing_policy.py for the cheapest eligible tier of the job type; explicit tiers
+and codex.cli stay pinned. An auto unit can move to the next stronger tier of its provider family on a transient
+provider failure, a context overflow or a failed deterministic check, continuing from its accepted history.
 """
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 import asyncio
 import json
 import os
 import shutil
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -28,12 +33,14 @@ from ..core.effort import EffortApprovalRequired, check_effort
 from ..core.types import ABOVE_HIGH, ChatRequest, Message, TextBlock, ToolSpec, Usage, new_id
 from ..providers.base import (BACKOFF_MAX_S, BACKOFF_START_S, MAX_RATE_RETRIES, ProviderError, backoff_wait,
                               compute_cost)
-from ..usage import BudgetExceeded
-from . import worktrees
+from ..usage import BudgetExceeded, UsageScope
+from . import routing_policy, worktrees
+from .tracing import bind as bind_span
 from .hookbus import HookEvent, result_notes, run_post_tool, run_pre_tool
 
 if TYPE_CHECKING:
     from ..app import AppState
+    from .tracing import Span
 
 READ_ONLY_TOOLS = ["read_file", "list_dir", "search"]
 WRITE_TOOLS = {"write_file", "edit_file", "delete_file", "run_command"}
@@ -81,6 +88,12 @@ class Subagent:
     want_worktree: bool = False  # created in _run once a pool slot is won, not while queued
     worktree_plan: Path | None = None  # where it will be (root/<id>), known at spawn
     history_on_disk: bool = False  # finished: history lives only in subagents/<id>.json
+    route: routing_policy.Route | None = None  # set for tier="auto" units; None = pinned
+    escalations: int = 0  # stronger-model switches in the current job
+    attempts: list[dict] = field(default_factory=list)  # {tier, model, reason} per model segment; works without tracing
+    usage_scope: UsageScope | None = None  # captured when the unit was queued; every attempt and fallback uses it
+    run_cap: float | None = None  # a caller's own per-run spend cap (Eval Forge batches), on top of the configured one
+    span: "Span | None" = None  # the invoke_agent span of the current job, closed exactly once
 
     def card(self) -> dict:
         return {"id": self.id, "name": self.name, "provider": self.provider, "tier": self.tier, "model": self.model,
@@ -123,6 +136,20 @@ class _Pool:
     async def _wake(self) -> None:
         async with self._cond:
             self._cond.notify_all()
+
+    @asynccontextmanager
+    async def yielded(self):
+        """Give the held slot back while the unit waits on the user, then take one again (the slot is held on exit)."""
+        self.running -= 1
+        await asyncio.shield(self._wake())
+        try:
+            yield
+        finally:
+            try:
+                await self.__aenter__()
+            except BaseException:
+                self.running += 1  # the caller's `async with` will release exactly one slot
+                raise
 
 
 KEEP_FINISHED = 200  # finished subagents kept in memory; older ones are rehydrated from their transcript
@@ -195,16 +222,23 @@ class SubagentManager:
     async def spawn(self, ctx: ToolContext, a: dict[str, Any]) -> Subagent:
         cfg = self.app.config
         tier = a.get("tier") or ("codex.standard" if a.get("provider") == "codex" else "claude.fast")
+        want = a.get("provider")
+        effort = a.get("effort") or cfg.delegation.get("default_subagent_effort", "low")
+        job_type = a.get("job_type") or "other"
+        route = None
+        if tier == "auto":  # never crosses provider families; unknown job types get the standard tier
+            route = routing_policy.select(cfg, job_type=job_type, effort=effort, instructions=a["instructions"],
+                                          provider=routing_policy.FAMILY.get(want, want) if want else None)
+            tier = route.tier
         model = cfg.resolve(tier)
         provider = cfg.model(model).provider
-        want = a.get("provider")
         if want and {"claude": "anthropic", "codex": "openai"}.get(want, want) != provider:
             raise ValueError(f"tier {tier} is a {provider} model but provider={want}")
-        effort = a.get("effort") or cfg.delegation.get("default_subagent_effort", "low")
         sub_id = new_id("sub_")
         token = a.get("approval_token")
         # Spend limits apply to every route, Codex CLI included.
-        self.app.usage.check(ctx.session_id)
+        usage_scope = self.app.usage.capture_scope(ctx.session_id, run_id=sub_id)
+        self.app.usage.check(ctx.session_id, scope=usage_scope)
         budget = float(cfg.delegation.get("job_budget_usd") or 0)
         if budget:
             since = self.app.turn_started.get(ctx.session_id, 0)
@@ -240,8 +274,9 @@ class SubagentManager:
             raise ValueError("worktree=true needs a session folder that is a git repo.")
         sub = Subagent(id=sub_id, session_id=ctx.session_id, name=a.get("name") or sub_id, provider=provider,
                        tier=tier, model=model, effort=effort, instructions=a["instructions"], tools=tools,
-                       job_type=a.get("job_type") or "other", approval_token=token,
+                       job_type=job_type, approval_token=token, route=route,
                        escalation_step=int(a.get("escalation_step") or 0),
+                       run_cap=float(a["run_cap_usd"]) if a.get("run_cap_usd") else None,
                        max_turns=min(int(a.get("max_turns") or cfg.delegation.get("subagent_max_turns", 30)), 100),
                        profile=cfg.profile_for(ctx.session, provider))
         if a.get("worktree") or is_cli:
@@ -254,25 +289,89 @@ class SubagentManager:
                 "cwd": str(sub.worktree_plan), "role": "main"})
             if res["status"] != "approved":
                 raise PermissionError("User declined the Codex CLI run.")
-        if (tier == "claude.deep" or "opus" in model.lower()) and not self.app.approvals.allowlisted("opus_subagent", tier):
-            res = await self.app.approvals.ask(ctx.session_id, "opus_subagent", {
-                "subject": f"Opus subagent: {sub.name}", "name": sub.name, "tier": tier, "model": model,
-                "effort": effort, "instructions": sub.instructions[:600]})
-            if res["status"] != "approved":
-                raise PermissionError("The user declined an Opus subagent. Continue with claude.standard (Sonnet) in smaller slices.")
+        if self._is_opus(tier, model):
+            await self._ask_opus(ctx.session_id, sub)
         self.subs[sub_id] = sub
         sub.job_id = self.app.jobs.start(ctx.session_id, "codex_cli" if is_cli else "subagent",
                                          f"{sub.name} · {tier} · {effort}", {"subagent": sub_id}, status="queued")
         sub.history = [Message.user(sub.instructions)]
-        sub.task = asyncio.create_task(self._run(sub, ctx))
-        self.app.jobs.attach(sub.job_id, sub.task)
+        sub.attempts = [self._attempt(sub, route.reason if route else "pinned")]
+        self._schedule(sub, ctx, usage_scope)
         self._publish(sub)
         return sub
 
+    @staticmethod
+    def _is_opus(tier: str, model: str) -> bool:
+        return tier == "claude.deep" or "opus" in model.lower()
+
+    async def _ask_opus(self, session_id: str, sub: Subagent) -> None:
+        """The user's rule: no unit starts or moves onto Opus without the approval card (an allowlisted
+        `opus_subagent:<tier>` rule stands in for it). A decline raises PermissionError."""
+        if self.app.approvals.allowlisted("opus_subagent", sub.tier):
+            return
+        res = await self.app.approvals.ask(session_id, "opus_subagent", {
+            "subject": f"Opus subagent: {sub.name}", "name": sub.name, "tier": sub.tier, "model": sub.model,
+            "effort": sub.effort, "instructions": sub.instructions[:600]})
+        if res["status"] != "approved":
+            raise PermissionError("The user declined an Opus subagent. Continue with claude.standard (Sonnet) in smaller slices.")
+
+    @staticmethod
+    def _attempt(sub: Subagent, reason: str) -> dict:
+        return {"tier": sub.tier, "model": sub.model, "reason": reason}
+
+    def _schedule(self, sub: Subagent, ctx: ToolContext, scope: UsageScope) -> None:
+        """Queue one execution of the unit (first run or follow-up). The run span starts here, at the scheduling
+        seam, and _run or _cancelled_before_start closes it; the scope is the one captured when it was queued."""
+        sub.usage_scope = scope
+        self._start_span(sub)
+        with self.app.usage.scope(captured=scope):
+            sub.task = asyncio.create_task(self._run(sub, ctx))
+        self.app.jobs.attach(sub.job_id, sub.task)
+
+    # ------------------------------------------------------------------- tracing (fails open)
+
+    def _start_span(self, sub: Subagent) -> None:
+        try:
+            attrs: dict[str, Any] = {
+                "gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": "subagent", "gdw.role": "subagent",
+                "gdw.harness": "codex_cli" if sub.tier == "codex.cli" else "builtin",
+                "gen_ai.request.model": sub.model, "gdw.effort": sub.effort, "gdw.job.id": sub.job_id,
+                "gdw.routing.job_type": sub.job_type if sub.job_type in routing_policy.JOB_TYPES else "other",
+                "gdw.routing.selected_tier": sub.tier, "gdw.routing.reason": sub.attempts[0]["reason"] if sub.attempts else "pinned"}
+            if sub.route is not None:
+                attrs["gdw.routing.policy_revision"] = sub.route.revision
+            sub.span = self.app.tracing.start("invoke_agent", category="subagent", session_id=sub.session_id,
+                                              run_id=sub.id, attrs=attrs)
+        except Exception:  # noqa: BLE001
+            sub.span = None
+
+    def _end_span(self, sub: Subagent) -> None:
+        span, sub.span = sub.span, None
+        if span is None:
+            return
+        try:
+            u = sub.usage
+            span.set_attributes({"gen_ai.request.model": sub.model, "gdw.routing.selected_tier": sub.tier,
+                                 "gdw.routing.escalation": sub.escalations, "gen_ai.usage.input_tokens": u.total_input,
+                                 "gen_ai.usage.output_tokens": u.output_tokens})
+            err = sub.error or ""
+            outcome = ("ok" if sub.status == "done" else "cancelled" if sub.status == "cancelled"
+                       else "budget_exceeded" if err.startswith("BudgetExceeded")
+                       else "effort_declined" if err.startswith("EffortApprovalRequired") else "failed")
+            span.end(outcome)
+        except Exception:  # noqa: BLE001
+            pass
+
     async def _run(self, sub: Subagent, parent: ToolContext) -> None:
         pool = self.pools["codex_cli" if sub.tier == "codex.cli" else "api"]
+        if sub.span is not None:
+            try:
+                bind_span(sub.span)  # chat and tool spans of this task nest under the run span
+            except Exception:  # noqa: BLE001
+                pass
         try:
             async with pool:
+                self._check_caps(sub)  # a queued unit meets the task, run and session caps at launch, not just at accept
                 if sub.want_worktree and sub.worktree is None:
                     if not parent.folder:
                         raise worktrees.GitError("worktree=true needs a session folder that is a git repo.")
@@ -293,6 +392,7 @@ class SubagentManager:
             sub.error = f"{type(e).__name__}: {e}"[:1000]
         finally:
             sub.ended = time.time()
+            self._end_span(sub)
             self.app.jobs.finish(sub.job_id, {"done": "done", "cancelled": "cancelled"}.get(sub.status, "failed"),
                                  subagent=sub.id, cost_usd=sub.usage.cost_usd)
             self._record_stats(sub)
@@ -303,36 +403,101 @@ class SubagentManager:
             sub.done_event.set()
             self._prune()
 
-    async def _loop(self, sub: Subagent, parent: ToolContext) -> None:
+    def _bind(self, sub: Subagent, parent: ToolContext):
+        """Provider adapter, model limits and tool context for the unit's current model (rebuilt on a switch)."""
         app = self.app
-        cfg = app.config
-        prov = app.providers.for_model(sub.model, sub.profile)
-        mcfg = cfg.model(sub.model)
-        folder = sub.worktree or parent.folder
         ctx = ToolContext(app=app, session=parent.session, run_id=sub.id, role="subagent", provider=sub.provider,
                           model=sub.model, extra_roots=[sub.worktree] if sub.worktree else [],
                           cwd_override=sub.worktree)
+        return app.providers.for_model(sub.model, sub.profile), app.config.model(sub.model), ctx
+
+    def _cap(self, sub: Subagent | None = None) -> float | None:
+        """The run cap: the configured subagent cap, or the unit's own `run_cap_usd` (eval batches) if smaller."""
+        caps = [c for c in (float(self.app.config.delegation.get("subagent_spend_cap_usd") or 0) or None,
+                            sub.run_cap if sub else None) if c]
+        return min(caps) if caps else None
+
+    def _check_caps(self, sub: Subagent) -> None:
+        """Session, daily, run and task caps for the unit's captured scope; raises BudgetExceeded."""
+        self.app.usage.check(sub.session_id, run_id=sub.id, run_cap=self._cap(sub), scope=sub.usage_scope)
+
+    async def _escalate(self, sub: Subagent, reason: str) -> bool:
+        """Switch an auto unit to its next stronger candidate. False when it has none left or no routing.
+        A move onto Opus needs the same approval card as starting an Opus unit; a decline raises PermissionError
+        naming the escalation, and the unit stays on its current model (nothing is switched or dispatched)."""
+        route, cfg = sub.route, self.app.config
+        if route is None or sub.escalations >= route.max_escalations:
+            return False
+        try:
+            chars = sum(len(m.model_dump_json()) for m in sub.history)
+        except Exception:  # noqa: BLE001
+            chars = 0
+        tin, _ = routing_policy.estimate_tokens(sub.instructions, chars)
+        tier = routing_policy.next_tier(cfg, route, sub.tier, effort=sub.effort, tokens_in=tin,
+                                        bigger_context=reason == "context_overflow")
+        if tier is None:
+            return False
+        model = cfg.resolve(tier)
+        if self._is_opus(tier, model) and not self._is_opus(sub.tier, sub.model):
+            probe = replace(sub, tier=tier, model=model)  # the card shows the target, the unit is untouched
+            try:
+                # A pending card must not hold a pool slot: other units keep running while the user decides.
+                async with self.pools["codex_cli" if sub.tier == "codex.cli" else "api"].yielded():
+                    await self._ask_opus(sub.session_id, probe)
+            except PermissionError as e:
+                self.app.jobs.log(sub.job_id, f"escalation {sub.tier} -> {tier} ({reason}) declined\n")
+                raise PermissionError(f"The user declined the Opus escalation of {sub.name} from {sub.tier} to {tier} "
+                                      f"({reason}); the unit stopped on {sub.tier}. {e}") from None
+        self.app.jobs.log(sub.job_id, f"escalating {sub.tier} -> {tier} ({reason})\n")
+        sub.escalations += 1
+        sub.tier, sub.model = tier, model
+        sub.attempts.append(self._attempt(sub, reason))
+        if sub.span is not None:
+            try:
+                sub.span.set_attributes({"gdw.routing.escalation": sub.escalations, "gdw.routing.selected_tier": tier,
+                                         "gdw.routing.reason": reason, "gen_ai.request.model": sub.model})
+            except Exception:  # noqa: BLE001
+                pass
+        self._publish(sub)
+        return True
+
+    async def _loop(self, sub: Subagent, parent: ToolContext) -> None:
+        app = self.app
+        prov, mcfg, ctx = self._bind(sub, parent)
+        folder = sub.worktree or parent.folder
         specs = [s for s in app.tools.specs(sub.tools, role="subagent", session=parent.session)]
         if app.mcp:
             specs += [s for s in app.mcp.tool_specs(parent.session) if s.name in sub.tools]
-        cap = float(cfg.delegation.get("subagent_spend_cap_usd") or 0) or None
         system = SUBAGENT_SYSTEM.format(folder=folder or "none (no file access)")
         for _ in range(sub.max_turns):
             sub.turns += 1
             while sub.inbox:
                 sub.history.append(Message.user(sub.inbox.pop(0)))
-            app.usage.check(sub.session_id, run_id=sub.id, run_cap=cap)
+            # Every dispatch, fallbacks included, re-checks the effort grant and the caps.
+            check_effort(sub.effort, sub.approval_token, sub.id)
+            self._check_caps(sub)
             req = ChatRequest(model=sub.model, messages=app.policy.filter_messages(sub.history, sub.provider), system=system, tools=specs, effort=sub.effort,
                               max_tokens=min(32000, mcfg.max_output), show_thinking=False,
                               approval_token=sub.approval_token, metadata={"run_id": sub.id, "cache_key": sub.job_type})
-            resp = await self._call_with_backoff(prov, req, sub)
+            try:
+                resp = await self._call_with_backoff(prov, req, sub)
+            except ProviderError as e:
+                # After the same-model backoff: a transient failure or context overflow may go to a stronger model
+                # and continue from the accepted history (executed tools are never replayed).
+                reason = routing_policy.failure_reason(e)
+                if reason and await self._escalate(sub, reason):
+                    prov, mcfg, ctx = self._bind(sub, parent)
+                    continue
+                raise
             msg = resp.message()
             sub.history.append(msg)
             sub.usage = sub.usage + resp.usage
+            failed = resp.stop_reason == "error"
             app.usage.record(provider=sub.provider, model=sub.model, usage=resp.usage, session_id=sub.session_id,
                              profile=sub.profile, role="subagent", run_id=sub.id, effort=sub.effort, latency_ms=resp.latency_ms,
                              context_fill=resp.usage.total_input / max(mcfg.context_window, 1),
-                             rate_limits=resp.rate_limits)
+                             rate_limits=resp.rate_limits, scope=sub.usage_scope,
+                             ok=not failed, error_kind="other" if failed else None)
             self._publish(sub)
             calls = msg.tool_calls()
             if resp.stop_reason == "pause_turn":
@@ -340,7 +505,21 @@ class SubagentManager:
             if resp.stop_reason != "tool_use" or not calls:
                 if sub.inbox:
                     continue
-                sub.result = msg.text().strip()
+                text = msg.text().strip()
+                check = sub.route.check if sub.route else ""
+                if check and not routing_policy.run_check(check, text):
+                    try:
+                        moved = await self._escalate(sub, "failed_check")
+                    except PermissionError:
+                        sub.result = text  # the last reply is kept; the unit still fails with the declined escalation
+                        raise
+                    if moved:
+                        sub.history.append(Message.user(routing_policy.repair_instruction(check)))
+                        prov, mcfg, ctx = self._bind(sub, parent)
+                        continue
+                    sub.result = text
+                    raise RuntimeError(f"the {check} check failed on the final reply")
+                sub.result = text
                 return
             outs = await asyncio.gather(*(self._tool(ctx, sub, c.name, c.input) for c in calls))
             sub.history.append(Message(role="user", content=[o.to_block(c.id) for o, c in zip(outs, calls)]))
@@ -369,11 +548,12 @@ class SubagentManager:
                 if not e.rate_limited or attempt == MAX_RATE_RETRIES:
                     self.app.usage.record(provider=sub.provider, model=sub.model, usage=Usage(),
                                           session_id=sub.session_id, role="subagent", run_id=sub.id, effort=sub.effort,
-                                          profile=sub.profile, ok=False, error_kind="rate_limit" if e.rate_limited else "other")
+                                          profile=sub.profile, ok=False, error_kind="rate_limit" if e.rate_limited else "other",
+                                          scope=sub.usage_scope)
                     raise
                 self.app.usage.record(provider=sub.provider, model=sub.model, usage=Usage(), session_id=sub.session_id,
                                       role="subagent", run_id=sub.id, effort=sub.effort, ok=False, profile=sub.profile,
-                                      error_kind="rate_limit")
+                                      error_kind="rate_limit", scope=sub.usage_scope)
                 wait = backoff_wait(e, delay)  # the provider's retry-after wins
                 self.app.jobs.log(sub.job_id, f"rate limited; waiting {wait:.0f}s\n")
                 sub.status = "queued"
@@ -381,8 +561,7 @@ class SubagentManager:
                 await asyncio.sleep(wait)
                 delay = min(delay * 2, BACKOFF_MAX_S)
                 sub.status = "running"
-                cap = float(self.app.config.delegation.get("subagent_spend_cap_usd") or 0) or None
-                self.app.usage.check(sub.session_id, run_id=sub.id, run_cap=cap)  # a retry is a new paid call
+                self._check_caps(sub)  # a retry is a new paid call
         raise RuntimeError("unreachable")
 
     # ------------------------------------------------------------------ codex cli
@@ -399,6 +578,8 @@ class SubagentManager:
         env = dict(os.environ)
         if key := get_key("openai", sub.profile):
             env["CODEX_API_KEY"] = key  # only on this process; never logged
+        self._check_caps(sub)
+        check_effort(effort, sub.approval_token, sub.id)
         proc = await asyncio.create_subprocess_exec(*cmd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                                                     stderr=asyncio.subprocess.PIPE, env=env, **NEW_GROUP,
                                                     limit=2**24)
@@ -436,10 +617,9 @@ class SubagentManager:
                     sub.turns += 1
                     app.usage.record(provider="openai", model=sub.model, usage=usage, session_id=sub.session_id,
                                      profile=sub.profile, role="subagent", run_id=sub.id, effort=sub.effort,
-                                     latency_ms=int((time.monotonic() - t0) * 1000))
+                                     latency_ms=int((time.monotonic() - t0) * 1000), scope=sub.usage_scope)
                     self._publish(sub)
-                    cap = float(app.config.delegation.get("subagent_spend_cap_usd") or 0) or None
-                    app.usage.check(sub.session_id, run_id=sub.id, run_cap=cap)  # raises → finally kills codex
+                    self._check_caps(sub)  # raises → finally kills codex
                 elif t in ("turn.failed", "error"):
                     sub.error = json.dumps(ev.get("error") or ev)[:800]
             await proc.wait()
@@ -469,7 +649,9 @@ class SubagentManager:
             "reasoning_tokens": sub.usage.reasoning_tokens, "characters": sub.usage.characters,
             "cost_usd": sub.usage.cost_usd, "wall_time_s": (sub.ended or time.time()) - sub.started,
             "success": int(success), "escalation_steps": sub.escalation_step,
-            "approval_requested": int(bool(sub.approval_token) or sub.effort in ABOVE_HIGH)})
+            "approval_requested": int(bool(sub.approval_token) or sub.effort in ABOVE_HIGH),
+            # Cost covers every model the unit used, so the row can't stand for one model's success or price.
+            "mixed_models": int(len({a["model"] for a in sub.attempts}) > 1)})
 
     def set_success(self, sub_id: str, success: bool) -> None:
         sub = self.get(sub_id)
@@ -512,6 +694,7 @@ class SubagentManager:
         if sub.done_event.is_set():
             return
         sub.status, sub.ended = "cancelled", time.time()
+        self._end_span(sub)
         self._record_stats(sub)
         self._publish(sub)
         sub.done_event.set()
@@ -607,14 +790,17 @@ def _register_tools(app: "AppState", mgr: SubagentManager) -> None:
             mgr._load_history(sub)
         except (OSError, ValueError, KeyError):
             return ToolOutput("That subagent's transcript is missing, so it can't be resumed.", is_error=True)
+        usage_scope = app.usage.capture_scope(ctx.session_id, run_id=sub.id)
         sub.profile = app.config.profile_for(ctx.session, sub.provider)  # a rehydrated sub doesn't know it
         sub.history.append(Message.user(a["message"]))
         sub.status, sub.result, sub.error, sub.recorded, sub.ended = "queued", "", None, False, None
+        sub.escalations = 0  # the follow-up is a new job with its own escalation allowance
+        if not sub.attempts:
+            sub.attempts = [mgr._attempt(sub, "pinned")]
         sub.done_event = asyncio.Event()
         sub.job_id = app.jobs.start(ctx.session_id, "subagent", f"{sub.name} (follow-up)", {"subagent": sub.id},
                                     status="queued")
-        sub.task = asyncio.create_task(mgr._run(sub, ctx))
-        app.jobs.attach(sub.job_id, sub.task)
+        mgr._schedule(sub, ctx, usage_scope)
         return ToolOutput(f"Resumed {sub.name} with your message. Collect with get_subagent_result.")
 
     add("message_subagent", "Send a follow-up message to a subagent (resumes it if it finished).",
@@ -695,9 +881,9 @@ def _register_tools(app: "AppState", mgr: SubagentManager) -> None:
         obj({"id": {"type": "string"}, "success": {"type": "boolean"}}, ["id", "success"]), record)
 
     async def stats(ctx: ToolContext, a: dict) -> ToolOutput:
-        where, p = "", []
+        where, p = "WHERE mixed_models=0", []  # a mixed run's cost belongs to no single model
         if a.get("job_type"):
-            where, p = "WHERE job_type=?", [a["job_type"]]
+            where, p = "WHERE mixed_models=0 AND job_type=?", [a["job_type"]]
         rows = app.db.all(
             "SELECT job_type, tier, model, effort, COUNT(*) n, AVG(success) success_rate, AVG(cost_usd) avg_cost, "
             f"AVG(wall_time_s) avg_wall FROM delegation_stats {where} GROUP BY job_type, tier, model, effort "

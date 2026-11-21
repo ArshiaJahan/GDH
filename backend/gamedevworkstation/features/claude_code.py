@@ -67,18 +67,23 @@ from fastapi import APIRouter, Body, FastAPI, HTTPException
 from ..procs import NEW_GROUP, SIGKILL, SIGTERM, kill_group
 from ..children import CHILDREN
 from ..config import data_dir, sessions_dir
+from ..core.effort import check_effort
 from ..core.media import cap_media
 from ..core.types import (AudioBlock, FileBlock, ImageBlock, Message, TextBlock, ThinkingBlock, ToolResultBlock,
                           ToolUseBlock, Usage, new_id)
 from ..providers.base import compute_cost
+from ..providers.registry import chat_result
 from ..skills import turn_skill_segments
 from ..store import remove_claude_code_folder, valid_claude_code_session
+from ..usage import BudgetExceeded, UsageScope
 from .claude_cli import LOGIN_HINT, CliProbe, redact
 from .gdw_mcp import PROMPT_TOOL, SERVER, GdwMcp, mount
-from .harnesses import DEFER, DEFERRED_SDK_TOOLS, HOOK_TIMEOUT_S, _project_instructions, _prompt_text, ask_tool, make_gate
+from .harnesses import (DEFER, DEFERRED_SDK_TOOLS, HOOK_TIMEOUT_S, _project_instructions, _prompt_text, ask_tool,
+                        make_gate, start_harness_span)
 
 if TYPE_CHECKING:
     from ..app import AppState
+    from .tracing import Span
 
 log = logging.getLogger(__name__)
 
@@ -297,6 +302,25 @@ def _block_text(content: Any) -> str:
     return json.dumps(content)[:20000] if content is not None else ""
 
 
+def _result_key(ev: dict) -> tuple | None:
+    """Identify a replay without treating the CLI's result UUID as a dispatched user-message ID."""
+    uid, index = ev.get("uuid"), ev.get("result_index")
+    if isinstance(uid, str) or isinstance(index, int):
+        return uid, index, ev.get("num_turns"), ev.get("total_cost_usd")
+    return None
+
+
+def _injected_result(ev: dict) -> bool:
+    origin = ev.get("origin")
+    return isinstance(origin, dict) and origin.get("kind") not in (None, "human")
+
+
+def _result_outcome(ev: dict) -> str:
+    if ev.get("terminal_reason") in ("aborted_streaming", "aborted_tools"):
+        return "interrupted"
+    return "error" if ev.get("is_error") or str(ev.get("subtype") or "success") != "success" else "ok"
+
+
 @dataclass
 class Turn:
     sid: str
@@ -313,6 +337,10 @@ class Turn:
     saw_output: bool = False
     quiet: bool = False  # a Skipper / central-doc step: text only, nothing shown in the chat
     texts: list[str] = field(default_factory=list)
+    usage_scope: UsageScope | None = None
+    span: Span | None = None
+    stop_outcome: str | None = None
+    preparing: bool = False
 
 
 class Proc:
@@ -336,6 +364,7 @@ class Proc:
         self._msg_ids: dict[str, str] = {}  # CLI message id → the GDW id its streamed text used
         self._open: tuple[str, Message] | None = None  # the GDW message the current CLI message's blocks join
         self._stream_id: str | None = None
+        self._results_seen: set[tuple] = set()
         self._req = 0
         self.reader = asyncio.create_task(self._read())
         self._err_task = asyncio.create_task(self._read_stderr())
@@ -349,8 +378,22 @@ class Proc:
     async def send(self, obj: dict) -> None:
         assert self.proc.stdin
         async with self._write_lock:
-            self.proc.stdin.write((json.dumps(obj) + "\n").encode())
+            self.proc.stdin.write((json.dumps(obj) + "\n").encode("utf-8"))
             await self.proc.stdin.drain()
+
+    async def dispatch(self, turn: Turn, text: str, scope: UsageScope) -> None:
+        if self.turn is not turn:
+            return  # The process exited while the prompt was being prepared.
+        turn.preparing = False
+        turn.t0 = time.monotonic()
+        turn.usage_scope = scope
+        turn.span = start_harness_span(self.app, HARNESS, self.sid, f"main:{self.sid}", turn.model,
+                                       turn.effort, job_id=turn.jid)
+        try:
+            await self.send({"type": "user", "message": {"role": "user", "content": text},
+                             "parent_tool_use_id": None, "session_id": "default"})
+        except (BrokenPipeError, ConnectionResetError, RuntimeError):
+            pass  # The reader ends the turn on EOF.
 
     async def request(self, req: dict, timeout: float | None) -> dict:
         """A control_request to the CLI; its control_response's `response` (raises on error/timeout)."""
@@ -411,8 +454,8 @@ class Proc:
             for fut in self._pending.values():
                 if not fut.done():
                     fut.set_exception(RuntimeError("claude exited"))
-            if self.turn and not self.turn.done.done():
-                self._finish_turn(exited=True)
+            if self.turn:
+                self._finish_turn(self.turn, exited=True)
 
     # -------------------------------------------------------- events
 
@@ -640,37 +683,60 @@ class Proc:
                                                    "output": (text or "")[:4000]}, self.sid)
 
     def _on_result(self, ev: dict, turn: Turn | None) -> None:
-        origin = ev.get("origin")
-        injected = isinstance(origin, dict) and origin.get("kind") not in (None, "human")
-        self._open = None
         if ev.get("num_turns") == 0 and RESUME_FAILED.search("; ".join(map(str, ev.get("errors") or []))):
             # `--resume` of a conversation that's gone: this result comes just before the CLI exits 1 with
             # "No conversation found with session ID: <id>" on stderr [live]; run_turn starts afresh on the exit.
             return
-        self._flush_results(turn)
-        self.mgr.record_usage(self.sid, ev, turn)
-        if turn is None or injected:
-            return  # a background-task turn the CLI started by itself: its usage counts, our turn goes on
-        for f in dict.fromkeys(turn.touched):
-            self.app.changes.notify(self.sid, f, "anthropic", turn.model)
-        if ev.get("is_error") or str(ev.get("subtype") or "success") != "success":
-            text = redact(str(ev.get("result") or "; ".join(map(str, ev.get("errors") or [])) or ev.get("subtype") or "error"), self.token)
-            if turn.login_error or LOGIN_TEXT.search(text):
-                self.mgr.probe.forget()
-                self.mgr.login_card(self.sid, text)
-            elif ev.get("terminal_reason") not in ("aborted_streaming", "aborted_tools"):  # not a Stop
-                self.app.store.add_message(self.sid, Message(role="assistant", content=[TextBlock(text=f"Claude Code: {text}"[:4000])],
-                                                             meta={"error": True, "error_kind": "harness"}))
-        self._finish_turn()
+        if (key := _result_key(ev)) is not None:
+            if key in self._results_seen:
+                return
+            self._results_seen.add(key)
+        if turn is None or turn is not self.turn or turn.preparing or _injected_result(ev):
+            # A CLI-owned result has usage but no task snapshot from this dispatch. It still flushes the tool
+            # results gathered so far and records under the live turn's model and effort, but never ends that
+            # turn or its span.
+            self._open = None
+            self._flush_results(turn)
+            self.mgr.record_usage(self.sid, ev, turn, scope=UsageScope(self.sid, None))
+            return
+        outcome = _result_outcome(ev)
+        try:
+            usage = self.mgr.record_usage(self.sid, ev, turn, scope=turn.usage_scope or UsageScope(self.sid, None))
+            chat_result(turn.span, usage=usage)
+            self._flush_results(turn)
+            for f in dict.fromkeys(turn.touched):
+                self.app.changes.notify(self.sid, f, "anthropic", turn.model)
+            if outcome == "error":
+                text = redact(str(ev.get("result") or "; ".join(map(str, ev.get("errors") or []))
+                                  or ev.get("subtype") or "error"), self.token)
+                if turn.login_error or LOGIN_TEXT.search(text):
+                    self.mgr.probe.forget()
+                    self.mgr.login_card(self.sid, text)
+                else:
+                    self.app.store.add_message(self.sid, Message(role="assistant", content=[TextBlock(text=f"Claude Code: {text}"[:4000])],
+                                                                 meta={"error": True, "error_kind": "harness"}))
+        finally:
+            self._finish_turn(turn, outcome=outcome)
 
-    def _finish_turn(self, exited: bool = False) -> None:
-        turn, self.turn = self.turn, None
+    def _finish_turn(self, turn: Turn, *, exited: bool = False, outcome: str = "process_exit") -> None:
+        if self.turn is not turn:
+            return
+        self.turn = None
         self._stream_id = None
         self._open = None
-        self.app.bus.publish("agent.status", {"kind": None}, self.sid)
-        if turn and not turn.done.done():
+        span, turn.span = turn.span, None
+        scope, turn.usage_scope = turn.usage_scope, None
+        try:
+            if span is not None:
+                span.end(turn.stop_outcome or outcome)
+                if exited:
+                    self.mgr.record_missing_usage(self.sid, turn.model, turn.effort, f"main:{self.sid}",
+                                                  self.billing, turn.t0, scope=scope)
+            self.app.bus.publish("agent.status", {"kind": None}, self.sid)
             self._flush_results(turn)
-            turn.done.set_result({"exited": exited, "code": self.proc.returncode})
+        finally:
+            if not turn.done.done():
+                turn.done.set_result({"exited": exited, "code": self.proc.returncode})
 
     # ------------------------------------------------- control requests
 
@@ -695,11 +761,11 @@ class Proc:
 
     # ---------------------------------------------------------- stop
 
-    async def interrupt(self, wait_s: float) -> None:
+    async def interrupt(self, turn: Turn, wait_s: float) -> None:
         """End the running turn: interrupt control request, then SIGINT, then kill the process group."""
-        turn = self.turn
-        if not turn or not self.alive:
+        if self.turn is not turn or not self.alive:
             return
+        turn.stop_outcome = turn.stop_outcome or "interrupted"
         try:
             await self.request({"subtype": "interrupt"}, timeout=wait_s)
         except Exception:  # noqa: BLE001 — no answer: the signals below still end it
@@ -799,13 +865,16 @@ class HelperConv:
         self.cost_seen = 0.0
         self.billing = "api" if (mgr.probe.cached() or {}).get("bills_api") else "subscription"
         self.model = ""
+        self.span: Span | None = None  # the ask in flight
 
     async def __call__(self, prompt: str) -> str | None:
         return await self.ask(prompt)
 
     async def ask(self, prompt: str) -> str | None:
-        from ..core.effort import check_effort
+        with self.app.usage.scope(self.sid):
+            return await self._ask(prompt)
 
+    async def _ask(self, prompt: str) -> str | None:
         self.failure = ""
         try:
             check_effort(self.effort, None, self.run_id)  # right before dispatch; xhigh/max never reach the CLI
@@ -832,6 +901,21 @@ class HelperConv:
             except Exception:  # noqa: BLE001 — over the spend limit: no helper call
                 self.failure = "spend_limit"
                 return None
+        span = start_harness_span(self.app, HARNESS, self.sid, self.run_id, model, self.effort, role="helper")
+        self.span = span
+        outcome = "cancelled"  # stays this if the ask is cancelled
+        try:
+            out = await self._dispatch(prompt, model)
+            outcome = "ok" if out is not None else "timeout" if self.failure == "timeout" else "error"
+            return out
+        except Exception:
+            outcome = "error"
+            raise
+        finally:
+            self.span = None
+            span.end(outcome)
+
+    async def _dispatch(self, prompt: str, model: str) -> str | None:
         try:
             if self.proc is None or self.proc.returncode is not None:
                 await self._spawn(model)
@@ -858,8 +942,11 @@ class HelperConv:
         cli = (self.mgr.probe.cached() or {}).get("path")
         if not cli:
             raise RuntimeError("The claude CLI isn't installed.")
+        budget = self.budget_usd - self.cost_seen
+        if self.billing == "api" and (left := self.app.usage.headroom(self.sid, self.run_id)) is not None:
+            budget = min(budget, left)
         argv = helper_argv(cli, session_id=self.cc_session, model=model, effort=self.effort,
-                           budget_usd=max(self.budget_usd - self.cost_seen, 0.0001))
+                           budget_usd=max(budget, 0.0001))
         cwd = data_dir() / "claude_code" / self.sid / "helper"
         cwd.mkdir(parents=True, exist_ok=True)
         self.proc = await asyncio.create_subprocess_exec(*argv, cwd=str(cwd), stdin=asyncio.subprocess.PIPE,
@@ -894,7 +981,9 @@ class HelperConv:
                     await self.aclose()
                     return None
             elif ev.get("type") == "result":
-                self.mgr.record_usage(self.sid, ev, None, helper=self, latency_ms=int((time.monotonic() - t0) * 1000))
+                usage = self.mgr.record_usage(self.sid, ev, None, helper=self,
+                                              latency_ms=int((time.monotonic() - t0) * 1000))
+                chat_result(self.span, usage=usage)
                 if ev.get("is_error") or str(ev.get("subtype") or "success") != "success":
                     self.failure = "budget" if "budget" in str(ev.get("subtype") or "") else "error"
                     return None
@@ -946,6 +1035,7 @@ class ClaudeCode:
         self.probe = CliProbe(app.config)
         self.mcp = GdwMcp(app)
         self.mcp.approver = self.approve
+        self.mcp.usage_scope_for = self._tool_usage_scope
         self.procs: dict[str, Proc] = {}
         self._stopping: dict[str, asyncio.Task] = {}
         self._spawn_lock: dict[str, asyncio.Lock] = {}
@@ -954,6 +1044,11 @@ class ClaudeCode:
     @property
     def cfg(self) -> dict:
         return dict(self.app.config.claude_code or {})
+
+    def _tool_usage_scope(self, sid: str) -> UsageScope | None:
+        if (proc := self.procs.get(sid)) and proc.turn:
+            return proc.turn.usage_scope
+        return None
 
     def settings_changed(self) -> None:
         self.probe.forget()
@@ -1073,6 +1168,10 @@ class ClaudeCode:
         return s["mode"] == "auto" or bool(self.cfg.get("pre_tool_hook", True))
 
     async def run_turn(self, s: dict) -> None:
+        with self.app.usage.scope(s["id"]) as scope:
+            await self._run_turn(s, scope)
+
+    async def _run_turn(self, s: dict, scope: UsageScope) -> None:
         app, sid = self.app, s["id"]
         if (t := self._stopping.get(sid)) and not t.done():
             await asyncio.wait([t], timeout=20)  # the previous turn's Stop is still winding down
@@ -1088,7 +1187,7 @@ class ClaudeCode:
             self.notice(sid, "claude_code_api", "`claude auth status` reports an API key login, so this session may "
                                                 "bill that API account instead of your Claude subscription.")
         billing = "api" if st.get("bills_api") else "subscription"
-        effort, _token = await app.runner._effective_effort(s)
+        effort, token = await app.runner._effective_effort(s)
         if effort == "cancel":
             app.store.add_message(sid, Message.assistant("Cancelled: effort above high wasn't approved."))
             return
@@ -1128,8 +1227,9 @@ class ClaudeCode:
                             gate=make_gate(app, lambda: app.store.get(sid) or s, session_cwd(s), proposed_edits))
                 proc.turn = turn
                 proc.last_used = time.monotonic()
+                turn.preparing = True  # no span or task snapshot until the prompt is dispatched
                 if proc.reader.done():  # it already exited (bad flags, crash at start)
-                    proc._finish_turn(exited=True)
+                    proc._finish_turn(turn, exited=True)
                 skipped = bool(settings.get("skipper") and settings.get("skipper_handoff"))  # the handoff replaces the recap
                 if improved is None:
                     improved = await self._improve(s, proc, turn)
@@ -1151,16 +1251,24 @@ class ClaudeCode:
                                                extra=getattr(improved, "context_text", "") or "",
                                                text_override=getattr(improved, "execution_text", "") or None)
                 try:
-                    await proc.send({"type": "user", "message": {"role": "user", "content": prompt},
-                                     "parent_tool_use_id": None, "session_id": "default"})
+                    if billing == "api":
+                        app.usage.check(sid, scope=scope)
+                    check_effort(effort, token, f"main:{sid}")
+                except (BudgetExceeded, PermissionError, ValueError):
+                    if proc.turn is turn:
+                        proc.turn = None
+                        turn.done.cancel()
+                    raise
+                await proc.dispatch(turn, prompt, scope)  # starts the harness span, keeps the task snapshot on the turn
+                if proc.turn is turn:
                     app.store.update(sid, settings={"claude_code_sent": last_id})
-                except (BrokenPipeError, ConnectionResetError, RuntimeError):
-                    pass  # the process is gone; the reader ends the turn
                 try:
                     res = await asyncio.shield(turn.done)
                 except asyncio.CancelledError:
                     status = "cancelled"
-                    self._stopping[sid] = asyncio.create_task(proc.interrupt(float(self.cfg.get("interrupt_wait_s", 5))))
+                    turn.stop_outcome = "cancelled"
+                    self._stopping[sid] = asyncio.create_task(
+                        proc.interrupt(turn, float(self.cfg.get("interrupt_wait_s", 5))))
                     raise
                 if res.get("exited"):
                     err = proc.stderr.strip()
@@ -1179,7 +1287,7 @@ class ClaudeCode:
                         self._error(sid, f"Claude Code exited ({res.get('code')}): {err[-800:] or 'no output'}")
                     return
                 status = "done"
-                await self._after_turn(sid, proc, model, effort, jid)
+                await self._after_turn(sid, proc, model, effort, jid, approval_token=token)
                 return
         except asyncio.CancelledError:
             status = "cancelled"
@@ -1217,33 +1325,40 @@ class ClaudeCode:
             await helper.aclose()
         return out if out is not None else False
 
-    async def _quiet_step(self, proc: Proc, model: str, effort: str | None, jid: str | None, text: str) -> str | None:
+    async def _quiet_step(self, proc: Proc, model: str, effort: str | None, jid: str | None, text: str,
+                          *, approval_token: str | None = None) -> str | None:
         """Send `text` as a hidden turn and return the reply's text (None if it failed or ran out of time)."""
         sid = proc.sid
         if not proc.alive or proc.turn is not None or proc.fatal_error:
             return None
-        turn = Turn(sid=sid, model=model, effort=effort, jid=jid, gate=None, quiet=True)
+        scope = self.app.usage.capture_scope(sid)
+        try:
+            if proc.billing == "api":
+                self.app.usage.check(sid, scope=scope)
+            check_effort(effort, approval_token, f"main:{sid}")
+        except (BudgetExceeded, PermissionError):
+            return None
+        turn = Turn(sid=sid, model=model, effort=effort, jid=jid, gate=None, quiet=True, preparing=True)
         proc.turn = turn
         proc.last_used = time.monotonic()
-        try:
-            await proc.send({"type": "user", "message": {"role": "user", "content": text},
-                             "parent_tool_use_id": None, "session_id": "default"})
-        except (BrokenPipeError, ConnectionResetError, RuntimeError):
-            pass  # the process is gone; the reader ends the turn
+        await proc.dispatch(turn, text, scope)
         try:
             res = await asyncio.wait_for(asyncio.shield(turn.done), STEP_TIMEOUT_S)
         except asyncio.TimeoutError:
-            await proc.interrupt(float(self.cfg.get("interrupt_wait_s", 5)))
+            turn.stop_outcome = "timeout"
+            await proc.interrupt(turn, float(self.cfg.get("interrupt_wait_s", 5)))
             return None
         except asyncio.CancelledError:
-            self._stopping[sid] = asyncio.create_task(proc.interrupt(float(self.cfg.get("interrupt_wait_s", 5))))
+            turn.stop_outcome = "cancelled"
+            self._stopping[sid] = asyncio.create_task(proc.interrupt(turn, float(self.cfg.get("interrupt_wait_s", 5))))
             raise
         if res.get("exited"):
             return None
         out = "\n\n".join(t for t in turn.texts if t.strip()).strip()
         return out or None
 
-    async def _after_turn(self, sid: str, proc: Proc, model: str, effort: str | None, jid: str | None) -> None:
+    async def _after_turn(self, sid: str, proc: Proc, model: str, effort: str | None, jid: str | None,
+                          *, approval_token: str | None = None) -> None:
         """Central-doc mode: ask for the updated central doc and save it. Skipper mode: ask for a handoff (the
         central doc, when both are on), save it, end this Claude Code conversation and start a fresh one that
         begins from the handoff, ready for the next message."""
@@ -1266,7 +1381,8 @@ class ClaudeCode:
             cur = _read_doc(path).strip() or "(empty: this is the first update)"
             if jid:
                 self.app.jobs.log(jid, "central doc update\n")
-            doc = await self._quiet_step(proc, model, effort, jid, CENTRAL_STEP.format(doc=cur))
+            doc = await self._quiet_step(proc, model, effort, jid, CENTRAL_STEP.format(doc=cur),
+                                         approval_token=approval_token)
             if doc:
                 path.write_text(doc.rstrip() + "\n", encoding="utf-8")
                 self.app.store.update(sid, settings={"central_doc_path": str(path)})
@@ -1277,7 +1393,7 @@ class ClaudeCode:
             return
         if jid:
             self.app.jobs.log(jid, "skipper handoff\n")
-        handoff = doc or await self._quiet_step(proc, model, effort, jid, HANDOFF_STEP)
+        handoff = doc or await self._quiet_step(proc, model, effort, jid, HANDOFF_STEP, approval_token=approval_token)
         if not handoff:
             self.notice(sid, "skipper", "Skipper: no handoff came back, so the next message stays in this conversation.")
             return
@@ -1535,7 +1651,7 @@ class ClaudeCode:
     # ------------------------------------------------------------ usage
 
     def record_usage(self, sid: str, ev: dict, turn: Turn | None, *, helper: "HelperConv | None" = None,
-                     latency_ms: int = 0) -> None:
+                     latency_ms: int = 0, scope: UsageScope | None = None) -> Usage | None:
         """One usage row per `result`. Observed [live]: `usage` holds this turn's own tokens (zero for a
         turn that was interrupted mid-stream), while `total_cost_usd` and `modelUsage` are running totals
         for the conversation that carry across --resume. So the tokens are recorded as they are and the
@@ -1563,7 +1679,7 @@ class ClaudeCode:
                              profile="subscription" if helper.billing == "subscription" else "default",
                              role="assistant", run_id=helper.run_id, effort=helper.effort, latency_ms=latency_ms,
                              ok=not ev.get("is_error"), billing=helper.billing, feature="prompt_improver")
-            return
+            return usage
         last = s["settings"].get("claude_code_totals") or {}
         if not isinstance(last, dict):
             last = {}
@@ -1590,9 +1706,21 @@ class ClaudeCode:
                          effort=turn.effort if turn else None,
                          latency_ms=int(ev.get("duration_ms") or ((time.monotonic() - turn.t0) * 1000 if turn else 0)),
                          ok=not ev.get("is_error"), billing=billing,
-                         error_kind="auth" if turn and turn.login_error else None)
+                         error_kind="auth" if turn and turn.login_error else None, scope=scope)
         totals = {"cost": cost if ev.get("total_cost_usd") is not None else before, "session_id": cs}
         app.store.update(sid, settings={"claude_code_totals": totals, **({"claude_code_session": cs} if cs else {})})
+        return usage
+
+    def record_missing_usage(self, sid: str, model: str, effort: str | None, run_id: str, billing: str, t0: float,
+                             *, scope: UsageScope | None) -> None:
+        """The process died before a `result`: the attempt still gets its one (empty, failed) usage row."""
+        try:
+            self.app.usage.record(provider="anthropic", model=model, usage=Usage(), session_id=sid,
+                                  profile="subscription" if billing == "subscription" else "default", role="main",
+                                  run_id=run_id, effort=effort, ok=False, error_kind="unknown_usage", billing=billing,
+                                  latency_ms=int((time.monotonic() - t0) * 1000), scope=scope)
+        except Exception:  # noqa: BLE001 — accounting never breaks teardown
+            log.warning("claude_code: couldn't record the missing usage", exc_info=True)
 
     # -------------------------------------------------------- lifecycle
 
@@ -1602,8 +1730,8 @@ class ClaudeCode:
         p = self.procs.pop(sid, None)
         self.mcp.revoke(sid)
         if p:
-            if p.turn and not p.turn.done.done():
-                p.turn.done.set_result({"exited": True, "code": None})
+            if p.turn:
+                p._finish_turn(p.turn, exited=True)  # ends its span exactly once
             await p.kill()
             try:
                 p.mcp_file.unlink(missing_ok=True)

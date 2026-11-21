@@ -266,6 +266,7 @@ class ComfyPlugService:
         if action == "check":
             return {"action": "check", "status": await asyncio.to_thread(self.status)}
         sid = session["id"] if session else None
+        scope = self.app.usage.capture_scope(sid)
         title, call = self._plan(action, a, self._resolver(ctx, session))
         jid = self.app.jobs.start(sid, "comfyplug", title, meta={"action": action})
         t0 = time.monotonic()
@@ -292,7 +293,7 @@ class ComfyPlugService:
                 items.append(iid)
         self.app.usage.record(provider="comfyplug", model=MODELS[action], feature=f"comfyplug:{action}",
                               session_id=sid, role="tool" if source == "agent" else "main", usage=Usage(),
-                              latency_ms=int(elapsed * 1000))
+                              latency_ms=int(elapsed * 1000), scope=scope)
         self.app.jobs.finish(jid, "done", outputs=len(paths))
         out = {"action": action, "paths": [str(p) for p in paths], "items": items, "elapsed_s": elapsed}
         self.app.bus.publish("comfyplug.generated", out, sid)

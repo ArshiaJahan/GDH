@@ -53,6 +53,10 @@ class AgentResult:
     helper_calls: int = 0  # subagent calls the agent made through a helper CLI (claude_code_glm: arkcli +chat)
     model: str = ""        # the model the agent reported using, when it says
     log: str = ""          # raw output (stream-json / JSONL / transcript), saved next to the trial
+    session_id: str = ""   # builtin: the trial's session, the key to its usage-ledger rows
+    fallbacks: int = 0     # builtin: stronger-model switches the router made during the trial
+    attempts: list[dict] = field(default_factory=list)  # builtin: {tier, model, reason} per model segment
+    policy_revision: str = ""  # builtin, auto arm: the [model_routing] revision that chose the model
 
 
 AgentFn = Callable[[str, Path, Limits], Awaitable[AgentResult]]
@@ -211,7 +215,11 @@ def codex_agent(*, model: str | None = None) -> AgentFn:
     return run
 
 
-def builtin_agent(app: "AppState", *, tier: str = "claude.standard", effort: str = "low") -> AgentFn:
+def builtin_agent(app: "AppState", *, tier: str = "claude.standard", effort: str = "low",
+                  job_type: str | None = None, provider: str | None = None,
+                  allowance: Callable[[], float] | None = None) -> AgentFn:
+    """The builtin subagent loop. `job_type` goes to the router (use with tier="auto"); `allowance` returns the
+    dollars an approved batch may still spend, and bounds the unit's run cap together with Limits.max_cost_usd."""
     from ..agent.tools import ToolContext
     from .subagents import SubagentManager
 
@@ -219,16 +227,29 @@ def builtin_agent(app: "AppState", *, tier: str = "claude.standard", effort: str
         mgr = app.extensions.get("subagents") or SubagentManager(app)
         session = app.store.create(folder=str(tree), mode="accept_edits")
         ctx = ToolContext(app=app, session=session, run_id="eval-" + secrets.token_hex(4))
+        cap = limits.max_cost_usd
+        if allowance is not None:
+            cap = min(cap, allowance())
+            if cap <= 0:
+                return AgentResult(error="BudgetExceeded: the approved spend allowance is used up", session_id=session["id"])
+        args = {"name": "eval", "tier": tier, "effort": effort, "tools": FILE_TOOLS,
+                "instructions": TASK_PREAMBLE + prompt, "max_turns": 60, "run_cap_usd": cap}
+        if job_type:
+            args["job_type"] = job_type
+        if provider:
+            args["provider"] = provider
         try:
-            sub = await mgr.spawn(ctx, {"name": "eval", "tier": tier, "effort": effort, "tools": FILE_TOOLS,
-                                        "instructions": TASK_PREAMBLE + prompt, "max_turns": 60})
+            sub = await mgr.spawn(ctx, args)
         except Exception as e:  # noqa: BLE001 — spend cap, effort gate, missing key: never started
-            return AgentResult(error=f"{type(e).__name__}: {e}"[:500])
+            return AgentResult(error=f"{type(e).__name__}: {e}"[:500], session_id=session["id"])
+        route = sub.route.revision if sub.route else ""
         try:
             await asyncio.wait_for(sub.done_event.wait(), limits.agent_timeout_s)
         except asyncio.TimeoutError:
             await mgr.stop(sub.id)
-            return AgentResult(timed_out=True, cost_usd=sub.usage.cost_usd)
+            return AgentResult(timed_out=True, cost_usd=sub.usage.cost_usd, session_id=session["id"],
+                               fallbacks=sub.escalations, attempts=list(sub.attempts), model=sub.model,
+                               policy_revision=route)
         history = [m.model_dump() for m in sub.history]
         if not history:
             from ..config import data_dir
@@ -238,7 +259,8 @@ def builtin_agent(app: "AppState", *, tier: str = "claude.standard", effort: str
         calls = sum(1 for m in history for b in (m.get("content") or []) if isinstance(b, dict) and b.get("type") == "tool_use")
         return AgentResult(error=sub.error or "", cost_usd=sub.usage.cost_usd, tool_calls=calls,
                            input_tokens=sub.usage.total_input, output_tokens=sub.usage.output_tokens,
-                           log=json.dumps(history, default=str))
+                           log=json.dumps(history, default=str), session_id=session["id"], fallbacks=sub.escalations,
+                           attempts=list(sub.attempts), model=sub.model, policy_revision=route)
 
     return run
 
@@ -353,3 +375,258 @@ def render_markdown(results: list[Trial], k: int) -> str:
                    f"{r['mean_wall_s']:.0f}s | {r['mean_tool_calls']:.0f} | {r['mean_helper_calls']:.1f} | "
                    f"{b['agent']} / {b['environment']} / {b['grader']} |")
     return "\n".join(out)
+
+
+# ------------------------------------------------------------------ compare-routing (D7)
+# Pinned baseline tier vs `tier = "auto"` through the real router, paired and interleaved by task and trial. The
+# preview (plan_compare) needs only the config; nothing here builds a model client unless compare_routing runs.
+
+COMPARE_SCHEMA = "gdw.eval.compare-routing/1"
+SMALL_SAMPLE_PAIRS = 10
+PINNED, ROUTED = "pinned", "routed"
+
+
+def split_tasks(tasks: list[LoadedTask]) -> tuple[list[LoadedTask], list[dict]]:
+    """The deterministic code subset of a suite, and why each other task is left out."""
+    keep, out = [], []
+    for t in tasks:
+        g = t.task.grader
+        why = []
+        if t.task.kind == "unity" or g.unity is not None:
+            why.append("needs Unity replay")
+        if g.rubric:
+            why.append("needs a paid rubric grader")
+        if not why and not (g.command or g.checks or g.differential):
+            why.append("no deterministic grader")
+        if why:
+            out.append({"task": t.task.id, "reason": "; ".join(why)})
+        else:
+            keep.append(t)
+    return keep, out
+
+
+def _active_cap(cfg) -> float | None:
+    return float(cfg.delegation.get("subagent_spend_cap_usd") or 0) or None
+
+
+def plan_compare(cfg, tasks: list[LoadedTask], *, baseline_tier: str, job_type: str, effort: str, trials: int,
+                 max_spend_usd: float) -> dict:
+    """What a paid run would do, from the config and the loaded suite only. Raises ValueError on a bad request."""
+    from . import routing_policy
+
+    if trials < 1:
+        raise ValueError("--trials must be at least 1")
+    if max_spend_usd <= 0:
+        raise ValueError("--max-spend-usd must be above 0")
+    if job_type not in routing_policy.JOB_TYPES:
+        raise ValueError(f"--job-type takes {', '.join(routing_policy.JOB_TYPES)}")
+    base_model = cfg.resolve(baseline_tier)
+    if base_model not in cfg.models:
+        raise ValueError(f"unknown --baseline-tier {baseline_tier!r}: no model {base_model!r} is configured")
+    provider = cfg.models[base_model].provider
+    if baseline_tier in routing_policy.PINNED_TIERS:
+        raise ValueError(f"{baseline_tier} runs outside the API loop; pick an API tier")
+    keep, excluded = split_tasks(tasks)
+    rows = []
+    for t in keep:  # the router sees the prompt the agent sees, never the graders
+        r = routing_policy.select(cfg, job_type=job_type, effort=effort, instructions=TASK_PREAMBLE + t.prompt,
+                                  provider=provider)
+        rows.append({"task": t.task.id, "baseline_model": base_model, "routed_tier": r.tier, "routed_model": r.model,
+                     "reason": r.reason, "check": r.check, "fallbacks": list(r.chain), "revision": r.revision,
+                     "changed": r.model != base_model, "max_cost_usd": t.task.limits.max_cost_usd})
+    cap = _active_cap(cfg)
+    per_trial = [min([x for x in (row["max_cost_usd"], max_spend_usd, cap) if x]) for row in rows]
+    return {"schema": COMPARE_SCHEMA, "job_type": job_type, "baseline_tier": baseline_tier, "baseline_model": base_model,
+            "effort": effort, "trials": trials, "eligible": rows, "excluded": excluded,
+            "arm_runs": 2 * len(rows) * trials, "max_spend_usd": max_spend_usd, "active_cap_usd": cap,
+            "per_trial_cap_usd": max(per_trial) if per_trial else None,
+            "no_selection_change": bool(rows) and not any(r["changed"] for r in rows)}
+
+
+def render_plan(plan: dict) -> str:
+    L = [f"gdw eval compare-routing: PREVIEW (no model client, trial or grader was started)", "",
+         f"job type:        {plan['job_type']}",
+         f"pinned arm:      {plan['baseline_tier']} -> {plan['baseline_model']}",
+         f"routed arm:      tier=auto (job type {plan['job_type']}), same effort ({plan['effort']}), prompt, tools and graders",
+         f"eligible tasks:  {len(plan['eligible'])}   trials per arm: {plan['trials']}   "
+         f"arm runs: {plan['arm_runs']} (paired, interleaved)"]
+    for r in plan["eligible"]:
+        fb = f", fallbacks {', '.join(r['fallbacks'])}" if r["fallbacks"] else ""
+        L.append(f"  {r['task']}: pinned {r['baseline_model']}; routed {r['routed_tier']} -> {r['routed_model']} "
+                 f"({r['reason']}{fb}){'' if r['changed'] else ' [same model]'}")
+    if plan["no_selection_change"]:
+        L.append("  The router picks the baseline model for every eligible task: no selection change to measure.")
+    L.append(f"excluded tasks:  {len(plan['excluded'])}")
+    for x in plan["excluded"]:
+        L.append(f"  {x['task']}: {x['reason']}")
+    cap = f"${plan['active_cap_usd']:.2f}" if plan["active_cap_usd"] else "none"
+    L += ["", f"spend ceiling:   ${plan['max_spend_usd']:.2f} recorded spend across both arms (admission stops at it; "
+          "the last request may overrun it)",
+          f"per-run cap:     the smaller of the task's max_cost_usd, the remaining allowance and the active "
+          f"subagent cap ({cap}); at most ${plan['per_trial_cap_usd'] or 0:.2f} for any one run",
+          "", "Nothing was run. Add --approve-paid to run it; that makes paid model calls on your accounts."]
+    return "\n".join(L)
+
+
+def ledger_spend(app: "AppState", session_ids: list[str]) -> dict:
+    """Full-precision ledger totals for the trial sessions: failed attempts and fallbacks included."""
+    ids = [i for i in dict.fromkeys(session_ids) if i]
+    if not ids:
+        return {"cost_usd": 0.0, "requests": 0, "failed": 0, "models": []}
+    q = ",".join("?" * len(ids))
+    r = app.db.one(f"SELECT COALESCE(SUM(cost_usd),0) c, COUNT(*) n, COALESCE(SUM(1-ok),0) f FROM usage_records "
+                   f"WHERE session_id IN ({q})", ids)
+    models = [m["model"] for m in app.db.all(f"SELECT DISTINCT model FROM usage_records WHERE session_id IN ({q}) "
+                                             "ORDER BY model", ids)]
+    return {"cost_usd": float(r["c"]), "requests": int(r["n"]), "failed": int(r["f"]), "models": models}
+
+
+def _usable(rec: dict | None) -> bool:
+    """A trial that says something about the model: not an environment or grader failure."""
+    return rec is not None and rec["blame"] not in ("environment", "grader")
+
+
+async def compare_routing(app: "AppState", tasks: list[LoadedTask], *, baseline_tier: str, job_type: str,
+                          effort: str, trials: int, max_spend_usd: float, out_dir: Path,
+                          repo: Path | None = None) -> dict:
+    """Paid mode: run both arms, task by task and trial by trial, and write compare-routing.json / .md."""
+    plan = plan_compare(app.config, tasks, baseline_tier=baseline_tier, job_type=job_type, effort=effort,
+                        trials=trials, max_spend_usd=max_spend_usd)
+    keep, _ = split_tasks(tasks)
+    provider = app.config.model(plan["baseline_model"]).provider
+    sessions: list[str] = []
+
+    def allowance() -> float:
+        return max_spend_usd - ledger_spend(app, sessions)["cost_usd"]
+
+    arms: dict[str, AgentFn] = {
+        PINNED: builtin_agent(app, tier=baseline_tier, effort=effort, job_type=job_type, provider=provider,
+                              allowance=allowance),
+        ROUTED: builtin_agent(app, tier="auto", effort=effort, job_type=job_type, provider=provider,
+                              allowance=allowance)}
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pairs: list[dict] = []
+    stopped = False
+    for t in keep:
+        for n in range(1, trials + 1):
+            pair: dict = {"task": t.task.id, "trial": n, PINNED: None, ROUTED: None,
+                          "order": [PINNED, ROUTED] if n % 2 else [ROUTED, PINNED]}  # alternate who goes first
+            pairs.append(pair)
+            for arm in pair["order"]:
+                if allowance() <= 0:
+                    stopped = True
+                    break
+                box: list[AgentResult] = []
+
+                async def captured(prompt, tree, limits, _fn=arms[arm], _box=box):
+                    r = await _fn(prompt, tree, limits)
+                    _box.append(r)
+                    if r.session_id:
+                        sessions.append(r.session_id)
+                    return r
+
+                trial = await run_trial(t, arm, captured, n, out_dir, repo=repo)
+                res = box[0] if box else AgentResult()
+                led = ledger_spend(app, [res.session_id])
+                pair[arm] = {**asdict(trial), "session_id": res.session_id, "spend_usd": led["cost_usd"],
+                             "requests": led["requests"], "failed_requests": led["failed"],
+                             "ledger_models": led["models"], "fallbacks": res.fallbacks, "attempts": res.attempts,
+                             "policy_revision": res.policy_revision,
+                             "stopped_at_cap": "BudgetExceeded" in res.error}
+            if stopped:
+                break
+        if stopped:
+            break
+    report = build_compare_report(plan, pairs, stopped=stopped, spent=ledger_spend(app, sessions))
+    (out_dir / "compare-routing.json").write_text(json.dumps(report, indent=1, default=str), encoding="utf-8")
+    (out_dir / "compare-routing.md").write_text(render_compare_markdown(report), encoding="utf-8")
+    return report
+
+
+def _trial_from(rec: dict) -> Trial:
+    keys = Trial.__dataclass_fields__
+    return Trial(**{k: rec[k] for k in keys if k in rec})
+
+
+def build_compare_report(plan: dict, pairs: list[dict], *, stopped: bool, spent: dict) -> dict:
+    k, planned = plan["trials"], len(plan["eligible"]) * plan["trials"]
+    arm_recs = {a: [p[a] for p in pairs if p[a] is not None] for a in (PINNED, ROUTED)}
+    complete = [p for p in pairs if p[PINNED] and p[ROUTED]]
+    valid = [p for p in complete if _usable(p[PINNED]) and _usable(p[ROUTED])]
+    arms = {}
+    for a, recs in arm_recs.items():
+        summ = summarize([_trial_from(r) for r in recs], k)
+        arms[a] = {"trials": len(recs), "passed": sum(r["passed"] for r in recs),
+                   "pass@1": summ[0]["pass@1"] if summ else None, f"pass@{k}": summ[0][f"pass@{k}"] if summ else None,
+                   "spend_usd": sum(r["spend_usd"] for r in recs), "requests": sum(r["requests"] for r in recs),
+                   "failed_requests": sum(r["failed_requests"] for r in recs),
+                   "fallbacks": sum(r["fallbacks"] for r in recs),
+                   "wall_s": round(sum(r["wall_s"] for r in recs), 1),
+                   "environment_failures": sum(r["blame"] == "environment" for r in recs),
+                   "grader_failures": sum(r["blame"] == "grader" for r in recs),
+                   "models": sorted({m for r in recs for m in r["ledger_models"]})}
+    n = len(valid)
+    pp, rp = sum(p[PINNED]["passed"] for p in valid), sum(p[ROUTED]["passed"] for p in valid)
+    pinned_spend, routed_spend = (sum(p[a]["spend_usd"] for p in valid) for a in (PINNED, ROUTED))
+    paired = {"pairs": n, "pinned_pass_rate": pp / n if n else None, "routed_pass_rate": rp / n if n else None,
+              "both_pass": sum(p[PINNED]["passed"] and p[ROUTED]["passed"] for p in valid),
+              "both_fail": sum(not p[PINNED]["passed"] and not p[ROUTED]["passed"] for p in valid),
+              "only_pinned_passes": sum(p[PINNED]["passed"] and not p[ROUTED]["passed"] for p in valid),
+              "only_routed_passes": sum(p[ROUTED]["passed"] and not p[PINNED]["passed"] for p in valid),
+              "pinned_spend_usd": pinned_spend, "routed_spend_usd": routed_spend,
+              "spend_difference_usd": routed_spend - pinned_spend}
+    changed = sum(1 for r in arm_recs[ROUTED] if any(a["model"] != plan["baseline_model"] for a in r["attempts"]))
+    notes = []
+    if len(complete) < planned:
+        notes.append(f"incomplete: {len(complete)} of {planned} planned pairs finished"
+                     + (" (stopped at the spend threshold)" if stopped else ""))
+    if len(valid) < len(complete):
+        notes.append(f"{len(complete) - len(valid)} pair(s) left out of the comparison for an environment or grader failure")
+    if 0 < n < SMALL_SAMPLE_PAIRS:
+        notes.append(f"small sample: {n} valid pair(s); differences are not evidence")
+    if not n:
+        savings = "No valid pairs finished, so there is nothing to compare."
+    elif pp != rp:
+        savings = (f"Pass rates differ (pinned {pp}/{n}, routed {rp}/{n}), so no savings at the same pass rate is "
+                   "claimed.")
+    elif plan["no_selection_change"] and changed == 0:
+        savings = "No selection change: the router used the baseline model throughout, so there are no savings to claim."
+    else:
+        d = pinned_spend - routed_spend
+        pct = f" ({d / pinned_spend:.0%} of the pinned spend)" if pinned_spend else ""
+        savings = (f"Savings at the same pass rate ({pp}/{n} both arms): ${d:.4f}{pct} on {n} pair(s)."
+                   if d >= 0 else
+                   f"Same pass rate ({pp}/{n} both arms), but the routed arm cost ${-d:.4f} more: no savings.")
+    return {"schema": COMPARE_SCHEMA, "plan": plan, "arms": arms, "paired": paired, "pairs": pairs,
+            "complete_pairs": len(complete), "planned_pairs": planned, "stopped_at_spend_threshold": stopped,
+            "spend_threshold_usd": plan["max_spend_usd"], "recorded_spend_usd": spent["cost_usd"],
+            "selection_changed_trials": changed, "savings": savings, "notes": notes,
+            "policy_revisions": sorted({r["policy_revision"] for r in arm_recs[ROUTED] if r["policy_revision"]})}
+
+
+def render_compare_markdown(rep: dict) -> str:
+    plan, k = rep["plan"], rep["plan"]["trials"]
+    L = [f"# Routing comparison: {plan['baseline_tier']} vs auto ({plan['job_type']})", "",
+         f"Pinned: `{plan['baseline_model']}`. Routed: `tier=auto`, policy revision "
+         f"{', '.join(rep['policy_revisions']) or 'n/a'}. Effort {plan['effort']}, {k} trial(s) per task and arm, "
+         f"{len(plan['eligible'])} task(s). Spend is read from the usage ledger and includes failed attempts and fallbacks.",
+         "", f"**{rep['savings']}**", ""]
+    L += [f"- {n}" for n in rep["notes"]]
+    L += ["", f"| Arm | Trials | Passed | pass@1 | pass@{k} | Spend | Requests (failed) | Fallbacks | Env / grader failures |",
+          "|---|---|---|---|---|---|---|---|---|"]
+    for a, r in rep["arms"].items():
+        p1 = f"{r['pass@1']:.0%}" if r["pass@1"] is not None else "n/a"
+        pk = f"{r[f'pass@{k}']:.0%}" if r[f"pass@{k}"] is not None else "n/a"
+        L.append(f"| {a} | {r['trials']} | {r['passed']} | {p1} | {pk} | ${r['spend_usd']:.4f} | "
+                 f"{r['requests']} ({r['failed_requests']}) | {r['fallbacks']} | "
+                 f"{r['environment_failures']} / {r['grader_failures']} |")
+    p = rep["paired"]
+    if p["pairs"]:
+        L += ["", f"Paired ({p['pairs']} valid pairs): pinned passes {p['pinned_pass_rate']:.0%}, routed "
+              f"{p['routed_pass_rate']:.0%}; both pass {p['both_pass']}, both fail {p['both_fail']}, only pinned "
+              f"{p['only_pinned_passes']}, only routed {p['only_routed_passes']}. Spend on these pairs: pinned "
+              f"${p['pinned_spend_usd']:.4f}, routed ${p['routed_spend_usd']:.4f} "
+              f"(difference ${p['spend_difference_usd']:+.4f})."]
+    L += ["", f"Recorded spend ${rep['recorded_spend_usd']:.4f} against the ${rep['spend_threshold_usd']:.2f} threshold "
+          "(admission stops once it is reached; the last request may overrun it)."]
+    return "\n".join(L) + "\n"

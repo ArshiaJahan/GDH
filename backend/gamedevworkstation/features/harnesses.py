@@ -24,12 +24,15 @@ from fastapi import APIRouter, FastAPI
 from ..procs import NEW_GROUP
 from ..agent.tools import GIT_WRITE_REFUSED, in_git_metadata
 from ..config import get_key, sessions_dir
+from ..core.effort import check_effort
 from ..core.types import (Message, TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock, Usage,
                           new_id)
 from ..providers.base import compute_cost
+from ..providers.registry import chat_result
 
 if TYPE_CHECKING:
     from ..app import AppState
+    from .tracing import Span
 
 READ_ONLY_SDK_TOOLS = {"Read", "Glob", "Grep", "LS", "WebSearch", "TodoWrite", "NotebookRead", "Task", "Agent"}
 # WebFetch is read-only too, but gate() first checks its URL: http(s) to a public host only, never this
@@ -51,6 +54,17 @@ RECAP_MESSAGES = 12
 RECAP_MESSAGE_CHARS = 400
 RECAP_SUMMARY_CHARS = 2000
 RECAP_MAX_CHARS = 6000
+
+
+def start_harness_span(app: AppState, harness: str, sid: str, run_id: str, model: str,
+                       effort: str | None, *, role: str = "main", job_id: str | None = None) -> Span:
+    return app.tracing.start(
+        "invoke_agent", category="harness", session_id=sid, run_id=run_id,
+        attrs={"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": role, "gdw.role": role,
+               "gdw.harness": harness, "gdw.visibility": "harness", "gen_ai.request.model": model,
+               **({"gdw.effort": effort} if effort is not None else {}),
+               **({"gdw.job.id": job_id} if job_id is not None else {})},
+    )
 
 
 def _cwd(session: dict) -> Path:
@@ -195,6 +209,10 @@ class Harnesses:
         self.app = app
 
     async def run(self, session: dict) -> None:
+        with self.app.usage.scope(session["id"]):
+            await self._run(session)
+
+    async def _run(self, session: dict) -> None:
         h = session["harness"]
         if h == "agent_sdk":
             await self._agent_sdk(session)
@@ -290,7 +308,7 @@ class Harnesses:
         profile = app.config.profile_for(s, "anthropic")
         if key := get_key("anthropic", profile):
             env["ANTHROPIC_API_KEY"] = key
-        # Session allowance (incl. "Resume anyway") and daily allowance; None only when no limit is set.
+        app.usage.check(sid)
         left = app.usage.headroom(sid)
         # No settings files at all (setting_sources=[]): a project's .claude/settings.json can carry
         # permission allow rules, hooks, env and statusLine commands, and the agent can write that file.
@@ -304,55 +322,76 @@ class Harnesses:
             hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[pre_tool_use], timeout=HOOK_TIMEOUT_S,
                                               on_failure="block")]})
         pending_results: list[ToolResultBlock] = []
+        run_id = f"main:{sid}"
+        check_effort(effort, token, run_id)
+        span = start_harness_span(app, "agent_sdk", sid, run_id, s["model"], effort)
         t0 = time.monotonic()
-        async for m in query(prompt=prompt_stream(), options=opts):
-            if isinstance(m, AssistantMessage):
-                if pending_results:
-                    app.store.add_message(sid, Message(role="user", content=pending_results, meta={"tool_results": True}))
-                    pending_results = []
-                blocks: list[Any] = []
-                for b in m.content:
-                    if isinstance(b, SText):
-                        blocks.append(TextBlock(text=b.text))
-                    elif isinstance(b, SThink):
-                        blocks.append(ThinkingBlock(thinking=b.thinking, signature=getattr(b, "signature", None),
-                                                    provider="anthropic"))
-                    elif isinstance(b, SUse):
-                        blocks.append(ToolUseBlock(id=b.id, name=b.name, input=b.input))
-                        app.bus.publish("tool.started", {"tool_use_id": b.id, "name": b.name, "input": b.input}, sid)
-                if blocks:
-                    app.store.add_message(sid, Message(role="assistant", content=blocks,
-                                                       meta={"model": m.model, "effort": effort, "harness": "agent_sdk"}))
-            elif isinstance(m, UserMessage) and isinstance(m.content, list):
-                for b in m.content:
-                    if isinstance(b, SResult):
-                        path = proposed_edits.pop(b.tool_use_id, None)
-                        if path is not None and not b.is_error:
-                            touched.append(path)
-                        text = b.content if isinstance(b.content, str) else json.dumps(b.content)[:20000]
-                        pending_results.append(ToolResultBlock.text(b.tool_use_id, text or "(no output)",
-                                                                    is_error=bool(b.is_error)))
-                        app.bus.publish("tool.finished", {"tool_use_id": b.tool_use_id, "is_error": bool(b.is_error),
-                                                          "output": (text or "")[:4000]}, sid)
-            elif isinstance(m, ResultMessage):
-                if pending_results:
-                    app.store.add_message(sid, Message(role="user", content=pending_results, meta={"tool_results": True}))
-                    pending_results = []
-                u = m.usage or {}
-                usage = Usage(input_tokens=u.get("input_tokens", 0), output_tokens=u.get("output_tokens", 0),
-                              cache_read_tokens=u.get("cache_read_input_tokens", 0),
-                              cache_write_tokens=u.get("cache_creation_input_tokens", 0))
-                usage.cost_usd = m.total_cost_usd if m.total_cost_usd is not None else compute_cost(mcfg, usage)
-                app.usage.record(provider="anthropic", model=s["model"], usage=usage, session_id=sid, profile=profile,
-                                 role="main", run_id=f"main:{sid}", effort=effort,
-                                 latency_ms=m.duration_ms or int((time.monotonic() - t0) * 1000),
-                                 ok=not m.is_error)
-                app.store.update(sid, settings={"agent_sdk_session": m.session_id})
-                for f in dict.fromkeys(touched):
-                    app.changes.notify(sid, f, "anthropic", s["model"])
-                if m.is_error and m.result:
-                    app.store.add_message(sid, Message(role="assistant", content=[TextBlock(text=str(m.result))],
-                                                       meta={"error": True, "error_kind": "harness"}))
+        recorded = False
+        outcome = "process_exit"
+        try:
+            async for m in query(prompt=prompt_stream(), options=opts):
+                if isinstance(m, AssistantMessage):
+                    if pending_results:
+                        app.store.add_message(sid, Message(role="user", content=pending_results, meta={"tool_results": True}))
+                        pending_results = []
+                    blocks: list[Any] = []
+                    for b in m.content:
+                        if isinstance(b, SText):
+                            blocks.append(TextBlock(text=b.text))
+                        elif isinstance(b, SThink):
+                            blocks.append(ThinkingBlock(thinking=b.thinking, signature=getattr(b, "signature", None),
+                                                        provider="anthropic"))
+                        elif isinstance(b, SUse):
+                            blocks.append(ToolUseBlock(id=b.id, name=b.name, input=b.input))
+                            app.bus.publish("tool.started", {"tool_use_id": b.id, "name": b.name, "input": b.input}, sid)
+                    if blocks:
+                        app.store.add_message(sid, Message(role="assistant", content=blocks,
+                                                           meta={"model": m.model, "effort": effort, "harness": "agent_sdk"}))
+                elif isinstance(m, UserMessage) and isinstance(m.content, list):
+                    for b in m.content:
+                        if isinstance(b, SResult):
+                            path = proposed_edits.pop(b.tool_use_id, None)
+                            if path is not None and not b.is_error:
+                                touched.append(path)
+                            text = b.content if isinstance(b.content, str) else json.dumps(b.content)[:20000]
+                            pending_results.append(ToolResultBlock.text(b.tool_use_id, text or "(no output)",
+                                                                        is_error=bool(b.is_error)))
+                            app.bus.publish("tool.finished", {"tool_use_id": b.tool_use_id, "is_error": bool(b.is_error),
+                                                              "output": (text or "")[:4000]}, sid)
+                elif isinstance(m, ResultMessage) and not recorded:
+                    if pending_results:
+                        app.store.add_message(sid, Message(role="user", content=pending_results, meta={"tool_results": True}))
+                        pending_results = []
+                    u = m.usage or {}
+                    usage = Usage(input_tokens=u.get("input_tokens", 0), output_tokens=u.get("output_tokens", 0),
+                                  cache_read_tokens=u.get("cache_read_input_tokens", 0),
+                                  cache_write_tokens=u.get("cache_creation_input_tokens", 0))
+                    usage.cost_usd = m.total_cost_usd if m.total_cost_usd is not None else compute_cost(mcfg, usage)
+                    chat_result(span, usage=usage if u else None)
+                    span.end("error" if m.is_error else "ok")
+                    recorded = True
+                    app.usage.record(provider="anthropic", model=s["model"], usage=usage, session_id=sid, profile=profile,
+                                     role="main", run_id=run_id, effort=effort,
+                                     latency_ms=m.duration_ms or int((time.monotonic() - t0) * 1000),
+                                     ok=not m.is_error)
+                    app.store.update(sid, settings={"agent_sdk_session": m.session_id})
+                    for f in dict.fromkeys(touched):
+                        app.changes.notify(sid, f, "anthropic", s["model"])
+                    if m.is_error and m.result:
+                        app.store.add_message(sid, Message(role="assistant", content=[TextBlock(text=str(m.result))],
+                                                           meta={"error": True, "error_kind": "harness"}))
+        except asyncio.CancelledError:
+            outcome = "cancelled"
+            raise
+        except Exception:
+            outcome = "error"
+            raise
+        finally:
+            if not recorded:
+                span.end(outcome)
+                app.usage.record(provider="anthropic", model=s["model"], usage=Usage(), session_id=sid,
+                                 profile=profile, run_id=run_id, effort=effort, ok=False, error_kind="unknown_usage",
+                                 latency_ms=int((time.monotonic() - t0) * 1000))
 
     # ------------------------------------------------------------------- codex cli
 
@@ -364,7 +403,7 @@ class Harnesses:
         cwd = _cwd(s)
         m = app.config.resolve(s["model"])
         model = m if app.config.model(m).provider == "openai" else app.config.resolve("codex.cli")
-        effort, _token = await app.runner._effective_effort(s)  # above high asks, like every other path
+        effort, token = await app.runner._effective_effort(s)  # above high asks, like every other path
         if effort == "cancel":
             app.store.add_message(sid, Message.assistant("Cancelled: effort above high wasn't approved."))
             return
@@ -385,38 +424,48 @@ class Harnesses:
                 "--sandbox", sandbox, "-C", str(cwd)]
         args = ["codex", "exec", *base, "resume", thread, "-"] if thread else ["codex", "exec", *base, "-"]
         # A new thread (copy, fork, harness switch) hasn't seen the earlier turns: recap them.
-        code, thread_id, err = await self._codex_turn(s, args, self._prompt(sid, recap=not thread), model, effort)
+        code, thread_id, err = await self._codex_turn(s, args, self._prompt(sid, recap=not thread), model, effort,
+                                                     approval_token=token)
         if code != 0 and thread:
             # Resume failed (old thread, CLI change): start fresh with a short recap.
             code, thread_id, err = await self._codex_turn(s, ["codex", "exec", *base, "-"],
-                                                          self._prompt(sid, recap=True), model, effort)
+                                                          self._prompt(sid, recap=True), model, effort,
+                                                          approval_token=token)
         if thread_id:
             app.store.update(sid, settings={"codex_thread": thread_id})
         if code != 0:
             app.store.add_message(sid, Message(role="assistant", content=[TextBlock(text=f"Codex CLI exited {code}: {err[-800:]}")],
                                                meta={"error": True, "error_kind": "harness"}))
 
-    async def _codex_turn(self, s: dict, args: list[str], prompt: str, model: str, effort: str) -> tuple[int, str | None, str]:
+    async def _codex_turn(self, s: dict, args: list[str], prompt: str, model: str, effort: str,
+                          *, approval_token: str | None = None) -> tuple[int, str | None, str]:
         app, sid = self.app, s["id"]
         env = dict(os.environ)
         profile = app.config.profile_for(s, "openai")
         if key := get_key("openai", profile):
             env["CODEX_API_KEY"] = key
+        app.usage.check(sid)
+        run_id = f"main:{sid}"
+        check_effort(effort, approval_token, run_id)
         tier = "codex.cli" if model == app.config.resolve("codex.cli") else None
         jid = app.jobs.start(sid, "codex_cli", f"Codex CLI turn · {app.config.label(model, tier)}",
                              {"model": model, "tier": tier})
-        proc = await asyncio.create_subprocess_exec(*args, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                                                    stderr=asyncio.subprocess.PIPE, env=env, **NEW_GROUP,
-                                                    limit=2**24)
-        app.jobs.procs[jid] = proc
-        assert proc.stdin and proc.stdout and proc.stderr
-        proc.stdin.write(prompt.encode())
-        await proc.stdin.drain()
-        proc.stdin.close()
-        thread_id = None
         mcfg = app.config.model(model)
+        span = start_harness_span(app, "codex_cli", sid, run_id, model, effort, job_id=jid)
         t0 = time.monotonic()
+        recorded = False
+        outcome = "process_exit"
+        proc = None
+        thread_id = None
         try:
+            proc = await asyncio.create_subprocess_exec(*args, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+                                                        stderr=asyncio.subprocess.PIPE, env=env, **NEW_GROUP,
+                                                        limit=2**24)
+            app.jobs.procs[jid] = proc
+            assert proc.stdin and proc.stdout and proc.stderr
+            proc.stdin.write(prompt.encode("utf-8"))
+            await proc.stdin.drain()
+            proc.stdin.close()
             async for line in proc.stdout:
                 try:
                     ev = json.loads(line)
@@ -445,24 +494,43 @@ class Harnesses:
                             fp = fp if fp.is_absolute() else _cwd(s) / fp
                             app.changes.notify(sid, fp, "openai", model)  # indexes artifacts for Outputs
                         app.bus.publish("file.changed", {"path": str(_cwd(s))}, sid)
-                elif t == "turn.completed":
+                elif t in ("turn.completed", "turn.failed") and not recorded:
                     u = ev.get("usage") or {}
                     cached = u.get("cached_input_tokens", 0)
                     usage = Usage(input_tokens=max(u.get("input_tokens", 0) - cached, 0), cache_read_tokens=cached,
                                   output_tokens=u.get("output_tokens", 0), reasoning_tokens=u.get("reasoning_output_tokens", 0))
                     usage.cost_usd = compute_cost(mcfg, usage)
+                    ok = t == "turn.completed"
+                    chat_result(span, usage=usage if u else None)
+                    span.end("ok" if ok else "error")
+                    recorded = True
                     app.usage.record(provider="openai", model=model, usage=usage, session_id=sid, role="main", profile=profile,
-                                     run_id=f"main:{sid}", effort=effort, latency_ms=int((time.monotonic() - t0) * 1000))
+                                     run_id=run_id, effort=effort, ok=ok, error_kind="unknown_usage" if not ok and not u else None,
+                                     latency_ms=int((time.monotonic() - t0) * 1000))
             await proc.wait()
-            err = (await proc.stderr.read()).decode(errors="replace")
+            err = (await proc.stderr.read()).decode("utf-8", errors="replace")
+        except asyncio.CancelledError:
+            outcome = "cancelled"
+            raise
+        except Exception:
+            outcome = "error"
+            raise
         finally:
             app.jobs.procs.pop(jid, None)
-            if proc.returncode is None:  # cancelled, budget hit or a store error: don't leave codex running
+            code = proc.returncode if proc is not None else None
+            if not recorded:
+                span.end(outcome)
+            if proc is not None and code is None:  # cancellation or a store error
                 from ..services import _kill_tree
 
                 _kill_tree(proc)
-        app.jobs.finish(jid, "done" if proc.returncode == 0 else "failed", exit_code=proc.returncode)
-        return proc.returncode or 0, thread_id, err
+            app.jobs.finish(jid, "cancelled" if outcome == "cancelled" else "done" if code == 0 else "failed",
+                            exit_code=code)
+            if not recorded:
+                app.usage.record(provider="openai", model=model, usage=Usage(), session_id=sid, role="main",
+                                 profile=profile, run_id=run_id, effort=effort, ok=False, error_kind="unknown_usage",
+                                 latency_ms=int((time.monotonic() - t0) * 1000))
+        return code or 0, thread_id, err
 
 
 def register(app_: FastAPI, api: APIRouter, S: "AppState") -> None:

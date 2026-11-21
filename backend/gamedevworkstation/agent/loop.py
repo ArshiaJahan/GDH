@@ -6,23 +6,26 @@ import datetime as dt
 import json
 import logging
 import time
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
 from ..core.effort import EffortApprovalRequired
 from ..core.media import stub_rejected_images
-from ..core.types import ABOVE_HIGH, ChatRequest, Message, TextBlock, ToolUseBlock, new_id
+from ..core.types import ABOVE_HIGH, ChatRequest, Message, TextBlock, ToolUseBlock, Usage, new_id
 from ..features.hookbus import HookEvent, TurnState, run_post_tool, run_pre_tool
 from ..features.prompt_improver import inject as pi_inject
 from ..legacy import migrate_project_dir
 from ..providers import base as _pb
 from ..providers.base import ProviderError
+from ..providers.registry import attempt_failure
 from ..skills import turn_skill_segments
 from ..usage import BudgetExceeded
 from . import context as cx
-from .tools import ToolContext, ToolOutput, wrap_untrusted
+from .tools import ToolContext, ToolOutput, finish_tool_span, tool_span, wrap_untrusted
 
 if TYPE_CHECKING:
     from ..app import AppState
+    from ..features.tracing import Span
 
 BASE_SYSTEM = """You are the main agent in GameDevWorkstation, a personal agent harness on the user's Mac.
 You plan work, do small things yourself, and delegate larger or parallel work to subagents
@@ -43,6 +46,7 @@ Rules:
 
 MAX_MAIN_TURNS = 60
 log = logging.getLogger("gamedevworkstation.agent")
+_harness_effort: ContextVar[tuple[str, bool] | None] = ContextVar("harness_effort", default=None)
 
 # Above-high estimate for the main session's approval card (a heuristic, shown as an estimate).
 # - Baseline turn (one model call of the loop): the mean of this session's last 10 successful
@@ -61,6 +65,8 @@ ESTIMATE_SAMPLE = 10
 class AgentRunner:
     def __init__(self, app: "AppState"):
         self.app = app
+        # Provider clients are lazy and share the app recorder even for calls outside the loop.
+        app.providers.tracing = app.tracing
         self.running: dict[str, asyncio.Task] = {}
 
     def is_running(self, sid: str) -> bool:
@@ -151,28 +157,47 @@ class AgentRunner:
 
     async def _run(self, sid: str) -> None:
         app = self.app
-        import time as _t
+        with app.usage.scope(sid), app.tracing.span(
+            "session_turn", category="turn", session_id=sid, run_id=f"main:{sid}",
+            attrs={"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": "main", "gdw.role": "main"},
+        ) as span:
+            await self._run_turn(sid, span)
 
-        app.turn_started[sid] = _t.time()  # job_budget_usd counts spend from here
-        app.store.update(sid, status="running", last_error=None)
+    async def _run_turn(self, sid: str, span: Span) -> None:
+        app = self.app
+
+        app.turn_started[sid] = time.time()  # job_budget_usd counts spend from here
+        session = app.store.update(sid, status="running", last_error=None)
+        if not session:
+            span.end("incomplete")
+            return
+        harness = session["harness"]
+        span.set_attributes({"gdw.harness": harness, "gen_ai.request.model": app.config.resolve(session["model"])})
         turn = app.hooks.begin_turn(sid, app.turn_started[sid])  # state the turn's hooks share
         ok = False
+        outcome = "error"
         error_kind: str | None = None  # for the turn_end hook event
         error = ""
         try:
-            await self._loop(sid)
+            outcome = await self._loop(sid)
             ok = True
         except asyncio.CancelledError:
+            outcome = "cancelled"
             error_kind = "cancelled"
             app.approvals.expire_session(sid)
             app.bus.publish("agent.stopped", {"reason": "cancelled"}, sid)
         except BudgetExceeded as e:
+            outcome = "budget_exceeded"
             error_kind, error = "budget", str(e)
             self._error_message(sid, str(e), kind="budget")
         except cx.ContextFull as e:
             error_kind, error = "context_full", str(e)
             self._error_message(sid, str(e), kind="error")
         except Exception as e:  # noqa: BLE001
+            if isinstance(e, EffortApprovalRequired):
+                outcome = "effort_declined"
+            elif harness != "builtin":
+                outcome = "harness_failure"
             error = str(e)
             if getattr(e, "no_key", None):  # no key yet (first run): a plain note; the chat adds a Settings button
                 error_kind = "no_key"
@@ -186,6 +211,9 @@ class AgentRunner:
             if ok and (titler := app.extensions.get("titler")):
                 titler.schedule(sid)  # type: ignore[attr-defined]  # names the session; never blocks
             await self._turn_end(sid, turn, ok, error_kind, error)
+            if outcome not in ("ok", "paused", "prompt_improver_pause", "unknown"):
+                span.set_attributes({"error.type": outcome})
+            span.end(outcome)
 
     async def _turn_end(self, sid: str, turn: TurnState, ok: bool, error_kind: str | None, error: str) -> None:
         """Fire turn_end (every harness) and drop the turn's state. Never raises; with no
@@ -256,9 +284,11 @@ class AgentRunner:
             return effort, res["token"]
         if res["status"] == "downgraded":
             return "high", None
+        if _harness_effort.get() == (session["id"], False):
+            _harness_effort.set((session["id"], True))
         return "cancel", None  # Cancel on the card stops the turn
 
-    async def _loop(self, sid: str) -> None:
+    async def _loop(self, sid: str) -> str:
         app = self.app
         app.store.repair_dangling_tool_calls(sid)
         if pre := app.extensions.get("pre_turn"):
@@ -266,8 +296,7 @@ class AgentRunner:
         session = app.store.get(sid)
         migrate_project_dir(session.get("folder"))  # first use after the rename (legacy.py)
         if session["harness"] != "builtin" and (h := app.extensions.get("harnesses")):
-            await h.run(session)  # type: ignore[attr-defined]
-            return
+            return await self._run_harness(session, h)
         model = app.config.resolve(session["model"])
         mcfg = app.config.model(model)
         profile = app.config.profile_for(session, mcfg.provider)  # the session's key profile for this provider
@@ -276,7 +305,7 @@ class AgentRunner:
         effort, token = await self._effective_effort(session)
         if effort == "cancel":
             self._error_message(sid, "Cancelled: effort above high wasn't approved.", kind="cancelled")
-            return
+            return "effort_declined"
         ctx = ToolContext(app=app, session=session, run_id=run_id, role="main", provider=mcfg.provider, model=model)
         # Hooks (features/hookbus.py). Every hook call below first checks hooks.has(event), so with
         # no hook registered the loop does exactly what it did before hooks existed.
@@ -308,7 +337,7 @@ class AgentRunner:
                 app.bus.publish("prompt_improver.done", {"status": outcome.status, "reason": outcome.reason,
                                                          "message_id": pending.id}, sid)
             if outcome.status == "paused":
-                return
+                return "prompt_improver_pause"
             if not (outcome.context_text or outcome.execution_text):
                 outcome = None
         with_pi = (lambda h: pi_inject(h, outcome.message_id, outcome.context_text, outcome.execution_text)) \
@@ -341,6 +370,7 @@ class AgentRunner:
             req = ChatRequest(model=model, messages=history, system=system, tools=tools, effort=effort,
                               max_tokens=max_tokens, show_thinking=show_thinking, approval_token=token,
                               metadata={"run_id": run_id})
+            app.usage.check(sid)  # hooks or compaction may have spent since the early check
             try:
                 msg_id, resp = await self._stream_with_backoff(sid, profile, provider, req, mcfg.provider, model,
                                                                run_id, effort)
@@ -361,9 +391,11 @@ class AgentRunner:
             if resp.usage.total_input and sent:
                 factor = min(max(resp.usage.total_input / sent, 0.5), 3.0)
             fill_real = resp.usage.total_input / window
+            failed = resp.stop_reason == "error"
             app.usage.record(provider=mcfg.provider, model=model, usage=resp.usage, session_id=sid,
                              profile=profile, role="main", run_id=run_id, effort=effort,
-                             latency_ms=resp.latency_ms, context_fill=fill_real, rate_limits=resp.rate_limits)
+                             latency_ms=resp.latency_ms, context_fill=fill_real, rate_limits=resp.rate_limits,
+                             ok=not failed, error_kind="other" if failed else None)
             if resp.stop_reason == "context_window" and not overflow_retried:
                 # The reply ran out of window midway: drop the partial reply, compact, try once more.
                 app.bus.publish("message.failed", {"id": msg_id, "error": "context window full"}, sid)
@@ -389,9 +421,15 @@ class AgentRunner:
                                                     "'continue' to have it pick up where it stopped.")
                 elif resp.stop_reason == "context_window":
                     self._notice(sid, "context_window", self._full_text(model))
-                elif not calls and await self._pre_complete(ctx, turn):
-                    continue  # a gate failed: its message asks the model to fix it (counts toward MAX_MAIN_TURNS)
-                return
+                elif not calls:
+                    gate = await self._pre_complete(ctx, turn)
+                    if gate == "retry":
+                        continue  # the gate asks the model to fix its reply
+                    if gate == "gate_exhausted":
+                        return gate
+                if resp.stop_reason in ("refusal", "error"):
+                    return resp.stop_reason
+                return "ok"
             ctx.message_id = msg_id
             offered = {t.name for t in tools}
             results = await asyncio.gather(*(self._run_tool(ctx, c, offered) for c in calls))
@@ -400,9 +438,52 @@ class AgentRunner:
             ctx.session = session
             if turn.stop:  # a hook ended the turn (TurnState.request_stop, e.g. a tool-failure breaker)
                 self._notice(sid, turn.stop["kind"], turn.stop["text"])
-                return
+                return "paused"
         self._notice(sid, "turn_limit", f"Paused after {MAX_MAIN_TURNS} model calls in one turn (the per-turn "
                                         "limit). Say 'continue' to keep going.")
+        return "paused"
+
+    async def _run_harness(self, session: dict, harness: Any) -> str:
+        """Keep the shared approval outcome scoped to this external dispatch."""
+        sid = session["id"]
+        decision = _harness_effort.set((sid, False))
+        started_at = time.time()
+        try:
+            await harness.run(session)
+            if _harness_effort.get() == (sid, True):
+                return "effort_declined"
+        finally:
+            _harness_effort.reset(decision)
+        ref = self.app.tracing.capture()
+        if ref is None or ref.span_id is None:
+            return "ok"
+        return self._harness_outcome(sid, session["harness"], started_at)
+
+    def _harness_outcome(self, sid: str, harness: str, started_at: float) -> str:
+        """Read outcomes from harnesses that handle failures and return normally."""
+        try:
+            if harness == "agent_sdk" and self.app.db.one("""
+                SELECT 1 AS failed FROM usage_records
+                WHERE run_id = ? AND ts >= ? AND session_id = ? AND provider = 'anthropic'
+                    AND role = 'main' AND feature = 'chat' AND ok = 0
+                LIMIT 1
+                """, [f"main:{sid}", started_at, sid]):
+                return "harness_failure"  # The SDK records ResultMessage.is_error even without result text.
+            row = self.app.db.one("""
+                SELECT CASE WHEN json_extract(meta, '$.notice') = 'prompt_improver'
+                            THEN 'prompt_improver_pause' ELSE 'harness_failure' END AS outcome
+                FROM messages
+                WHERE session_id = ? AND created_at >= ? AND role = 'assistant' AND
+                    CASE WHEN json_valid(meta) THEN
+                        json_extract(meta, '$.error_kind') IN ('harness', 'claude_login')
+                        OR (json_extract(meta, '$.notice') = 'prompt_improver' AND
+                            json_extract(meta, '$.outcome.status') = 'paused')
+                    END
+                ORDER BY created_at DESC LIMIT 1
+                """, [sid, started_at])
+        except Exception:  # noqa: BLE001 — an unavailable trace outcome must leave the turn alone
+            return "unknown"
+        return row["outcome"] if row else "ok"
 
     # -------------------------------------------------------------------- hooks
 
@@ -411,9 +492,8 @@ class AgentRunner:
         return any(m.role == "assistant" and not m.meta.get("notice") and not m.meta.get("error")
                    for m in self.app.store.messages(sid))
 
-    async def _pre_complete(self, ctx: ToolContext, turn: TurnState) -> bool:
-        """The model ended its turn: run the pre_complete gates. True = a gate failed and a message
-        asking the model to fix it was added (the caller continues the loop); False = end the turn.
+    async def _pre_complete(self, ctx: ToolContext, turn: TurnState) -> str | None:
+        """Distinguish a requested retry from a gate that needs human input.
 
         Every result becomes a gate_runs row (+ gate.result event). A `block` is a failing gate:
         while turn.retries[gate] < its max retries ([hooks] gate_max_retries, default 2), one
@@ -423,10 +503,10 @@ class AgentRunner:
         event. Plan only mode runs no gates (and max_tokens / context_window stops never get here)."""
         app, hooks, sid = self.app, self.app.hooks, ctx.session_id
         if not hooks.has("pre_complete"):
-            return False
+            return None
         session = app.store.get(sid) or ctx.session
         if session.get("mode") == "plan":
-            return False
+            return None
         ctx.session = session
         t0 = time.time()
         results = await hooks.fire(HookEvent("pre_complete", ctx, turn=turn))
@@ -445,7 +525,7 @@ class AgentRunner:
             self._notice(sid, "gate_exhausted", text + " Needs you.")
             app.bus.publish("gate.exhausted", {"gates": [r.id for r in exhausted],
                                                "reasons": {r.id: r.reason[:1000] for r in exhausted}}, sid)
-            return False
+            return "gate_exhausted"
         for r in failing:
             gid = r.id or "hook"
             attempt = turn.retries[gid] = turn.retries.get(gid, 0) + 1
@@ -455,7 +535,7 @@ class AgentRunner:
             app.store.add_message(sid, Message(role="user", content=[TextBlock(text=text)], meta={"gate": {
                 "id": gid, "status": "fail", "attempt": attempt, "max": hooks.max_retries(r), "hook": r.hook,
                 "level": r.level}}))
-        return bool(failing)
+        return "retry" if failing else None
 
     # ------------------------------------------------------------------ context
 
@@ -524,6 +604,7 @@ class AgentRunner:
             app.bus.publish("message.started", {"id": msg_id, "role": "assistant", "model": model,
                                                 "effort": effort}, sid)
             resp = None
+            usage: Usage | None = None
             try:
                 async for ev in provider.stream(req):
                     if ev.type == "text_delta":
@@ -535,21 +616,28 @@ class AgentRunner:
                                                              "name": ev.tool_use.name}, sid)
                     elif ev.type == "done":
                         resp = ev.response
-            except (ProviderError, EffortApprovalRequired) as e:
-                rate = getattr(e, "rate_limited", False)
-                app.usage.record(provider=prov_name, model=model, usage=_zero(), session_id=sid,
-                                 profile=profile, role="main", run_id=run_id,
-                                 effort=effort, ok=False,
-                                 error_kind="rate_limit" if rate else ("auth" if getattr(e, "auth", False) else "other"))
+                    elif ev.type == "usage":
+                        usage = ev.usage
+                if resp is None:
+                    raise ProviderError("stream ended without a final response")
+            except EffortApprovalRequired as e:
                 app.bus.publish("message.failed", {"id": msg_id, "error": str(e)}, sid)
-                if not rate or attempt == _pb.MAX_RATE_RETRIES:
+                raise
+            except (Exception, asyncio.CancelledError) as e:
+                failed_usage, error_kind = attempt_failure(e)
+                app.usage.record(provider=prov_name, model=model, usage=usage or failed_usage, session_id=sid,
+                                 profile=profile, role="main", run_id=run_id,
+                                 effort=effort, ok=False, error_kind=error_kind)
+                if not isinstance(e, ProviderError):
+                    raise
+                app.bus.publish("message.failed", {"id": msg_id, "error": str(e)}, sid)
+                if not e.rate_limited or attempt == _pb.MAX_RATE_RETRIES:
                     raise
                 wait = _pb.backoff_wait(e, delay)  # type: ignore[arg-type]
                 delay = min(delay * 2, _pb.BACKOFF_MAX_S)
                 await self._rate_limit_wait(sid, wait, attempt + 1)
                 app.usage.check(sid)  # a retry is a new paid call
                 continue
-            assert resp is not None
             return msg_id, resp
         raise RuntimeError("unreachable")
 
@@ -566,29 +654,29 @@ class AgentRunner:
     async def _run_tool(self, ctx: ToolContext, call: ToolUseBlock, offered: set[str] | None = None):
         """Run one tool call. `offered` is the tool names this model call was given: anything else
         (a connector turned off for this session, a subagent-only tool, a made-up name) is refused."""
+        with tool_span(ctx, call.name) as span:
+            out = await self._dispatch_tool(ctx, call, offered)
+            finish_tool_span(span, out)
+            return out.to_block(call.id)
+
+    async def _dispatch_tool(self, ctx: ToolContext, call: ToolUseBlock, offered: set[str] | None) -> ToolOutput:
         app = self.app
         sid = ctx.session_id
         app.bus.publish("tool.started", {"tool_use_id": call.id, "name": call.name, "input": _preview(call.input),
                                          "message_id": ctx.message_id}, sid)
         if offered is not None and call.name not in offered:
-            out = ToolOutput(f"Tool {call.name!r} is not available in this session.", is_error=True)
+            out = ToolOutput(f"Tool {call.name!r} is not available in this session.", is_error=True, denied=True)
         elif (blocked := await run_pre_tool(app, ctx, call.name, call.input)) is not None:
-            out = ToolOutput(blocked.block_text(), is_error=True)  # a pre_tool hook denied it
+            out = ToolOutput(blocked.block_text(), is_error=True, denied=True)
         else:
             if app.mcp and app.mcp.owns(call.name):
-                out = await app.mcp.call(ctx, call.name, call.input)
+                out = await app.mcp.call(ctx, call.name, call.input, trace=False)
             else:
-                out = await app.tools.run(ctx, call.name, call.input)
+                out = await app.tools.run(ctx, call.name, call.input, trace=False)
             out = await run_post_tool(app, ctx, call.name, call.input, out)  # hook notes appended
         app.bus.publish("tool.finished", {"tool_use_id": call.id, "name": call.name, "is_error": out.is_error,
                                           "output": out.text[:4000], "items": out.items}, sid)
-        return out.to_block(call.id)
-
-
-def _zero():
-    from ..core.types import Usage
-
-    return Usage()
+        return out
 
 
 def _preview(d: Any) -> Any:

@@ -444,6 +444,21 @@ def _v5_usage_billing(c: sqlite3.Connection) -> None:
 
 
 MIGRATIONS.append((5, _v5_usage_billing))
+
+
+def _v6_usage_attribution(c: sqlite3.Connection) -> None:
+    """Keep attribution as a ledger snapshot; legacy rows have no known task assignment."""
+    cols = _columns(c, "usage_records")
+    for name in ("task_id", "task_attribution"):
+        if name not in cols:
+            c.execute(f"ALTER TABLE usage_records ADD COLUMN {name} TEXT")
+    c.execute("CREATE INDEX IF NOT EXISTS usage_task ON usage_records(task_id, ts)")
+    c.execute("CREATE INDEX IF NOT EXISTS usage_run ON usage_records(run_id, ts)")
+    if "mixed_models" not in _columns(c, "delegation_stats"):
+        c.execute("ALTER TABLE delegation_stats ADD COLUMN mixed_models INTEGER NOT NULL DEFAULT 0")
+
+
+MIGRATIONS.append((6, _v6_usage_attribution))
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 

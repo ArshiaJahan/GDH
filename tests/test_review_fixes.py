@@ -185,3 +185,29 @@ async def test_web_search_returns_cited_findings(app):
     cost = app.db.one("SELECT cost_usd FROM usage_records WHERE feature='web_search'")["cost_usd"]
     assert cost == pytest.approx(0.02 + (3000 * 0.10 + 200 * 0.50) / 1e6)
     assert app.items.list(session_id=s["id"], tab="links")[0]["provider"] == "openai"
+
+
+async def test_web_search_accounting_failure_after_a_paid_response_keeps_usage(app, monkeypatch):
+    import anthropic
+
+    from gamedevworkstation.features import web_tools
+    from gamedevworkstation.providers.anthropic_provider import AnthropicProvider
+
+    body = {"id": "msg_ws2", "type": "message", "role": "assistant", "model": "claude-haiku-5-5",
+            "stop_reason": "end_turn", "stop_sequence": None,
+            "content": [{"type": "text", "text": "Found it."}],
+            "usage": {"input_tokens": 3000, "output_tokens": 200, "server_tool_use": {"web_search_requests": 1}}}
+    api = MockAPI().add("POST", "/v1/messages", jresp(200, body))
+    app.providers.override("anthropic", "default", AnthropicProvider(config=app.config, client=anthropic.AsyncAnthropic(
+        api_key="k", base_url="https://api.anthropic.com", http_client=api.client(), max_retries=0)))
+
+    def boom(*_a, **_k):
+        raise RuntimeError("no price")
+
+    monkeypatch.setattr(web_tools, "compute_cost", boom)
+    monkeypatch.setattr(web_tools, "_search_errors", boom)
+    s = app.store.create()
+    out = await app.tools.run(ToolContext(app=app, session=s, run_id="main:x"), "web_search", {"query": "q"})
+    assert not out.is_error and "Found it." in out.text
+    row, = app.db.all("SELECT ok, input_tokens, output_tokens FROM usage_records WHERE feature='web_search'")
+    assert (row["ok"], row["input_tokens"], row["output_tokens"]) == (1, 3000, 200)

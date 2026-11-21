@@ -531,3 +531,11 @@ async def test_generic_approval_choice_and_note(app):
     assert await task == {"status": "denied", "choice": "park", "note": "later"}
     row = app.db.one("SELECT payload FROM approvals WHERE id=?", [aid])
     assert json.loads(row["payload"])["answer"] == {"choice": "park", "note": "later"}
+
+
+async def test_error_stop_reason_records_one_failed_usage_row(app, folder):
+    s = session(app, folder)
+    app.fake.script = [text_response("").model_copy(update={"stop_reason": "error"})]
+    await turn(app, s["id"])
+    rows = app.db.all("SELECT ok, error_kind FROM usage_records WHERE session_id=? AND role='main'", [s["id"]])
+    assert [(r["ok"], r["error_kind"]) for r in rows] == [(0, "other")]

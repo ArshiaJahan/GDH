@@ -205,8 +205,173 @@ export function UsagePage() {
             </div>
           </section>
         )}
+
+        <AttributionSection qs={qs} sessions={sessions.filter((s) => !s.deleted)} />
       </div>
     </div>
+  );
+}
+
+const GROUPS = [
+  { key: "task", label: "Task" }, { key: "session", label: "Session" }, { key: "role", label: "Agent role" },
+  { key: "run", label: "Agent run" }, { key: "model", label: "Model" },
+] as const;
+const PAGE = 50;
+
+/** Name a row of GET /api/usage/attribution. Spend with no task snapshot keeps its own labelled rows. */
+function attributionLabel(group: string, r: any): { text: string; note?: string; title?: string } {
+  if (group === "task") {
+    if (r.task_id) return r.task_code ? { text: `${r.task_code} ${r.task_title ?? ""}`.trim() } : { text: "Deleted task", title: r.task_id };
+    if (r.task_attribution === "ambiguous") return { text: "Ambiguous", note: "Session linked to several tasks, none chosen", title: "Several linked tasks and none was attached" };
+    if (r.task_attribution === "unlinked") return { text: "Unattributed", note: "No linked task" };
+    return { text: "Legacy", note: "Recorded before attribution existed" };
+  }
+  if (group === "session") return r.session_id ? { text: r.session_title || r.session_id, title: r.session_id } : { text: "No session" };
+  if (group === "role") return { text: r.role ?? "—" };
+  if (group === "run") return r.run_id ? { text: r.run_id } : { text: "No run", note: "Not part of an agent run" };
+  return { text: modelLabel(r.model), title: `${r.provider} / ${r.model}` };
+}
+
+function fmtDuration(ns: number): string {
+  const ms = ns / 1e6;
+  return ms < 1000 ? `${Math.round(ms)} ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
+}
+
+function AttributionSection({ qs, sessions }: { qs: string; sessions: { id: string; title: string }[] }) {
+  const [group, setGroup] = useState<string>("task");
+  const [data, setData] = useState<any>(null);
+  const [extra, setExtra] = useState<any[]>([]);
+  const [error, setError] = useState("");
+  const load = (offset: number) => {
+    const p = new URLSearchParams(qs);
+    p.set("group_by", group); p.set("limit", String(PAGE)); p.set("offset", String(offset));
+    return get(`/usage/attribution?${p}`);
+  };
+  useEffect(() => {
+    let live = true;
+    setError(""); setExtra([]);
+    load(0).then((d) => live && setData(d)).catch((e) => { if (live) { setData(null); setError(e.message ?? "Could not load cost attribution"); } });
+    return () => { live = false; };
+  }, [qs, group]);
+  const more = async () => {
+    try {
+      const d = await load(data.next_offset);
+      setExtra((x) => [...x, ...d.rows]); setData({ ...data, next_offset: d.next_offset });
+    } catch (e: any) { setError(e.message ?? "Could not load more"); }
+  };
+  const rows: any[] = data ? [...data.rows, ...extra] : [];
+  const t = data?.totals;
+  return (
+    <section className="rounded-md border border-line surface" aria-label="Cost attribution">
+      <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-line">
+        <span className="font-medium">Cost attribution</span>
+        <span className="text-[12px] text-faint">Uses the date range and filters above.</span>
+        <div className="inline-flex rounded border border-line overflow-hidden text-[13px] ml-auto" role="group" aria-label="Group by">
+          {GROUPS.map((g) => (
+            <button key={g.key} className={`px-2.5 py-1 ${group === g.key ? "bg-sunken font-medium" : "hover:bg-sunken"}`} aria-pressed={group === g.key} onClick={() => setGroup(g.key)}>{g.label}</button>
+          ))}
+        </div>
+      </div>
+      {error && <div className="px-3 py-2 text-[13px]" style={{ color: "var(--bad)" }} role="alert">{error}</div>}
+      {data && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-[13px]">
+            <thead className="text-muted text-left"><tr className="border-b border-line">
+              <th className="px-3 py-1.5 font-normal">{GROUPS.find((g) => g.key === group)?.label}</th>
+              <th className="px-3 font-normal text-right" title="Billed to your API accounts">Ledger cost</th>
+              <th className="px-3 font-normal text-right" title="Claude subscription usage priced at API rates; not billed">Subscription estimate</th>
+              <th className="px-3 font-normal text-right">Tokens</th><th className="px-3 font-normal text-right">Attempts</th><th className="px-3 font-normal text-right">Failures</th>
+            </tr></thead>
+            <tbody>
+              {rows.map((r, i) => {
+                const l = attributionLabel(group, r);
+                const special = group === "task" && !r.task_id;
+                return (
+                  <tr key={i} className="border-b border-line last:border-0">
+                    <td className="px-3 py-1.5" title={l.title}>
+                      <span className={special ? "italic" : ""}>{l.text}</span>
+                      {l.note && <span className="chip ml-2" title={l.note}>{l.note}</span>}
+                    </td>
+                    <td className="px-3 text-right tabular-nums">{fmtUsd(r.ledger_usd)}</td>
+                    <td className="px-3 text-right tabular-nums text-muted">{fmtUsd(r.subscription_estimated_usd)}</td>
+                    <td className="px-3 text-right tabular-nums">{fmtTokens(r.tokens)}</td>
+                    <td className="px-3 text-right tabular-nums">{r.attempts}</td>
+                    <td className="px-3 text-right tabular-nums">{r.failures}</td>
+                  </tr>
+                );
+              })}
+              {!rows.length && <tr><td colSpan={6} className="px-3 py-3 text-muted">No spend in this range.</td></tr>}
+            </tbody>
+            {t && rows.length > 0 && (
+              <tfoot><tr className="border-t border-line font-medium">
+                <td className="px-3 py-1.5">Total (all rows)</td>
+                <td className="px-3 text-right tabular-nums">{fmtUsd(t.ledger_usd)}</td>
+                <td className="px-3 text-right tabular-nums text-muted">{fmtUsd(t.subscription_estimated_usd)}</td>
+                <td className="px-3 text-right tabular-nums">{fmtTokens(t.tokens)}</td>
+                <td className="px-3 text-right tabular-nums">{t.attempts}</td>
+                <td className="px-3 text-right tabular-nums">{t.failures}</td>
+              </tr></tfoot>
+            )}
+          </table>
+        </div>
+      )}
+      {data?.next_offset != null && <div className="px-3 py-2 border-t border-line"><button className="btn" onClick={more}>Show more</button></div>}
+      <RecentTraces sessions={sessions} />
+    </section>
+  );
+}
+
+function RecentTraces({ sessions }: { sessions: { id: string; title: string }[] }) {
+  const [open, setOpen] = useState(false);
+  const [sid, setSid] = useState("");
+  const [traces, setTraces] = useState<any[] | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    if (!open || !sid) { setTraces(null); return; }
+    let live = true;
+    setError(""); setTraces(null);
+    // A failing traces call stays inside this disclosure; the rest of the page is unaffected.
+    get(`/traces?session_id=${encodeURIComponent(sid)}&limit=20`)
+      .then((d) => live && setTraces(d.traces ?? []))
+      .catch((e) => { if (live) setError(e.message ?? "Could not load traces"); });
+    return () => { live = false; };
+  }, [open, sid]);
+  return (
+    <details className="border-t border-line" onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}>
+      <summary className="px-3 py-2 cursor-pointer font-medium">Recent traces</summary>
+      <div className="px-3 pb-3 space-y-2 text-[13px]">
+        <select className="input w-[260px]" value={sid} onChange={(e) => setSid(e.target.value)} aria-label="Trace session">
+          <option value="">Choose a session…</option>
+          {sessions.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
+        </select>
+        {error && <div role="alert" style={{ color: "var(--bad)" }}>{error}</div>}
+        {!sid && !error && <div className="text-muted">Choose a session to see its recent traces.</div>}
+        {traces && !traces.length && <div className="text-muted">No traces recorded for this session.</div>}
+        {traces && traces.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-[13px]">
+              <thead className="text-muted text-left"><tr className="border-b border-line">
+                <th className="py-1 font-normal">Started</th><th className="px-3 font-normal text-right">Duration</th>
+                <th className="px-3 font-normal">Outcome</th><th className="px-3 font-normal">Trace ID</th>
+              </tr></thead>
+              <tbody>
+                {traces.map((t) => {
+                  const outcome = t.attrs?.["gdw.outcome"] ?? (t.status === 1 ? "ok" : t.status === 2 ? "error" : "unknown");
+                  return (
+                    <tr key={t.span_id} className="border-b border-line last:border-0">
+                      <td className="py-1">{new Date(t.start_ns / 1e6).toLocaleString()}</td>
+                      <td className="px-3 text-right tabular-nums">{fmtDuration(t.end_ns - t.start_ns)}</td>
+                      <td className="px-3" style={t.status === 2 ? { color: "var(--bad)" } : undefined}>{outcome}</td>
+                      <td className="px-3 font-mono text-[12px] text-muted select-all">{t.trace_id}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </details>
   );
 }
 

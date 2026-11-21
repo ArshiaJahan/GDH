@@ -7,6 +7,7 @@ Limits:
   limit's worth of spend today.
 - `session_usd`: the same for one session's total spend; "Resume anyway" (`resume_session`) allows
   another limit's worth for that session.
+- `task_usd`: a lifetime cap on spend attributed to one task, enforced before dispatch.
 Only API-billed records count (billing = "api"). Claude Code sessions on the user's own Claude
 subscription record billing = "subscription": their cost is the CLI's estimate, shown on the Usage
 page as "Claude subscription (estimated)" and never counted against these limits.
@@ -16,7 +17,10 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass, replace
+from typing import Any, Iterator, Literal
 
 from .config import Config
 from .core.types import RateLimits, Usage
@@ -33,6 +37,17 @@ class BudgetExceeded(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class UsageScope:
+    """Keep the task selected at entry even if links change while work is in flight."""
+
+    session_id: str | None
+    run_id: str | None  # the unit's run ID, for tool rows that lack one
+    task_attribution: Literal["explicit", "sole_link", "unlinked", "ambiguous"] = "unlinked"
+    task_id: str | None = None
+    task_code: str | None = None
+
+
 def _usd(x: float) -> str:
     return f"${x:.4f}" if 0 < x < 0.01 else f"${x:.2f}"
 
@@ -45,20 +60,74 @@ def _day_start() -> float:
 class UsageTracker:
     def __init__(self, db: DB, bus: EventBus, config: Config):
         self.db, self.bus, self.config = db, bus, config
+        self._scope: ContextVar[UsageScope | None] = ContextVar("usage_scope", default=None)
         self.paused_all = False
         self.paused_sessions: dict[str, dict] = {}
         self._day = _day_start()
         self._global_base = 0.0  # spend already let through today by "Resume anyway"
         self._session_base: dict[str, float] = {}  # same, per session
 
+    def capture_scope(self, sid: str | None = None, *, run_id: str | None = None) -> UsageScope:
+        """Capture at turn or operation entry, or when queuing a unit for later execution."""
+        parent = self._scope.get()
+        if parent is not None and (sid is None or sid == parent.session_id):
+            return parent if run_id is None else replace(parent, run_id=run_id)
+        if sid is None:
+            return UsageScope(sid, run_id)
+
+        # Match only the latest attachment against the current links in the same read.
+        links = self.db.all("""
+            WITH attachment AS (
+                SELECT json_extract(meta, '$.task_context') AS code
+                FROM messages
+                WHERE session_id = ? AND role = 'user'
+                  AND CASE WHEN json_valid(meta) THEN json_type(meta, '$.task_context') = 'text' END
+                ORDER BY created_at DESC, rowid DESC LIMIT 1
+            ), linked AS (
+                SELECT t.id, printf('Task%05d', t.num) AS code
+                FROM task_sessions AS l JOIN board_tasks AS t ON t.id = l.task_id
+                WHERE l.session_id = ?
+            )
+            SELECT id, code, code = (SELECT code FROM attachment) AS attached
+            FROM linked ORDER BY attached DESC LIMIT 2
+        """, [sid, sid])
+        if not links:
+            return UsageScope(sid, run_id)
+        if links[0]["attached"]:
+            return UsageScope(sid, run_id, "explicit", links[0]["id"], links[0]["code"])
+        if len(links) == 1:
+            return UsageScope(sid, run_id, "sole_link", links[0]["id"], links[0]["code"])
+        return UsageScope(sid, run_id, "ambiguous")
+
+    @contextmanager
+    def scope(self, sid: str | None = None, *, run_id: str | None = None,
+              captured: UsageScope | None = None) -> Iterator[UsageScope]:
+        """Bind a captured scope for queued work, or capture once for a new operation."""
+        scope = captured if captured is not None else self.capture_scope(sid, run_id=run_id)
+        token = self._scope.set(scope)
+        try:
+            yield scope
+        finally:
+            self._scope.reset(token)
+
     def record(self, *, provider: str, model: str, usage: Usage, session_id: str | None = None,
                profile: str = "default", role: str = "main", run_id: str | None = None,
                effort: str | None = None, feature: str = "chat", voice: str | None = None,
                latency_ms: int = 0, ok: bool = True, error_kind: str | None = None,
                context_fill: float | None = None, rate_limits: RateLimits | None = None,
-               billing: str = "api") -> dict:
-        """billing: "api" (counts against the spend limits) or "subscription" (the user's own Claude
-        login through the claude_code harness: cost_usd is an estimate and never counts)."""
+               billing: str = "api", scope: UsageScope | None = None) -> dict:
+        """Record one attempt. Subscription cost is an estimate and does not count against limits.
+
+        Pass the captured scope in persistent callbacks that outlive the originating context.
+        """
+        if scope is None:
+            try:
+                # No session means no task: never inherit a bound parent session's attribution.
+                scope = self.capture_scope(session_id) if session_id is not None else UsageScope(None, run_id)
+            except Exception:  # noqa: BLE001 - a failed attribution read must never lose a paid call's row
+                scope = UsageScope(session_id, run_id)
+        if role == "tool" and run_id is None:
+            run_id = scope.run_id
         row: dict[str, Any] = {
             "ts": time.time(), "session_id": session_id, "provider": provider, "profile": profile,
             "model": model, "role": role, "run_id": run_id, "effort": effort, "feature": feature, "voice": voice,
@@ -69,6 +138,7 @@ class UsageTracker:
             "context_fill": context_fill,
             "rate_limits": json.dumps(rate_limits.model_dump(exclude_none=True)) if rate_limits else None,
             "billing": billing if billing in BILLING else "api",
+            "task_id": scope.task_id, "task_attribution": scope.task_attribution,
         }
         row["id"] = self.db.insert("usage_records", row)
         self.bus.publish("usage.recorded", row, session_id)
@@ -88,6 +158,23 @@ class UsageTracker:
     def spent_run(self, run_id: str) -> float:
         r = self.db.one(f"SELECT COALESCE(SUM(cost_usd),0) AS c FROM usage_records WHERE run_id=? AND {BILLED}", [run_id])
         return r["c"]
+
+    def spent_task(self, task_id: str) -> float:
+        r = self.db.one(f"SELECT COALESCE(SUM(cost_usd),0) AS c FROM usage_records WHERE task_id=? AND {BILLED}",
+                        [task_id])
+        return r["c"]
+
+    def _task_limit(self, sid: str | None, scope: UsageScope | None) -> tuple[str, str, float] | None:
+        cap = float(self.config.limits.get("task_usd") or 0)
+        if not cap:
+            return None
+        scope = scope if scope is not None else self.capture_scope(sid)
+        if scope.task_attribution == "ambiguous":
+            raise BudgetExceeded("Multiple tasks are linked to this session. Attach the intended task through /task "
+                                 "before continuing.")
+        if scope.task_id is not None:
+            return scope.task_id, scope.task_code or scope.task_id, cap
+        return None
 
     def _roll_day(self) -> None:
         """A new local day lifts the daily pause and forgets yesterday's "Resume anyway"."""
@@ -152,7 +239,8 @@ class UsageTracker:
         return {"global": self.global_info() if self.paused_all else None,
                 "sessions": {sid: self.session_info(sid) for sid in self.paused_sessions}}
 
-    def check(self, sid: str | None = None, run_id: str | None = None, run_cap: float | None = None) -> None:
+    def check(self, sid: str | None = None, run_id: str | None = None, run_cap: float | None = None,
+              *, scope: UsageScope | None = None) -> None:
         """Raise before starting any paid call if a limit has been hit."""
         lim = self.config.limits
         if self._sync_global():
@@ -165,12 +253,17 @@ class UsageTracker:
                                  "Raise it in Settings or press Resume anyway.")
         if run_id and run_cap and self.spent_run(run_id) >= run_cap:
             raise BudgetExceeded(f"Subagent spend cap (${run_cap:.2f}) reached.")
+        if task_limit := self._task_limit(sid, scope):
+            task_id, task_code, cap = task_limit
+            if self.spent_task(task_id) >= cap:
+                raise BudgetExceeded(f"{task_code} has reached its {_usd(cap)} spend limit. "
+                                     "Raise `limits.task_usd` to continue.")
 
     def headroom(self, sid: str | None = None, run_id: str | None = None,
-                 run_cap: float | None = None) -> float | None:
+                 run_cap: float | None = None, *, scope: UsageScope | None = None) -> float | None:
         """Dollars that may still be spent before a limit pauses this work: the smallest of the
         session allowance (incl. "Resume anyway"), the daily allowance (incl. its resume allowance)
-        and the run cap. None when no limit applies. Can be <= 0 (already over)."""
+        and the run and task caps. None when no limit applies. Can be <= 0 (already over)."""
         self._roll_day()
         lefts: list[float] = []
         g = float(self.config.limits.get("global_daily_usd") or 0)
@@ -182,6 +275,9 @@ class UsageTracker:
                 lefts.append(s + self._session_base.get(sid, 0.0) - self.spent_session(sid))
         if run_id and run_cap:
             lefts.append(run_cap - self.spent_run(run_id))
+        if task_limit := self._task_limit(sid, scope):
+            task_id, _, cap = task_limit
+            lefts.append(cap - self.spent_task(task_id))
         return min(lefts) if lefts else None
 
     def resume_all(self) -> None:

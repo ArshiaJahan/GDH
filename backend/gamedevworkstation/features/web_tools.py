@@ -5,6 +5,7 @@ server-side web search tool and returns cited findings; `web_fetch` reads one pu
 Cited and fetched URLs land in the item index (Links tab)."""
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import TYPE_CHECKING
 
@@ -12,9 +13,11 @@ import httpx
 from fastapi import APIRouter, Body, FastAPI, HTTPException, Response
 
 from ..agent.tools import ToolContext, ToolOutput, obj
+from ..core.effort import check_effort
 from ..core.types import Usage
-from ..providers.anthropic_provider import usage_from_wire
-from ..providers.base import compute_cost
+from ..providers.anthropic_provider import STOP_MAP, usage_from_wire
+from ..providers.base import ProviderError, compute_cost
+from ..providers.registry import attempt_failure, chat_result, chat_span
 from ..safe_fetch import UnsafeURL, safe_fetch
 
 if TYPE_CHECKING:
@@ -43,30 +46,87 @@ def html_to_text(html: str) -> tuple[str, str]:
     return title, body
 
 
+def _search_errors(content) -> list[str]:
+    """Error codes of web_search_tool_result_error blocks in a successful Anthropic response."""
+    codes = []
+    for b in content or []:
+        if getattr(b, "type", None) != "web_search_tool_result":
+            continue
+        inner = getattr(b, "content", None)
+        if not isinstance(inner, list) and getattr(inner, "type", None) == "web_search_tool_result_error":
+            codes.append(str(getattr(inner, "error_code", None) or "unknown"))
+    return codes
+
+
+def _has_search_results(content) -> bool:
+    return any(getattr(b, "type", None) == "web_search_tool_result" and isinstance(getattr(b, "content", None), list)
+               for b in content or [])
+
+
+def _search_usage(S, model: str, msg):
+    """(wire usage, Usage with cost, search errors, every search failed). Never raises."""
+    wire_usage = getattr(msg, "usage", None)
+    try:
+        usage = usage_from_wire(wire_usage)
+    except Exception:  # noqa: BLE001
+        usage = Usage()
+    try:
+        errors = _search_errors(msg.content)
+        failed_all = bool(errors) and not _has_search_results(msg.content)
+    except Exception:  # noqa: BLE001
+        errors, failed_all = [], False
+    try:
+        searches = getattr(getattr(wire_usage, "server_tool_use", None), "web_search_requests", 0) or 0
+        # Anthropic bills only searches that ran: errored ones carry no surcharge.
+        billed = max(searches - len(errors), 0) if failed_all else searches
+        usage.cost_usd = compute_cost(S.config.model(model), usage) + billed * SEARCH_USD
+    except Exception:  # noqa: BLE001
+        pass
+    return wire_usage, usage, errors, failed_all
+
+
 def register(app_: FastAPI, api: APIRouter, S: "AppState") -> None:
     @S.tools.add("web_search", "Search the web (via Claude's web search) and get cited findings. Grant it to research "
                  "subagents together with web_fetch.",
                  obj({"query": {"type": "string"}, "allowed_domains": {"type": "array", "items": {"type": "string"}}},
                      ["query"]), read_only=True)
     async def web_search(ctx: ToolContext, a: dict) -> ToolOutput:
-        S.usage.check(ctx.session_id)
-        model = S.config.resolve("claude.fast")
-        profile = S.config.profile_for(ctx.session, "anthropic")
-        prov = S.providers.chat("anthropic", profile)
-        tool = dict(WEB_SEARCH_TOOL)
-        if a.get("allowed_domains"):
-            tool["allowed_domains"] = a["allowed_domains"]
-        try:
-            msg = await prov.client.messages.create(  # type: ignore[attr-defined]
-                model=model, max_tokens=4000, tools=[tool], output_config={"effort": "low"},
-                messages=[{"role": "user", "content": SEARCH_PROMPT.format(q=a["query"])}])
-        except Exception as e:  # noqa: BLE001
-            return ToolOutput(f"web search failed: {e}", is_error=True)
-        usage = usage_from_wire(msg.usage)
-        searches = getattr(getattr(msg.usage, "server_tool_use", None), "web_search_requests", 0) or 0
-        usage.cost_usd = compute_cost(S.config.model(model), usage) + searches * SEARCH_USD
-        S.usage.record(provider="anthropic", model=model, usage=usage, session_id=ctx.session_id, role="tool",
-                       run_id=ctx.run_id, effort="low", feature="web_search", profile=profile)
+        with S.usage.scope(ctx.session_id):
+            S.usage.check(ctx.session_id)
+            model = S.config.resolve("claude.fast")
+            profile = S.config.profile_for(ctx.session, "anthropic")
+            prov = S.providers.chat("anthropic", profile)
+            tool = dict(WEB_SEARCH_TOOL)
+            if a.get("allowed_domains"):
+                tool["allowed_domains"] = a["allowed_domains"]
+            messages = [{"role": "user", "content": SEARCH_PROMPT.format(q=a["query"])}]
+            check_effort("low", None, ctx.run_id)
+            try:
+                with chat_span(S.tracing, "anthropic", model, 4000, "low",
+                               session_id=ctx.session_id, run_id=ctx.run_id) as span:
+                    msg = await prov.client.messages.create(  # type: ignore[attr-defined]
+                        model=model, max_tokens=4000, tools=[tool], output_config={"effort": "low"}, messages=messages)
+                    # Accounting after the paid response never fails the call: a broken estimate keeps the tokens.
+                    wire_usage, usage, errors, failed_all = _search_usage(S, model, msg)
+                    if failed_all:
+                        code = errors[0]
+                        failure = ProviderError(f"web search returned an error: {code}",
+                                                rate_limited=code == "too_many_requests")
+                        failure.usage = usage  # type: ignore[attr-defined]
+                        raise failure
+                    chat_result(span, model=getattr(msg, "model", None),
+                                finish=STOP_MAP.get(getattr(msg, "stop_reason", None) or "", "other"),
+                                usage=usage if wire_usage is not None else None)
+            except (Exception, asyncio.CancelledError) as exc:
+                usage, kind = attempt_failure(exc)
+                S.usage.record(provider="anthropic", model=model, usage=usage, session_id=ctx.session_id, role="tool",
+                               run_id=ctx.run_id, effort="low", feature="web_search", profile=profile,
+                               ok=False, error_kind=kind)
+                if isinstance(exc, asyncio.CancelledError):
+                    raise
+                return ToolOutput(f"web search failed: {exc}", is_error=True)
+            S.usage.record(provider="anthropic", model=model, usage=usage, session_id=ctx.session_id, role="tool",
+                           run_id=ctx.run_id, effort="low", feature="web_search", profile=profile)
         lines, sources = [], {}
         for b in msg.content:
             if b.type == "text":

@@ -130,6 +130,7 @@ class Titler:
 
     async def generate(self, sid: str, *, force: bool = False) -> str | None:
         app = self.app
+        scope = app.usage.capture_scope(sid)
         s = app.store.get(sid)
         if not s:
             raise KeyError(sid)
@@ -147,7 +148,7 @@ class Titler:
         mcfg = app.config.model(model)
         profile = app.config.profile_for(s, mcfg.provider)  # the session's key profile for that provider
         provider = app.providers.for_model(model, profile)
-        app.usage.check(sid)
+        app.usage.check(sid, scope=scope)
         req = ChatRequest(model=model, effort="low", max_tokens=2000, show_thinking=False, system=TITLE_PROMPT,
                           messages=[Message.user("\n\n".join(parts)[:6000])], metadata={"run_id": f"title:{sid}"})
         try:
@@ -156,10 +157,10 @@ class Titler:
             from ..core.types import Usage
 
             app.usage.record(provider=mcfg.provider, model=model, usage=Usage(), session_id=sid, profile=profile,
-                             role="title", effort="low", feature="title", ok=False, error_kind="other")
+                             role="title", effort="low", feature="title", ok=False, error_kind="other", scope=scope)
             raise
         app.usage.record(provider=mcfg.provider, model=model, usage=resp.usage, session_id=sid, profile=profile,
-                         role="title", effort="low", feature="title", latency_ms=resp.latency_ms)
+                         role="title", effort="low", feature="title", latency_ms=resp.latency_ms, scope=scope)
         title = _clean_title(resp.text())
         if not title:
             return None

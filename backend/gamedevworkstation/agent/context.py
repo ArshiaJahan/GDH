@@ -3,11 +3,14 @@ by hand or automatically before the window fills) and, as a last resort, stub ol
 in the outgoing request so a long autonomous turn can't overflow the model's window."""
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import TYPE_CHECKING, Callable
 
 from ..core.types import (AudioBlock, ChatRequest, FileBlock, ImageBlock, Message, TextBlock, ThinkingBlock,
                           ToolResultBlock, ToolUseBlock)
+from ..providers.base import ProviderError
+from ..providers.registry import attempt_failure
 
 if TYPE_CHECKING:
     from ..app import AppState
@@ -171,6 +174,11 @@ async def compact_messages(app: "AppState", sid: str, msgs: list[Message], cut: 
     originals stay in history. If the kept part has no user turn, the latest one is quoted verbatim
     in the summary so the current request survives. Fires the pre_compact hook event first (both
     auto-compact and the Compact button come through here)."""
+    with app.usage.scope(sid):
+        return await _compact_messages(app, sid, msgs, cut, auto)
+
+
+async def _compact_messages(app: "AppState", sid: str, msgs: list[Message], cut: int, auto: bool) -> dict:
     s = app.store.get(sid)
     old, keep = msgs[:cut], msgs[cut:]
     model = app.config.resolve("claude.fast")
@@ -185,11 +193,23 @@ async def compact_messages(app: "AppState", sid: str, msgs: list[Message], cut: 
 
         await hooks.fire(HookEvent("pre_compact", ToolContext(app=app, session=s, run_id=f"compact:{sid}"),
                                    turn=hooks.turn(sid), extra={"auto": auto, "cut": cut, "messages": len(msgs)}))
-    resp = await prov.complete(ChatRequest(model=model, effort="low", max_tokens=2000, show_thinking=False,
-                                           system=COMPACT_PROMPT, messages=[Message.user(transcript(old))],
-                                           metadata={"run_id": f"compact:{sid}"}))
+    run_id = f"compact:{sid}"
+    req = ChatRequest(model=model, effort="low", max_tokens=2000, show_thinking=False,
+                      system=COMPACT_PROMPT, messages=[Message.user(transcript(old))],
+                      metadata={"session_id": sid, "run_id": run_id})
+    try:
+        resp = await prov.complete(req)
+    except (Exception, asyncio.CancelledError) as exc:
+        usage, kind = attempt_failure(exc)
+        app.usage.record(provider=mcfg.provider, model=model, usage=usage, session_id=sid, role="compact",
+                         profile=profile, run_id=run_id, effort="low", ok=False, error_kind=kind)
+        raise
+    failed = resp.stop_reason == "error"
     app.usage.record(provider=mcfg.provider, model=model, usage=resp.usage, session_id=sid, role="compact",
-                     profile=profile, effort="low", latency_ms=resp.latency_ms)
+                     profile=profile, run_id=run_id, effort="low", latency_ms=resp.latency_ms, ok=not failed,
+                     error_kind="other" if failed else None)
+    if failed:
+        raise ProviderError("Compaction response failed")
     text = resp.text().strip() or "(No summary.)"
     if not any(is_user_turn(m) for m in keep):
         for m in reversed(old):

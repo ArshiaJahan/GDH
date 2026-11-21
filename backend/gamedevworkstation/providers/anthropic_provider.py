@@ -11,8 +11,9 @@ Checked against platform.claude.com docs on 2026-11-05:
 """
 from __future__ import annotations
 
+import asyncio
 import time
-from typing import Any, AsyncIterator
+from typing import TYPE_CHECKING, Any, AsyncIterator
 
 import anthropic
 
@@ -36,6 +37,10 @@ from ..core.types import (
     Usage,
 )
 from .base import AuthStatus, Capabilities, ChatProvider, ProviderError, compute_cost, retry_after_from
+from .registry import chat_result, chat_span
+
+if TYPE_CHECKING:
+    from ..features.tracing import TraceRecorder
 
 TEXTLIKE = ("text/", "application/json", "application/xml", "application/x-yaml", "application/toml",
             "application/javascript", "application/x-sh", "application/sql")
@@ -181,6 +186,8 @@ def block_from_wire(b: Any) -> ContentBlock | None:
 
 
 def usage_from_wire(u: Any) -> Usage:
+    if u is None:
+        return Usage()
     details = getattr(u, "output_tokens_details", None)
     return Usage(
         input_tokens=u.input_tokens or 0,
@@ -252,10 +259,12 @@ class AnthropicProvider(ChatProvider):
     name = "anthropic"
 
     def __init__(self, profile: str = "default", config: Config | None = None,
-                 client: anthropic.AsyncAnthropic | None = None):
+                 client: anthropic.AsyncAnthropic | None = None, *,
+                 tracing: TraceRecorder | None = None):
         self.profile = profile
         self.config = config or get_config()
         self._client = client
+        self.tracing = tracing
 
     @property
     def client(self) -> anthropic.AsyncAnthropic:
@@ -279,42 +288,63 @@ class AnthropicProvider(ChatProvider):
 
     async def complete(self, req: ChatRequest) -> Response:
         params, m = self._prepare(req)
-        t0 = time.monotonic()
-        try:
-            raw = await self.client.messages.with_raw_response.create(**params)
-            msg = await raw.parse()
-        except Exception as e:  # noqa: BLE001
-            raise _wrap_error(e) from e
-        return response_from_wire(msg, m, int((time.monotonic() - t0) * 1000), raw.headers)
+        with chat_span(self.tracing, self.name, req.model, params["max_tokens"], req.effort,
+                       session_id=req.metadata.get("session_id"), run_id=req.metadata.get("run_id")) as span:
+            t0 = time.monotonic()
+            try:
+                raw = await self.client.messages.with_raw_response.create(**params)
+                msg = await raw.parse()
+            except Exception as e:  # noqa: BLE001
+                raise _wrap_error(e) from e
+            resp = response_from_wire(msg, m, int((time.monotonic() - t0) * 1000), raw.headers)
+            chat_result(span, model=msg.model, finish=resp.stop_reason,
+                        usage=resp.usage if msg.usage is not None else None)
+            return resp
 
     async def stream(self, req: ChatRequest) -> AsyncIterator[StreamEvent]:
         params, m = self._prepare(req)
-        t0 = time.monotonic()
         try:
-            async with self.client.messages.stream(**params) as s:
-                async for ev in s:
-                    et = ev.type
-                    if et == "content_block_start" and ev.content_block.type == "tool_use":
-                        cb = ev.content_block
-                        yield StreamEvent(type="tool_use_start", index=ev.index,
-                                          tool_use=ToolUseBlock(id=cb.id, name=cb.name))
-                    elif et == "content_block_delta":
-                        d = ev.delta
-                        if d.type == "text_delta":
-                            yield StreamEvent(type="text_delta", index=ev.index, text=d.text)
-                        elif d.type == "thinking_delta" and d.thinking:
-                            yield StreamEvent(type="thinking_delta", index=ev.index, text=d.thinking)
-                        elif d.type == "input_json_delta":
-                            yield StreamEvent(type="tool_input_delta", index=ev.index, text=d.partial_json)
-                    elif et == "content_block_stop":
-                        yield StreamEvent(type="block_stop", index=ev.index)
-                final = await s.get_final_message()
-                headers = getattr(getattr(s, "response", None), "headers", None)
-        except Exception as e:  # noqa: BLE001
-            err = _wrap_error(e)
-            yield StreamEvent(type="error", error=str(err))
-            raise err from e
-        resp = response_from_wire(final, m, int((time.monotonic() - t0) * 1000), headers)
+            with chat_span(self.tracing, self.name, req.model, params["max_tokens"], req.effort,
+                           session_id=req.metadata.get("session_id"), run_id=req.metadata.get("run_id")) as span:
+                t0 = time.monotonic()
+                usage_wire = None
+                try:
+                    async with self.client.messages.stream(**params) as s:
+                        async for ev in s:
+                            et = ev.type
+                            if et == "message_start":
+                                usage_wire = ev.message.usage
+                            elif et == "message_delta":
+                                usage_wire = s.current_message_snapshot.usage
+                            elif et == "content_block_start" and ev.content_block.type == "tool_use":
+                                cb = ev.content_block
+                                yield StreamEvent(type="tool_use_start", index=ev.index,
+                                                  tool_use=ToolUseBlock(id=cb.id, name=cb.name))
+                            elif et == "content_block_delta":
+                                d = ev.delta
+                                if d.type == "text_delta":
+                                    yield StreamEvent(type="text_delta", index=ev.index, text=d.text)
+                                elif d.type == "thinking_delta" and d.thinking:
+                                    yield StreamEvent(type="thinking_delta", index=ev.index, text=d.thinking)
+                                elif d.type == "input_json_delta":
+                                    yield StreamEvent(type="tool_input_delta", index=ev.index, text=d.partial_json)
+                            elif et == "content_block_stop":
+                                yield StreamEvent(type="block_stop", index=ev.index)
+                        final = await s.get_final_message()
+                        headers = getattr(getattr(s, "response", None), "headers", None)
+                except (asyncio.CancelledError, GeneratorExit) as e:
+                    _attach_stream_usage(e, m, usage_wire)
+                    raise
+                except Exception as e:  # noqa: BLE001
+                    err = _wrap_error(e)
+                    _attach_stream_usage(err, m, usage_wire)
+                    raise err from e
+                resp = response_from_wire(final, m, int((time.monotonic() - t0) * 1000), headers)
+                chat_result(span, model=final.model, finish=resp.stop_reason,
+                            usage=resp.usage if final.usage is not None else None)
+        except ProviderError as e:
+            yield StreamEvent(type="error", error=str(e))
+            raise
         yield StreamEvent(type="usage", usage=resp.usage)
         yield StreamEvent(type="done", response=resp)
 
@@ -333,6 +363,13 @@ class AnthropicProvider(ChatProvider):
         except anthropic.APIStatusError as e:
             st.status, st.error = ("auth_failed" if e.status_code in (401, 403) else "unreachable"), _short(e)
         return st
+
+
+def _attach_stream_usage(error: BaseException, model: ModelConfig, wire: Any) -> None:
+    if wire is not None:
+        usage = usage_from_wire(wire)
+        usage.cost_usd = compute_cost(model, usage)
+        error.usage = usage  # type: ignore[attr-defined]
 
 
 def _short(e: Exception) -> str:

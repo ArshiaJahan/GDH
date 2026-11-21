@@ -316,10 +316,15 @@ class PromptImprover:
         return await self._entry(session, message, helper)
 
     async def _entry(self, session: dict, message: Any, helper: Any) -> ImproverOutcome:
+        run_id = f"pi:{session['id']}:{message.id}"
+        if not _cfg(self.app).get("enabled"):  # disabled: no DB read, no research, nothing
+            return ImproverOutcome(status="bypassed", reason="disabled", message_id=message.id,
+                                   run_id=run_id)
+        with self.app.usage.scope(session["id"]):
+            return await self._improve(session, message, helper, run_id)
+
+    async def _improve(self, session: dict, message: Any, helper: Any, run_id: str) -> ImproverOutcome:
         app, sid, mid = self.app, session["id"], message.id
-        run_id = f"pi:{sid}:{mid}"
-        if not _cfg(app).get("enabled"):  # disabled: no DB read, no research, nothing
-            return ImproverOutcome(status="bypassed", reason="disabled", message_id=mid, run_id=run_id)
         try:
             ok, reason, exec_text = check_eligibility(app, session, message)
         except Exception:  # noqa: BLE001 - a broken check never blocks the turn

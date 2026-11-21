@@ -212,6 +212,8 @@ class UsageQueries:
             m["credits"] += r["credits"] or 0
             m["requests"] += 1
         for s in stats:
+            if s.get("mixed_models"):
+                continue  # spans several models: its success and cost are no single model's
             m = out.setdefault(s["model"] or "?", {"model": s["model"], "provider": s["provider"], "cost": 0.0,
                                                    "tokens": 0, "characters": 0, "credits": 0.0, "requests": 0,
                                                    "tasks": 0, "successes": 0, "by_job_type": {}})

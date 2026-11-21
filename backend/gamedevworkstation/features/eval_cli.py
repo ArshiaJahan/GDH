@@ -6,6 +6,8 @@
     gdw eval validate <task>... | --suite DIR  the reference must pass, flawed solutions must fail
     gdw eval run --agents claude_code,codex,builtin --trials K [<task>... | --suite DIR]
     gdw eval export [<task>... | --suite DIR] --out DIR   as Harbor tasks (the Terminal-Bench 2.0 format)
+    gdw eval compare-routing --suite DIR --baseline-tier T --job-type J --trials N --max-spend-usd X [--approve-paid]
+                                             pinned tier vs tier="auto"; without --approve-paid only a preview
 """
 from __future__ import annotations
 
@@ -22,7 +24,8 @@ from fastapi import APIRouter, FastAPI, HTTPException
 
 from ..agent.tools import wrap_untrusted
 from ..core.effort import EffortApprovalRequired, check_effort
-from ..core.types import EFFORT_LEVELS, ChatRequest, Message, TextBlock, Usage
+from ..core.types import EFFORT_LEVELS, ChatRequest, Message, TextBlock
+from ..providers.registry import attempt_failure
 from . import eval_export, eval_forge, eval_grade, eval_run, eval_task, eval_validate
 
 if TYPE_CHECKING:
@@ -45,15 +48,19 @@ def make_rewrite(app: "AppState", *, model: str | None = None, effort: str = "lo
         req = ChatRequest(model=m, messages=[Message(role="user", content=[TextBlock(text=wrap_untrusted(text, "pull request"))])],
                           system=eval_forge.REWRITE_SYSTEM, effort=effort, max_tokens=1500,  # type: ignore[arg-type]
                           show_thinking=False, metadata={"run_id": run_id, "cache_key": "eval_forge"})
-        try:
-            resp = await prov.complete(req)
-        except Exception as e:  # noqa: BLE001
-            app.usage.record(provider=mcfg.provider, model=m, usage=Usage(), role="assistant", profile=profile,
-                             run_id=run_id, effort=effort, feature="eval_forge", ok=False,
-                             error_kind="rate_limit" if getattr(e, "rate_limited", False) else "other")
-            raise
-        app.usage.record(provider=mcfg.provider, model=m, usage=resp.usage, role="assistant", profile=profile,
-                         run_id=run_id, effort=effort, feature="eval_forge", latency_ms=resp.latency_ms)
+        with app.usage.scope():
+            try:
+                resp = await prov.complete(req)
+            except (Exception, asyncio.CancelledError) as exc:
+                usage, kind = attempt_failure(exc)
+                app.usage.record(provider=mcfg.provider, model=m, usage=usage, role="assistant", profile=profile,
+                                 run_id=run_id, effort=effort, feature="eval_forge", ok=False, error_kind=kind)
+                raise
+            failed = resp.stop_reason == "error"
+            app.usage.record(provider=mcfg.provider, model=m, usage=resp.usage, role="assistant", profile=profile,
+                             run_id=run_id, effort=effort, feature="eval_forge", latency_ms=resp.latency_ms,
+                             ok=not failed, error_kind="other" if failed else None)
+        # A failed reply is already recorded as a failed attempt; its (empty) text reaches Forge's own validation.
         return resp.message().text()
 
     return rewrite, m
@@ -80,9 +87,19 @@ def make_rubric(app: "AppState", *, model: str | None = None, effort: str = "low
         req = ChatRequest(model=m, messages=[Message(role="user", content=[TextBlock(text=body)])], system=RUBRIC_SYSTEM,
                           effort=effort, max_tokens=600, show_thinking=False,  # type: ignore[arg-type]
                           metadata={"run_id": run_id, "cache_key": "eval_rubric"})
-        resp = await prov.complete(req)
-        app.usage.record(provider=mcfg.provider, model=m, usage=resp.usage, role="assistant", profile=profile,
-                         run_id=run_id, effort=effort, feature="eval_rubric", latency_ms=resp.latency_ms)
+        with app.usage.scope():
+            try:
+                resp = await prov.complete(req)
+            except (Exception, asyncio.CancelledError) as exc:
+                usage, kind = attempt_failure(exc)
+                app.usage.record(provider=mcfg.provider, model=m, usage=usage, role="assistant", profile=profile,
+                                 run_id=run_id, effort=effort, feature="eval_rubric", ok=False, error_kind=kind)
+                raise
+            failed = resp.stop_reason == "error"
+            app.usage.record(provider=mcfg.provider, model=m, usage=resp.usage, role="assistant", profile=profile,
+                             run_id=run_id, effort=effort, feature="eval_rubric", latency_ms=resp.latency_ms,
+                             ok=not failed, error_kind="other" if failed else None)
+        # A failed reply is already recorded as a failed attempt; it grades as a failure like any unparsable reply.
         from .pi_contracts import loads_reply
 
         try:
@@ -94,12 +111,35 @@ def make_rubric(app: "AppState", *, model: str | None = None, effort: str = "low
     return judge
 
 
+_STARTED: list["AppState"] = []
+
+
+def _cli_state() -> "AppState":
+    """An AppState whose trace recorder runs for the CLI's lifetime (the app starts it in the FastAPI lifespan);
+    `cli` drains it at exit."""
+    from ..app import AppState
+
+    state = AppState()
+    _STARTED.append(state)
+    try:
+        asyncio.run(state.tracing.astart())
+    except Exception:  # noqa: BLE001  tracing fails open
+        pass
+    return state
+
+
+async def _drain(states: list["AppState"]) -> None:
+    for state in states:
+        try:
+            await state.tracing.aclose()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _rubric_for(args: argparse.Namespace) -> eval_grade.Rubric | None:
     if not getattr(args, "rubric_model", None):
         return None
-    from ..app import AppState
-
-    return make_rubric(AppState(), model=args.rubric_model, effort=args.effort)
+    return make_rubric(_cli_state(), model=args.rubric_model, effort=args.effort)
 
 
 def _grade_cmd(args: argparse.Namespace) -> int:
@@ -159,9 +199,7 @@ def _run_cmd(args: argparse.Namespace) -> int:
     tasks = [eval_task.load(d) for d in dirs]
     app = None
     if {"builtin", "claude_code", "claude_code_glm"} & set(names):
-        from ..app import AppState
-
-        app = AppState()
+        app = _cli_state()
     agents: dict[str, eval_run.AgentFn] = {}
     for n in names:
         if n == "builtin":
@@ -178,6 +216,38 @@ def _run_cmd(args: argparse.Namespace) -> int:
                                              parallel=args.parallel, rubric=_rubric_for(args)))
     print(eval_run.render_markdown(results, args.trials))
     print(f"\nraw trials, logs and diffs: {out}")
+    return 0
+
+
+def _compare_cmd(args: argparse.Namespace) -> int:
+    from ..config import get_config
+
+    dirs = eval_task.discover(args.suite)
+    if not dirs:
+        print("gdw eval compare-routing: no tasks in the suite", file=sys.stderr)
+        return 2
+    tasks = [eval_task.load(d) for d in dirs]
+    try:
+        # The preview needs only the config: no AppState, no provider, no trial, no grader command.
+        plan = eval_run.plan_compare(get_config(), tasks, baseline_tier=args.baseline_tier, job_type=args.job_type,
+                                     effort=args.effort, trials=args.trials, max_spend_usd=args.max_spend_usd)
+    except ValueError as e:
+        print(f"gdw eval compare-routing: {e}", file=sys.stderr)
+        return 2
+    if not args.approve_paid:
+        print(eval_run.render_plan(plan))
+        return 0
+    if not plan["eligible"]:
+        print("gdw eval compare-routing: no eligible tasks in the suite", file=sys.stderr)
+        return 2
+    app = _cli_state()
+    out = Path(args.out or f"evals/runs/compare-{time.strftime('%Y%m%d-%H%M%S')}")
+    rep = asyncio.run(eval_run.compare_routing(app, tasks, baseline_tier=args.baseline_tier, job_type=args.job_type,
+                                               effort=args.effort, trials=args.trials,
+                                               max_spend_usd=args.max_spend_usd, out_dir=out,
+                                               repo=Path(args.repo) if args.repo else None))
+    print(eval_run.render_compare_markdown(rep))
+    print(f"report, raw trials, logs and diffs: {out}")
     return 0
 
 
@@ -217,9 +287,7 @@ def _forge_cmd(args: argparse.Namespace) -> int:
         text = text if text is not None else body
     rewrite, by = None, ""
     if args.rewrite:
-        from ..app import AppState
-
-        rewrite, by = make_rewrite(AppState(), model=args.model, effort=args.effort)
+        rewrite, by = make_rewrite(_cli_state(), model=args.model, effort=args.effort)
     out = asyncio.run(eval_forge.forge(repo, rev, Path(args.out), task_id=args.id, command=args.command, text=text,
                                        pr=pr, source_repo=slug, rewrite=rewrite, rewritten_by=by,
                                        kind=args.kind, unity_replay=args.unity_replay or "", tags=args.tag or [],
@@ -298,6 +366,17 @@ def parser() -> argparse.ArgumentParser:
     r.add_argument("--rubric-model")
     r.add_argument("--effort", default="low", choices=list(EFFORT_LEVELS))
     r.set_defaults(fn=_run_cmd)
+    c = sub.add_parser("compare-routing", help="pinned tier vs tier=auto on the same tasks (preview unless --approve-paid)")
+    c.add_argument("--suite", default=DEFAULT_SUITE)
+    c.add_argument("--baseline-tier", required=True, help="the pinned arm's tier, e.g. codex.standard")
+    c.add_argument("--job-type", required=True, help="the router rule to exercise (extract, mechanical_edit, implement_feature)")
+    c.add_argument("--trials", type=int, required=True, help="trials per task and arm")
+    c.add_argument("--max-spend-usd", type=float, required=True, help="recorded-spend threshold for the whole run")
+    c.add_argument("--approve-paid", action="store_true", help="really run it: paid model calls on your accounts")
+    c.add_argument("--out", help="results directory (default evals/runs/compare-<time>)")
+    c.add_argument("--repo", help="the git repository holding the start commits (default: each task's source.repo)")
+    c.add_argument("--effort", default="low", choices=list(EFFORT_LEVELS))
+    c.set_defaults(fn=_compare_cmd)
     x = sub.add_parser("export", help="write tasks as Harbor tasks (the Terminal-Bench 2.0 format)")
     x.add_argument("tasks", nargs="*", help="task directories (default: every task in --suite)")
     x.add_argument("--suite", default=DEFAULT_SUITE)
@@ -329,6 +408,10 @@ def cli(argv: list[str]) -> int:
     except EffortApprovalRequired as e:
         print(f"gdw eval {args.cmd}: {e}", file=sys.stderr)
         return 2
+    finally:
+        states, _STARTED[:] = list(_STARTED), []
+        if states:
+            asyncio.run(_drain(states))
 
 
 def register(app_: FastAPI, api: APIRouter, S: "AppState") -> None:

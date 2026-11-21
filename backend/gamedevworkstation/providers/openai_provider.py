@@ -12,9 +12,10 @@ Checked against developers.openai.com on 2026-11-05:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import time
-from typing import Any, AsyncIterator
+from typing import TYPE_CHECKING, Any, AsyncIterator
 
 import openai
 
@@ -27,6 +28,10 @@ from ..core.types import (
 from ..core.media import cap_media, image_payload
 from .anthropic_provider import TEXTLIKE, _media_text_fallback
 from .base import AuthStatus, Capabilities, ChatProvider, ProviderError, compute_cost, retry_after_from
+from .registry import chat_result, chat_span
+
+if TYPE_CHECKING:
+    from ..features.tracing import TraceRecorder
 
 ORDER = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 
@@ -209,7 +214,9 @@ def response_from(resp: Any, model: ModelConfig, latency_ms: int, headers: Any =
     usage.cost_usd = compute_cost(model, usage)
     status = _get(resp, "status")
     reason = _get(_get(resp, "incomplete_details") or {}, "reason")
-    if any(isinstance(b, ToolUseBlock) for b in blocks):
+    if status == "failed":
+        stop = "error"
+    elif any(isinstance(b, ToolUseBlock) for b in blocks):
         stop = "tool_use"
     elif status == "incomplete":
         stop = "max_tokens" if reason == "max_output_tokens" else "other"
@@ -234,6 +241,15 @@ def _wrap(e: Exception) -> ProviderError:
     return ProviderError(str(e))
 
 
+def _failed_response(resp: Any, model: ModelConfig) -> ProviderError:
+    error = ProviderError(_get(_get(resp, "error") or {}, "message") or "response failed")
+    if (wire := _get(resp, "usage")) is not None:
+        usage = usage_from(wire)
+        usage.cost_usd = compute_cost(model, usage)
+        error.usage = usage  # type: ignore[attr-defined]
+    return error
+
+
 # ------------------------------------------------------------------------ adapter
 
 
@@ -241,10 +257,12 @@ class OpenAIProvider(ChatProvider):
     name = "openai"
 
     def __init__(self, profile: str = "default", config: Config | None = None,
-                 client: openai.AsyncOpenAI | None = None):
+                 client: openai.AsyncOpenAI | None = None, *,
+                 tracing: TraceRecorder | None = None):
         self.profile = profile
         self.config = config or get_config()
         self._client = client
+        self.tracing = tracing
 
     @property
     def client(self) -> openai.AsyncOpenAI:
@@ -269,55 +287,75 @@ class OpenAIProvider(ChatProvider):
 
     async def complete(self, req: ChatRequest) -> Response:
         params, m = self._prepare(req)
-        t0 = time.monotonic()
-        try:
-            raw = await self.client.responses.with_raw_response.create(**params)
-            resp = raw.parse()
-            if hasattr(resp, "__await__"):
-                resp = await resp
-        except Exception as e:  # noqa: BLE001
-            raise _wrap(e) from e
-        return response_from(resp, m, int((time.monotonic() - t0) * 1000), raw.headers)
+        with chat_span(self.tracing, self.name, req.model, params["max_output_tokens"], req.effort,
+                       session_id=req.metadata.get("session_id"), run_id=req.metadata.get("run_id")) as span:
+            t0 = time.monotonic()
+            try:
+                raw = await self.client.responses.with_raw_response.create(**params)
+                resp = raw.parse()
+                if hasattr(resp, "__await__"):
+                    resp = await resp
+            except Exception as e:  # noqa: BLE001
+                raise _wrap(e) from e
+            result = response_from(resp, m, int((time.monotonic() - t0) * 1000), raw.headers)
+            chat_result(span, model=_get(resp, "model"), finish=result.stop_reason,
+                        usage=result.usage if _get(resp, "usage") is not None else None)
+            return result
 
     async def stream(self, req: ChatRequest) -> AsyncIterator[StreamEvent]:
         params, m = self._prepare(req)
-        t0 = time.monotonic()
-        final = None
-        headers = None
         try:
-            stream = await self.client.responses.create(**params, stream=True)
-            headers = getattr(getattr(stream, "response", None), "headers", None)
-            async for ev in stream:
-                t = ev.type
-                if t == "response.output_text.delta":
-                    yield StreamEvent(type="text_delta", index=ev.output_index, text=ev.delta)
-                elif t == "response.reasoning_summary_text.delta":
-                    yield StreamEvent(type="thinking_delta", index=ev.output_index, text=ev.delta)
-                elif t == "response.output_item.added" and _get(ev.item, "type") == "function_call":
-                    yield StreamEvent(type="tool_use_start", index=ev.output_index,
-                                      tool_use=ToolUseBlock(id=_get(ev.item, "call_id"), name=_get(ev.item, "name")))
-                elif t == "response.function_call_arguments.delta":
-                    yield StreamEvent(type="tool_input_delta", index=ev.output_index, text=ev.delta)
-                elif t == "response.output_item.done":
-                    yield StreamEvent(type="block_stop", index=ev.output_index)
-                elif t in ("response.completed", "response.incomplete"):
-                    final = ev.response
-                elif t == "response.failed":
-                    err = _get(_get(ev.response, "error") or {}, "message") or "response failed"
-                    raise ProviderError(err)
-                elif t == "error":
-                    raise ProviderError(getattr(ev, "message", "stream error"),
-                                        rate_limited=getattr(ev, "code", "") in ("rate_limit_exceeded", "slow_down"))
+            with chat_span(self.tracing, self.name, req.model, params["max_output_tokens"], req.effort,
+                           session_id=req.metadata.get("session_id"), run_id=req.metadata.get("run_id")) as span:
+                t0 = time.monotonic()
+                resp = None
+                usage = None
+                try:
+                    stream = await self.client.responses.create(**params, stream=True)
+                    headers = getattr(getattr(stream, "response", None), "headers", None)
+                    async for ev in stream:
+                        t = ev.type
+                        if t == "response.output_text.delta":
+                            yield StreamEvent(type="text_delta", index=ev.output_index, text=ev.delta)
+                        elif t == "response.reasoning_summary_text.delta":
+                            yield StreamEvent(type="thinking_delta", index=ev.output_index, text=ev.delta)
+                        elif t == "response.output_item.added" and _get(ev.item, "type") == "function_call":
+                            yield StreamEvent(type="tool_use_start", index=ev.output_index,
+                                              tool_use=ToolUseBlock(id=_get(ev.item, "call_id"), name=_get(ev.item, "name")))
+                        elif t == "response.function_call_arguments.delta":
+                            yield StreamEvent(type="tool_input_delta", index=ev.output_index, text=ev.delta)
+                        elif t == "response.output_item.done":
+                            yield StreamEvent(type="block_stop", index=ev.output_index)
+                        elif t in ("response.completed", "response.incomplete"):
+                            # Keep the reported usage if the read after the terminal event fails.
+                            final = ev.response
+                            resp = response_from(final, m, 0, headers)
+                            usage = resp.usage if _get(final, "usage") is not None else None
+                            chat_result(span, model=_get(final, "model"))
+                        elif t == "response.failed":
+                            chat_result(span, model=_get(ev.response, "model"))
+                            raise _failed_response(ev.response, m)
+                        elif t == "error":
+                            raise ProviderError(getattr(ev, "message", "stream error"),
+                                                rate_limited=getattr(ev, "code", "") in ("rate_limit_exceeded", "slow_down"))
+                except (asyncio.CancelledError, GeneratorExit) as e:
+                    if usage is not None:
+                        e.usage = usage  # type: ignore[attr-defined]
+                    raise
+                except Exception as e:  # noqa: BLE001
+                    error = _wrap(e)
+                    if usage is not None and getattr(error, "usage", None) is None:
+                        error.usage = usage  # type: ignore[attr-defined]
+                    if error is e:
+                        raise
+                    raise error from e
+                if resp is None:
+                    raise ProviderError("stream ended without a final response")
+                resp.latency_ms = int((time.monotonic() - t0) * 1000)
+                chat_result(span, finish=resp.stop_reason, usage=usage)
         except ProviderError as e:
             yield StreamEvent(type="error", error=str(e))
             raise
-        except Exception as e:  # noqa: BLE001
-            err = _wrap(e)
-            yield StreamEvent(type="error", error=str(err))
-            raise err from e
-        if final is None:
-            raise ProviderError("stream ended without a final response")
-        resp = response_from(final, m, int((time.monotonic() - t0) * 1000), headers)
         yield StreamEvent(type="usage", usage=resp.usage)
         yield StreamEvent(type="done", response=resp)
 

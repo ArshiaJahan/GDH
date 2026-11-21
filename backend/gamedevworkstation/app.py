@@ -14,6 +14,7 @@ from .config import Config, data_dir, get_config
 from .db import DB
 from .events import EventBus
 from .features.hookbus import HookBus
+from .features.tracing import TraceRecorder
 from .items import ItemIndex
 from .policy import DataPolicy
 from .providers.registry import ProviderRegistry
@@ -44,8 +45,9 @@ class AppState:
         self.mcp = None  # set by the MCP manager once loaded
         self.session_tokens: dict[str, str] = {}  # approved above-high tokens for main sessions
         self.hooks = HookBus(self)  # lifecycle hooks (features/hookbus.py); none registered by default
+        self.tracing = TraceRecorder(self.config.tracing, tool_names=self.tools.tools.keys(), model_names=self.config.models)
         self.runner = AgentRunner(self)
-        self.extensions: dict[str, object] = {}
+        self.extensions: dict[str, object] = {"tracing": self.tracing}
         # Short notes for the main agent's system prompt, each fn(session) -> str | None (e.g. the
         # task board's). They must depend only on the session, so the cached prompt stays the same.
         self.prompt_notes: list = []

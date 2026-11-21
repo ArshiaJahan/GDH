@@ -29,15 +29,17 @@ import logging
 import os
 import re
 import shutil
+from contextlib import contextmanager, nullcontext
 from typing import TYPE_CHECKING, Any, Iterable
 
 from fastapi import APIRouter, Body, FastAPI, HTTPException
 
-from ..agent.tools import ToolContext, ToolOutput, finalize_output, obj
+from ..agent.tools import ToolContext, ToolOutput, finalize_output, finish_tool_span, obj, tool_span
 from ..children import CHILDREN
 from ..config import delete_secret, get_secret, keychain_enabled, set_secret
 from ..core.types import ImageBlock, ToolSpec
 from ..skills import get_skill, list_skills, read_skill_file, save_skill
+from .tracing import SpanKind, TraceRecorder
 
 if TYPE_CHECKING:
     from ..app import AppState
@@ -299,11 +301,38 @@ def tool_name(server: str, tool: str) -> str:
     return f"mcp__{clean(server)}__{clean(tool)}"[:64]
 
 
+@contextmanager
+def _rpc_span(tracing: TraceRecorder | None, method: str, transport: str | None, *,
+              ctx: ToolContext | None = None, name: str | None = None, root: bool = False):
+    """`root` starts a span with no parent and no session (a connection's own handshake)."""
+    if tracing is None:
+        yield None
+        return
+    attrs = {"mcp.method.name": method, "gdw.mcp.direction": "outbound"}
+    if transport:
+        attrs["gdw.mcp.transport"] = transport
+    if name:
+        attrs["gen_ai.tool.name"] = name
+    extra = {"parent": None} if root else {}
+    with tracing.span(method, category="mcp", kind=SpanKind.CLIENT, attrs=attrs,
+                      session_id=ctx.session_id if ctx else None, run_id=ctx.run_id if ctx else None, **extra) as span:
+        try:
+            yield span
+        except TimeoutError:
+            span.set_attributes({"error.type": "timeout"})
+            span.end("timeout")
+            raise
+        except Exception:
+            span.set_attributes({"error.type": "rpc_error"})
+            raise
+
+
 class MCPConnection:
     """One live server connection, owned by its own task."""
 
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, tracing: TraceRecorder | None = None):
         self.cfg = cfg
+        self.tracing = tracing
         self.session: Any = None
         self.tools: list[Any] = []
         self.error: str | None = None
@@ -343,9 +372,12 @@ class MCPConnection:
             async with transport as streams:
                 read, write = streams[0], streams[1]
                 async with ClientSession(read, write) as session:
-                    await session.initialize()
+                    with _rpc_span(self.tracing, "initialize", self.cfg["transport"], root=True):
+                        await session.initialize()
                     self.session = session
-                    self.tools = (await session.list_tools()).tools
+                    with _rpc_span(self.tracing, "tools/list", self.cfg["transport"], root=True):
+                        listed = await session.list_tools()
+                    self.tools = listed.tools
                     self._ready.set()
                     await self._stop.wait()
         except Exception as e:  # noqa: BLE001
@@ -577,7 +609,7 @@ class MCPManager:
             cfg = self._row(name)
             if not cfg:
                 raise KeyError(name)
-            c = MCPConnection(cfg)  # secrets are resolved when it starts
+            c = MCPConnection(cfg, self.app.tracing)  # secrets are resolved when it starts
             self.conns[name] = c
             await c.start()
             for t in c.tools:
@@ -632,19 +664,25 @@ class MCPManager:
             out[key] = v if isinstance(v, bool) else None
         return out
 
-    async def call(self, ctx: ToolContext, name: str, args: dict) -> ToolOutput:
+    async def call(self, ctx: ToolContext, name: str, args: dict, *, trace: bool = True) -> ToolOutput:
+        with self.app.usage.scope(ctx.session_id), (tool_span(ctx, name) if trace else nullcontext()) as span:
+            out = await self._call(ctx, name, args)
+            finish_tool_span(span, out)
+            return out
+
+    async def _call(self, ctx: ToolContext, name: str, args: dict) -> ToolOutput:
         server, tool = self._names[name]
         cfg = self.server(server) or {}
         if not any(s["name"] == server for s in self.enabled_for(ctx.session)):
             # Connected for another session, but turned off (or removed) for this one.
             if cfg.get("shared") and not (ctx.session.get("settings") or {}).get("shared_tools"):
-                return ToolOutput("Shared tools are off for this session.", is_error=True)
-            return ToolOutput(f"MCP server {server} is turned off for this session.", is_error=True)
+                return ToolOutput("Shared tools are off for this session.", is_error=True, denied=True)
+            return ToolOutput(f"MCP server {server} is turned off for this session.", is_error=True, denied=True)
         hints = self.hints(server, tool)
         decision = mcp_policy(ctx.mode, hints)
         if decision == "deny":
             return ToolOutput(f"Plan only mode: {server}.{tool} isn't marked read-only (readOnlyHint), so it isn't "
-                              "run. Describe the call instead.", is_error=True)
+                              "run. Describe the call instead.", is_error=True, denied=True)
         if not cfg.get("shared") and decision == "ask" and not (ctx.consented("mcp", f"{server}__{tool}")
                                                                 or self.app.approvals.allowlisted("mcp", f"{server}__{tool}")):
             # Allowlist rule: `mcp:<server>__<tool>` (glob), e.g. `mcp:github__get_*`. ctx.consented: a
@@ -653,20 +691,25 @@ class MCPManager:
                 "subject": f"{server}.{tool}", "tool": tool, "server": server, "summary": json.dumps(args)[:300],
                 "hints": hint_notes(hints), "role": ctx.role, "run_id": ctx.run_id})
             if res["status"] != "approved":
-                return ToolOutput(f"User declined {server}.{tool}.", is_error=True)
+                return ToolOutput(f"User declined {server}.{tool}.", is_error=True, denied=True)
         if cfg.get("shared"):
             if not (ctx.session.get("settings") or {}).get("shared_tools"):
-                return ToolOutput("Shared tools are off for this session.", is_error=True)
+                return ToolOutput("Shared tools are off for this session.", is_error=True, denied=True)
             # Allowlist rule: `shared_tool:<server>__<tool>` (glob), e.g. `shared_tool:laptop__*`.
             if not self.app.approvals.allowlisted("shared_tool", f"{server}__{tool}"):
                 res = await self.app.approvals.ask(ctx.session_id, "shared_tool", {
                     "subject": f"{server}.{tool}", "tool": tool, "machine": server,
                     "summary": json.dumps(args)[:300], "role": ctx.role})
                 if res["status"] != "approved":
-                    return ToolOutput("User declined the job on shared tools.", is_error=True)
+                    return ToolOutput("User declined the job on shared tools.", is_error=True, denied=True)
         try:
             c = await self.connect(server)
-            r = await asyncio.wait_for(c.session.call_tool(tool, args), 300)
+            rpc = c.session.call_tool
+            with _rpc_span(self.app.tracing, "tools/call", cfg.get("transport"), ctx=ctx, name=name) as span:
+                r = await asyncio.wait_for(rpc(tool, args), 300)
+                if span is not None and _attr(r, "is_error", "isError"):
+                    span.set_attributes({"error.type": "rpc_error"})
+                    span.end("error")
         except Exception as e:  # noqa: BLE001
             await self.disconnect(server)
             return finalize_output(ctx, name, ToolOutput(f"MCP {server} error: {e}", is_error=True,

@@ -147,6 +147,8 @@ class Config(BaseModel):
     claude_code: dict[str, Any] = Field(default_factory=dict)  # cli_path, load_user_mcp, setting_sources (features/claude_code.py)
     prompt_improver: dict[str, Any] = Field(default_factory=dict)  # enabled, max_questions, model, effort, limits (features/prompt_improver.py)
     comfyplug: dict[str, Any] = Field(default_factory=dict)  # enabled, url, cli_path, timeout_s (features/comfyplug_feature.py)
+    tracing: dict[str, Any] = Field(default_factory=dict)
+    model_routing: dict[str, Any] = Field(default_factory=dict)
     models: dict[str, ModelConfig] = Field(default_factory=dict)
 
     def mcp_presets(self) -> dict[str, dict[str, Any]]:
@@ -259,10 +261,10 @@ PRE_OVERRIDES_BACKUP = "config.toml.pre-overrides.bak"  # the old full copy, kep
 # number, bool, string, list or table must have that type, else the default is used (see _check_types).
 TYPED_SECTIONS = ("orchestrator", "delegation", "assistant", "limits", "elevenlabs", "modes", "data_policy",
                   "appearance", "updates", "sessions", "skills", "hooks", "ladder", "campaigns", "fleet", "unity",
-                  "claude_code", "prompt_improver", "comfyplug")
+                  "claude_code", "prompt_improver", "comfyplug", "tracing", "model_routing")
 # Tables inside typed sections that stay free-form (their entries may legitimately differ in type
 # from the defaults: [skills.mcp_on_invoke] takes a server name or a list of them).
-UNTYPED_KEYS = {"skills": ("mcp_on_invoke",)}
+UNTYPED_KEYS = {"skills": ("mcp_on_invoke",), "model_routing": ("rules",)}
 
 
 def load_error() -> dict[str, Any] | None:
@@ -373,6 +375,21 @@ def _split_invalid(user: dict, defaults: dict) -> tuple[dict, list[str]]:
         for k in prompt_improver_errors(out["prompt_improver"]):
             del out["prompt_improver"][k]
             bad.append(f"prompt_improver.{k}")
+    # Counts must be whole numbers; sampling and storage stay within their supported bounds.
+    ranges = {
+        "tracing": {
+            "sample_rate": lambda v: _is_num(v) and 0 <= v <= 1,
+            "retention_days": lambda v: _is_int(v) and v > 0,
+            "max_spans": lambda v: _is_int(v) and 0 < v <= 100000,
+            "otlp_timeout_s": lambda v: _is_num(v) and v > 0,
+        },
+        "model_routing": {"max_escalations": lambda v: _is_int(v) and v >= 0},
+    }
+    for sec, checks in ranges.items():
+        for k, valid in checks.items():
+            if k in out.get(sec, {}) and not valid(out[sec][k]):
+                del out[sec][k]
+                bad.append(f"{sec}.{k}")
     return out, bad
 
 

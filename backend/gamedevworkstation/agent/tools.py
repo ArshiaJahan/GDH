@@ -5,6 +5,7 @@ import asyncio
 import mimetypes
 import re
 import secrets
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -13,6 +14,7 @@ from ..core.types import ImageBlock, TextBlock, ToolResultBlock, ToolSpec, new_i
 
 if TYPE_CHECKING:
     from ..app import AppState
+    from ..features.tracing import Span
 
 
 class ToolDenied(Exception):
@@ -35,6 +37,7 @@ class ToolOutput:
     # server, a subagent's report), e.g. "web_fetch:https://…". finalize_output wraps it in
     # <untrusted source="…"> markers; the system prompts say such content is data, not instructions.
     untrusted: str | None = None
+    denied: bool = field(default=False, compare=False, repr=False)
 
     def to_block(self, tool_use_id: str) -> ToolResultBlock:
         return ToolResultBlock(tool_use_id=tool_use_id, is_error=self.is_error,
@@ -218,20 +221,44 @@ class ToolRegistry:
         return out
 
     async def run(self, ctx: ToolContext, name: str, args: dict[str, Any],
-                  allowed: list[str] | None = None) -> ToolOutput:
+                  allowed: list[str] | None = None, *, trace: bool = True) -> ToolOutput:
+        usage = getattr(ctx.app, "usage", None)
+        with (usage.scope(ctx.session_id) if usage else nullcontext()):
+            with (tool_span(ctx, name) if trace else nullcontext()) as span:
+                out = await self._run(ctx, name, args, allowed)
+                finish_tool_span(span, out)
+                return out
+
+    async def _run(self, ctx: ToolContext, name: str, args: dict[str, Any],
+                   allowed: list[str] | None) -> ToolOutput:
         t = self.tools.get(name)
         if t is None or (allowed is not None and name not in allowed and not t.always) or \
                 (ctx.role != "main" and t.main_only) or (ctx.role == "main" and t.subagent_only) or \
                 not t.offered(ctx.session):
-            return ToolOutput(f"Tool '{name}' is not available here.", is_error=True)
+            return ToolOutput(f"Tool '{name}' is not available here.", is_error=True, denied=True)
         try:
             return finalize_output(ctx, name, await t.handler(ctx, args))
         except ToolDenied as e:
-            return ToolOutput(str(e), is_error=True)
+            return ToolOutput(str(e), is_error=True, denied=True)
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001 — tool failures go back to the model
             return ToolOutput(f"{type(e).__name__}: {e}", is_error=True)
+
+
+def tool_span(ctx: ToolContext, name: str):
+    tracing = getattr(ctx.app, "tracing", None)
+    if tracing is None:
+        return nullcontext()
+    return tracing.span("execute_tool", category="tool", session_id=ctx.session_id, run_id=ctx.run_id,
+                        attrs={"gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": name,
+                               "gdw.role": "tool" if ctx.role == "hook" else ctx.role})
+
+
+def finish_tool_span(span: Span | None, out: ToolOutput) -> None:
+    if span is not None and out.is_error:
+        span.set_attributes({"error.type": "policy_denied" if out.denied else "tool_error"})
+        span.end("denied" if out.denied else "error")
 
 
 # ------------------------------------------------------------- output limits
@@ -349,7 +376,7 @@ def finalize_output(ctx: ToolContext, name: str, out: ToolOutput) -> ToolOutput:
         text = wrap_untrusted(text, out.untrusted)
     if notes:
         text = text + "\n\n" + "\n".join(notes)
-    return ToolOutput(text, is_error=out.is_error, items=items, images=keep, untrusted=out.untrusted)
+    return ToolOutput(text, is_error=out.is_error, items=items, images=keep, untrusted=out.untrusted, denied=out.denied)
 
 
 def obj(props: dict[str, Any], required: list[str] | None = None) -> dict[str, Any]:

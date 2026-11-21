@@ -19,7 +19,7 @@ from fastapi import APIRouter, Body, FastAPI, HTTPException
 from ..agent.tools import ToolContext, ToolDenied, ToolOutput, obj
 from ..config import media_dir
 from ..core.types import Usage, new_id
-from ..usage import BudgetExceeded
+from ..usage import BudgetExceeded, UsageScope
 from ..providers.elevenlabs_client import (SFX_CREDITS_PER_SECOND, STS_CREDITS_PER_MINUTE, STT_CREDITS_PER_MINUTE,
                                            ElevenLabsClient, ElevenLabsError, char_cost, ext_for, music_seed)
 
@@ -215,20 +215,22 @@ class ElevenLabsService:
     # ---------------------------------------------------------------- generate
 
     async def _confirm(self, session_id: str | None, source: str, feature: str, credits: float, preview: str,
-                       characters: int) -> None:
-        self.app.usage.check(session_id)  # spend limits pause ElevenLabs too
+                       characters: int) -> UsageScope:
+        scope = self.app.usage.capture_scope(session_id)
+        self.app.usage.check(session_id, scope=scope)  # spend limits pause ElevenLabs too
         limit = float(self.defaults.get("confirm_over_characters") or 0)
         # Speech is measured in characters (as the setting's name says); other features by estimated credits.
         amount = characters if feature == "tts" else credits
         if source != "agent" or not limit or amount <= limit:
-            return
+            return scope
         if self.app.approvals.allowlisted("elevenlabs", feature):
-            return
+            return scope
         res = await self.app.approvals.ask(session_id, "elevenlabs", {
             "subject": f"{feature}: {characters} characters", "feature": feature, "characters": characters,
             "est_credits": round(credits), "preview": preview[:400]})
         if res["status"] != "approved":
             raise ToolDenied(f"User declined the {feature} generation.")
+        return scope
 
     async def _save(self, *, data: bytes, ext: str, feature: str, model: str, session_id: str | None, source: str,
                     title: str, text: str, credits: float, characters: int, voice: str | None, meta: dict,
@@ -252,24 +254,25 @@ class ElevenLabsService:
         self.app.bus.publish("elevenlabs.generated", out, session_id)
         return out
 
-    async def _run_job(self, session_id: str | None, title: str, coro):
-        try:
-            self.app.usage.check(session_id)
-        except Exception as e:
-            coro.close()
-            raise ElevenLabsError(str(e), 402) from e
-        jid = self.app.jobs.start(session_id, "elevenlabs", title)
-        try:
-            r = await coro
-            self.app.jobs.finish(jid, "done", credits=r.get("credits") if isinstance(r, dict) else None)
-            return r
-        except asyncio.CancelledError:
-            self.app.jobs.finish(jid, "cancelled")
-            raise
-        except Exception as e:
-            self.app.jobs.log(jid, str(e))
-            self.app.jobs.finish(jid, "failed")
-            raise
+    async def _run_job(self, session_id: str | None, title: str, coro, *, scope: UsageScope | None = None):
+        with self.app.usage.scope(session_id, captured=scope):
+            try:
+                self.app.usage.check(session_id)
+            except Exception as e:
+                coro.close()
+                raise ElevenLabsError(str(e), 402) from e
+            jid = self.app.jobs.start(session_id, "elevenlabs", title)
+            try:
+                r = await coro
+                self.app.jobs.finish(jid, "done", credits=r.get("credits") if isinstance(r, dict) else None)
+                return r
+            except asyncio.CancelledError:
+                self.app.jobs.finish(jid, "cancelled")
+                raise
+            except Exception as e:
+                self.app.jobs.log(jid, str(e))
+                self.app.jobs.finish(jid, "failed")
+                raise
 
     async def tts(self, text: str, *, session_id: str | None, source: str, voice_id: str | None = None,
                   model_id: str | None = None, output_format: str | None = None, voice_settings: dict | None = None,
@@ -278,7 +281,7 @@ class ElevenLabsService:
         model = model_id or self.defaults.get("model_id", "eleven_v4")
         fmt = output_format or self.defaults.get("output_format", "mp3_44100_128")
         est = len(text) * c.credit_multiplier(model)
-        await self._confirm(session_id, source, "tts", est, text, len(text))
+        scope = await self._confirm(session_id, source, "tts", est, text, len(text))
 
         async def go():
             vid = voice_id or await self.default_voice(c)
@@ -290,14 +293,14 @@ class ElevenLabsService:
                                     meta={"voice_id": vid, "output_format": fmt, "settings": voice_settings},
                                     message_id=message_id, profile=c.profile)
 
-        return await self._run_job(session_id, f"Text to speech ({len(text)} chars)", go())
+        return await self._run_job(session_id, f"Text to speech ({len(text)} chars)", go(), scope=scope)
 
     async def sound_effect(self, text: str, *, session_id: str | None, source: str, duration_s: float | None = None,
                            prompt_influence: float | None = None, loop: bool = False,
                            message_id: str | None = None, profile: str | None = None) -> dict:
         c = self.client_for_session(session_id, profile)
         est = SFX_CREDITS_PER_SECOND * (duration_s or 5)
-        await self._confirm(session_id, source, "sound_effect", est, text, len(text))
+        scope = await self._confirm(session_id, source, "sound_effect", est, text, len(text))
 
         async def go():
             data, headers = await c.sound_effect(text, duration_s, prompt_influence, loop)
@@ -307,7 +310,7 @@ class ElevenLabsService:
                                     meta={"duration_s": duration_s, "loop": loop}, message_id=message_id,
                                     profile=c.profile)
 
-        return await self._run_job(session_id, f"Sound effect: {text[:40]}", go())
+        return await self._run_job(session_id, f"Sound effect: {text[:40]}", go(), scope=scope)
 
     async def music(self, prompt: str, *, session_id: str | None, source: str, duration_s: float = 30,
                     instrumental: bool = False, message_id: str | None = None, profile: str | None = None,
@@ -332,7 +335,7 @@ class ElevenLabsService:
         if not self.features(c.profile).get("features", {}).get("music", True):
             raise ElevenLabsError("Music needs a paid ElevenLabs plan.")
         est = duration_s / 60 * MUSIC_CREDITS_PER_MINUTE  # rough; the response header gives the real cost
-        await self._confirm(session_id, source, "music", est, text, len(text))
+        scope = await self._confirm(session_id, source, "music", est, text, len(text))
 
         async def go():
             data, headers = await c.music(prompt, int(duration_s * 1000), instrumental, composition_plan=plan,
@@ -349,7 +352,7 @@ class ElevenLabsService:
                                     credits=char_cost(headers, est), characters=len(text), voice=None,
                                     meta=meta, message_id=message_id, profile=c.profile)
 
-        return await self._run_job(session_id, f"Music: {prompt[:40]}", go())
+        return await self._run_job(session_id, f"Music: {prompt[:40]}", go(), scope=scope)
 
     async def voice_changer(self, audio: Path, voice_id: str, *, session_id: str | None, source: str,
                             profile: str | None = None) -> dict:
