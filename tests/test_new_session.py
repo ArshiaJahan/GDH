@@ -56,8 +56,8 @@ def test_default_harness_setting(tmp_path):
 
 def test_modes_have_no_bypass(client):
     env = client.get("/api/environment", headers=H).json()
-    assert env["modes"] == ["plan", "ask", "accept_edits"]
-    for bad in ("bypassPermissions", "bypass", "dontAsk", "auto"):
+    assert env["modes"] == ["plan", "ask", "accept_edits", "auto"]
+    for bad in ("bypassPermissions", "bypass", "dontAsk"):
         assert client.post("/api/sessions", json={"mode": bad}, headers=H).status_code == 400
     sid = client.post("/api/sessions", json={"mode": "accept_edits"}, headers=H).json()["id"]
     assert client.patch(f"/api/sessions/{sid}", json={"mode": "bypassPermissions"}, headers=H).status_code == 400

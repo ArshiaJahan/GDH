@@ -114,7 +114,8 @@ class AgentRunner:
         # so a mid-turn pin or catalog edit can't change the cached prompt; the next turn picks it up.
         seg = [BASE_SYSTEM, *turn_skill_segments(settings, self.app.hooks.turn(session["id"]))]
         folder = session.get("folder") or "none (chat only)"
-        mode = {"ask": "Ask before edits", "accept_edits": "Accept edits", "plan": "Plan only (no edits or commands)"}
+        mode = {"ask": "Ask before edits", "accept_edits": "Accept edits", "plan": "Plan only (no edits or commands)",
+                "auto": "Auto (GDH decides; risky actions are refused)"}
         tiers = ", ".join(f"{k} = {v}" for k, v in self.app.config.tiers.items())
         d = self.app.config.delegation
         mp = d.get("max_parallel", {}) or {}

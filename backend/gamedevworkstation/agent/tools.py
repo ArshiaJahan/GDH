@@ -116,8 +116,24 @@ class ToolContext:
                              "Describe the change instead.")
         if self.consented(kind, subject) or app.approvals.allowlisted(kind, subject):
             return
-        if kind == "edit" and self.mode == "accept_edits":
+        if kind == "edit" and self.mode in ("accept_edits", "auto"):
             return
+        if self.mode == "auto":
+            from ..features.auto_mode import always_ask_reason, decide
+
+            # Deletes (any delete kind, a command that deletes recursively or in bulk, or a git command
+            # that rewrites or discards history) always show the card in Auto; everything else that would be a user question reaches the classifier, which
+            # fails closed to "ask".
+            why = next((r for v in (subject, payload.get("command")) if v
+                        and (r := always_ask_reason(str(v)))), None)
+            if why:
+                payload = {**payload, "reason": f"Auto mode always asks for this: {why}"}
+            if not (why or "delete" in kind):
+                decision, reason = await decide(self, kind, subject, payload)
+                if decision == "allow":
+                    return
+                if decision == "block":
+                    raise ToolDenied(f"Auto mode refused: {reason}")
         res = await app.approvals.ask(self.session_id, kind, {"subject": subject, "run_id": self.run_id,
                                                                "role": self.role, **payload})
         if res["status"] != "approved":

@@ -13,7 +13,7 @@ export type Att = { path: string; name: string; mime: string; size?: number; ite
 import { EFFORTS, sessionCardRows } from "./ClaudeCard";
 
 export { EFFORTS };
-export const MODES: Record<string, string> = { ask: "Ask before edits", accept_edits: "Accept edits", plan: "Plan only" };
+export const MODES: Record<string, string> = { ask: "Ask before edits", accept_edits: "Accept edits", auto: "Auto", plan: "Plan only" };
 
 /** The new-session screen's composer: no session exists yet. The settings live on the screen
  *  (/model, /effort, /mode change them there), and sending creates the session with the first message. */
@@ -155,7 +155,7 @@ export function Composer({ session, running, draft }: { session: Session; runnin
   const commands = useMemo(() => [
     { cmd: "/model", hint: "Switch model or tier", args: modelChoices },
     { cmd: "/effort", hint: "Set thinking effort", args: EFFORTS },
-    { cmd: "/mode", hint: "Ask before edits, accept edits, or plan only", args: Object.keys(MODES) },
+    { cmd: "/mode", hint: "Ask before edits, accept edits, auto, or plan only", args: Object.keys(MODES) },
     { cmd: "/compact", hint: "Summarize older turns to free context", args: [] },
     { cmd: "/clear", hint: "Start fresh; history stays visible", args: [] },
     { cmd: "/skill", hint: "Use a skill in this message", args: skills.map((s) => s.name) },
@@ -232,7 +232,7 @@ export function Composer({ session, running, draft }: { session: Session; runnin
           actions.toast(["xhigh", "max"].includes(arg) ? `Effort set to ${arg}. You'll be asked to approve it on the next turn.` : `Effort set to ${arg}`);
           return true;
         case "/mode":
-          if (!MODES[arg]) return actions.toast("Mode must be ask, accept_edits or plan", "error"), true;
+          if (!MODES[arg]) return actions.toast("Mode must be ask, accept_edits, auto or plan", "error"), true;
           await update({ mode: arg });
           actions.toast(`Mode: ${MODES[arg]}`);
           return true;

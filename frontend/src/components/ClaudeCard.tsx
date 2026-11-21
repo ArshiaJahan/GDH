@@ -11,7 +11,9 @@ import { modelLabel, providerModels, useModelCatalog } from "./ui";
 
 export const EFFORTS = ["none", "low", "medium", "high", "xhigh", "max"];
 /** The permission modes a Claude Code session can have, in menu order (no bypass mode: see store.SESSION_MODES). */
-export const NEW_SESSION_MODES: [string, string][] = [["plan", "Plan only"], ["ask", "Ask before edits"], ["accept_edits", "Accept edits"]];
+export const NEW_SESSION_MODES: [string, string][] = [["plan", "Plan only"], ["ask", "Ask before edits"], ["accept_edits", "Accept edits"], ["auto", "Auto"]];
+/** What Auto means: Claude Code's own auto mode for Claude Code sessions; GDW's classifier for built-in ones. */
+export const AUTO_MODE_HINT = "Claude decides what's safe; risky actions are refused or asked";
 
 /** "/Users/me/Games/Forklift" → "Forklift". */
 export const folderName = (f: string) => f.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || f;
@@ -58,7 +60,7 @@ export function ModeSelect({ value, onChange }: { value: string; onChange: (v: s
   return (
     <TextSelect label="Permission mode" value={value} onChange={onChange}>
       {!NEW_SESSION_MODES.some(([v]) => v === value) && <option value={value}>{value}</option>}
-      {NEW_SESSION_MODES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+      {NEW_SESSION_MODES.map(([v, l]) => <option key={v} value={v} title={v === "auto" ? AUTO_MODE_HINT : undefined}>{l}</option>)}
     </TextSelect>
   );
 }

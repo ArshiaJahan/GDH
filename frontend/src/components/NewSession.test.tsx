@@ -134,7 +134,7 @@ describe("NewSession", () => {
     expect(select("Model").selectedOptions[0].textContent).toBe("Opus 5.5");
     expect(select("Effort").value).toBe("medium");
     // GDW's modes only: no bypass.
-    expect(optionValues("Permission mode")).toEqual(["plan", "ask", "accept_edits"]);
+    expect(optionValues("Permission mode")).toEqual(["plan", "ask", "accept_edits", "auto"]);
     expect(select("Permission mode").value).toBe("ask");
     expect(screen.getByRole("button", { name: "Tools" })).toBeTruthy();
     expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);

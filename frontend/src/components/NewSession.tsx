@@ -153,7 +153,7 @@ export function NewSession() {
     set: (b) => {
       const m = b.model ? appState?.tiers?.[b.model] ?? b.model : undefined; // a tier key names its model
       if (m && !models.some((x) => x.id === m)) throw new Error("New sessions run Claude Code: pick a Claude model.");
-      if (b.mode && !NEW_SESSION_MODES.some(([v]) => v === b.mode)) throw new Error("Mode must be plan, ask or accept_edits.");
+      if (b.mode && !NEW_SESSION_MODES.some(([v]) => v === b.mode)) throw new Error("Mode must be plan, ask, accept_edits or auto.");
       setPrefs({ ...(m ? { model: m } : {}), ...(b.effort ? { effort: b.effort } : {}), ...(b.mode ? { mode: b.mode } : {}) });
     },
     start: async (text, skill, attachments) => {

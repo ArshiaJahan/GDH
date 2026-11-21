@@ -357,7 +357,7 @@ function NewCampaignDialog({ onClose, onCreated }: { onClose: () => void; onCrea
       <div className="flex flex-wrap items-center gap-4 mb-3 text-[13px]">
         <label className="flex items-center gap-1.5"><span className="label mb-0">Mode</span>
           <select className="input py-0.5" value={f.mode} onChange={(e) => setF({ ...f, mode: e.target.value })}>
-            <option value="accept_edits">Accept edits</option><option value="ask">Ask before edits</option><option value="plan">Plan only</option>
+            <option value="accept_edits">Accept edits</option><option value="ask">Ask before edits</option><option value="auto">Auto</option><option value="plan">Plan only</option>
           </select>
         </label>
         <label className="flex items-center gap-1.5 cursor-pointer"><input type="checkbox" checked={f.autopilot} onChange={(e) => setF({ ...f, autopilot: e.target.checked })} /> Autopilot</label>

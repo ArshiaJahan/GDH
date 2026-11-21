@@ -35,8 +35,8 @@ Checked against claude 2.1.308 logged in with a claude.ai subscription ("[live]"
   tool_use_id}, answer {"behavior":"allow","updatedInput":{...}} or {"behavior":"deny","message":...}
   [live]. A `can_use_tool` control request (only sent with `--permission-prompt-tool stdio`, which
   GDW doesn't pass) gets the same answer.
-- Modes: ask → manual (reported back as "default"), accept_edits → acceptEdits, plan → plan.
-  bypassPermissions, dontAsk and auto are never passed (build_argv refuses them).
+- Modes: ask → manual (reported back as "default"), accept_edits → acceptEdits, plan → plan, auto → auto.
+  bypassPermissions and dontAsk are never passed (build_argv refuses them).
 - Stop: an `interrupt` control request (answered with {"still_queued": []}, the turn ends with
   terminal_reason "aborted_streaming", the process stays) [live]; then SIGINT, which ends the turn
   and the process [live]; then services._kill_tree.
@@ -75,7 +75,7 @@ from ..skills import turn_skill_segments
 from ..store import remove_claude_code_folder, valid_claude_code_session
 from .claude_cli import LOGIN_HINT, CliProbe, redact
 from .gdw_mcp import PROMPT_TOOL, SERVER, GdwMcp, mount
-from .harnesses import DEFERRED_SDK_TOOLS, HOOK_TIMEOUT_S, _project_instructions, _prompt_text, make_gate
+from .harnesses import DEFER, DEFERRED_SDK_TOOLS, HOOK_TIMEOUT_S, _project_instructions, _prompt_text, ask_tool, make_gate
 
 if TYPE_CHECKING:
     from ..app import AppState
@@ -83,8 +83,8 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 HARNESS = "claude_code"
-CLI_MODE = {"ask": "manual", "accept_edits": "acceptEdits", "plan": "plan"}  # `--help` lists manual; init reports "default"
-FORBIDDEN_MODES = frozenset({"bypassPermissions", "dontAsk", "auto"})
+CLI_MODE = {"ask": "manual", "accept_edits": "acceptEdits", "plan": "plan", "auto": "auto"}
+FORBIDDEN_MODES = frozenset({"bypassPermissions", "dontAsk"})
 FORBIDDEN_FLAGS = ("--bare", "--dangerously-skip-permissions", "--allow-dangerously-skip-permissions")
 SETTING_SOURCES = ("user", "project", "local")
 GDW_PREFIX = f"mcp__{SERVER}__"
@@ -304,6 +304,7 @@ class Turn:
     effort: str | None
     jid: str | None
     gate: Any
+    proposed_edits: dict[str, Path] = field(default_factory=dict)
     touched: list[Path] = field(default_factory=list)
     done: asyncio.Future = field(default_factory=lambda: asyncio.get_running_loop().create_future())
     t0: float = field(default_factory=time.monotonic)
@@ -449,6 +450,8 @@ class Proc:
                                if isinstance(b, dict) and b.get("type") == "text")
                 if txt:
                     app.jobs.log(turn.jid, f"[subagent] {txt[:500]}\n")
+            elif turn and t == "user":
+                self._on_user(ev.get("message") or {}, turn, subagent=True)
             return
         if t == "stream_event":
             self._on_stream(ev.get("event") or {}, turn)
@@ -610,19 +613,25 @@ class Proc:
                 if turn and turn.jid:
                     app.jobs.log(turn.jid, f"{b.name}: {json.dumps(b.input)[:200]}\n")
 
-    def _on_user(self, m: dict, turn: Turn | None) -> None:
-        self._open = None
+    def _on_user(self, m: dict, turn: Turn | None, *, subagent: bool = False) -> None:
+        if not subagent:
+            self._open = None
         content = m.get("content")
         if not isinstance(content, list):
             return
         for b in content:
             if not isinstance(b, dict) or b.get("type") != "tool_result":
                 continue
-            text = redact(_block_text(b.get("content")), self.token)[:20000]
+            tool_use_id = str(b.get("tool_use_id") or "")
             err = bool(b.get("is_error"))
-            res = ToolResultBlock.text(str(b.get("tool_use_id") or ""), text or "(no output)", is_error=err)
-            if turn and turn.quiet:
+            if turn:
+                path = turn.proposed_edits.pop(tool_use_id, None)
+                if path is not None and not err:
+                    turn.touched.append(path)
+            if subagent or (turn and turn.quiet):
                 continue
+            text = redact(_block_text(b.get("content")), self.token)[:20000]
+            res = ToolResultBlock.text(tool_use_id, text or "(no output)", is_error=err)
             if turn:
                 turn.pending_results.append(res)
             else:
@@ -670,9 +679,10 @@ class Proc:
         sub = req.get("subtype")
         try:
             if sub == "hook_callback":
-                out = await self.mgr.pre_tool_use(self.sid, req.get("input") or {})
+                out = await self.mgr.pre_tool_use(self.sid, req.get("input") or {}, req.get("tool_use_id"))
             elif sub == "can_use_tool":
-                out = await self.mgr.decide(self.sid, str(req.get("tool_name") or ""), req.get("input") or {})
+                out = await self.mgr.decide(self.sid, str(req.get("tool_name") or ""), req.get("input") or {},
+                                            req.get("tool_use_id"))
             else:
                 raise ValueError(f"Unsupported control request subtype: {sub}")
             await self.send({"type": "control_response",
@@ -1018,7 +1028,8 @@ class ClaudeCode:
 
     def _system_prompt(self, s: dict, cwd: Path) -> str:
         app = self.app
-        mode = {"ask": "Ask before edits", "accept_edits": "Accept edits", "plan": "Plan only (no edits or commands)"}
+        mode = {"ask": "Ask before edits", "accept_edits": "Accept edits", "plan": "Plan only (no edits or commands)",
+                "auto": "Auto (Claude decides; risky actions are refused)"}
         where = s.get("folder") or f"none (chat only). Working folder: {cwd}, a private scratch folder for this session"
         seg = [CONTEXT_HEAD, f"Session folder: {where}\nMode: {mode.get(s['mode'], s['mode'])}"]
         seg.extend(self._mode_notes(s))
@@ -1057,6 +1068,9 @@ class ClaudeCode:
         return (cli, model, effort if effort not in ("none", None) else None, s["mode"], str(cwd),
                 str(c.get("setting_sources") or ""), bool(c.get("load_user_mcp")), bool(c.get("pre_tool_hook", True)),
                 tuple(self.mcp.tool_names(s)))
+
+    def _requires_pre_tool_hook(self, s: dict) -> bool:
+        return s["mode"] == "auto" or bool(self.cfg.get("pre_tool_hook", True))
 
     async def run_turn(self, s: dict) -> None:
         app, sid = self.app, s["id"]
@@ -1109,9 +1123,9 @@ class ClaudeCode:
                         self._error(sid, str(e))
                     return
                 proc.billing = billing
-                touched: list[Path] = []
-                turn = Turn(sid=sid, model=model, effort=effort, jid=jid, touched=touched,
-                            gate=make_gate(app, lambda: app.store.get(sid) or s, session_cwd(s), touched))
+                proposed_edits: dict[str, Path] = {}
+                turn = Turn(sid=sid, model=model, effort=effort, jid=jid, proposed_edits=proposed_edits,
+                            gate=make_gate(app, lambda: app.store.get(sid) or s, session_cwd(s), proposed_edits))
                 proc.turn = turn
                 proc.last_used = time.monotonic()
                 if proc.reader.done():  # it already exited (bad flags, crash at start)
@@ -1292,7 +1306,7 @@ class ClaudeCode:
             sig = self._signature(s, cli, model, effort, cwd)
             cur = self.procs.get(sid)
             if cur and cur.alive and cur.signature == sig and cur.turn is None and not cur.starting \
-                    and (cur.hook_ok or not self.cfg.get("pre_tool_hook", True)):
+                    and (cur.hook_ok or not self._requires_pre_tool_hook(s)):
                 return cur
             if cur:
                 await self.close_session(sid, keep_lock=True)
@@ -1313,6 +1327,7 @@ class ClaudeCode:
     async def _spawn(self, s: dict, cli: str, model: str, effort: str | None, resume: str | None,
                      cwd: Path, sig: tuple) -> Proc:
         app, sid, c = self.app, s["id"], self.cfg
+        require_hook = self._requires_pre_tool_hook(s)
         cc_session = resume or str(uuid.uuid4())
         from .claude_cli import child_env
 
@@ -1342,11 +1357,12 @@ class ClaudeCode:
             billing = "api" if (self.probe.cached() or {}).get("bills_api") else "subscription"
             p = Proc(self, sid, proc, sig, cc_session, mcp_file, resumed=bool(resume), token=token, billing=billing)
             self.procs[sid] = p
-            if c.get("pre_tool_hook", True):
+            if require_hook:
                 info = await p.request({"subtype": "initialize", "hooks": {"PreToolUse": [{
                     "matcher": None, "hookCallbackIds": [HOOK_ID], "timeout": HOOK_TIMEOUT_S, "onFailure": "block"}]}},
                     timeout=INIT_TIMEOUT_S)
-                if isinstance(info, dict) and info.get("hooks_applied") is False:  # 2.1.308 answers true [live]
+                applied = info.get("hooks_applied") if isinstance(info, dict) else None
+                if applied is False or (s["mode"] == "auto" and applied is not True):
                     raise RuntimeError("Claude Code didn't apply GameDevWorkstation's PreToolUse hook")
                 p.hook_ok = True
                 self._check_model(sid, model, info)
@@ -1376,7 +1392,7 @@ class ClaudeCode:
             stderr = p.stderr.strip() if p else ""
             if isinstance(e, OSError) and e.errno == errno.E2BIG:
                 text = "Couldn't start Claude Code: command line too large (E2BIG); reduce the session context or paths."
-            elif p is not None and c.get("pre_tool_hook", True) and not p.hook_ok:
+            elif p is not None and require_hook and not p.hook_ok:
                 text = f"Claude Code PreToolUse hook registration failed; process ended: {e or type(e).__name__}"
             else:
                 text = f"Couldn't start Claude Code: {e or type(e).__name__}"
@@ -1408,7 +1424,7 @@ class ClaudeCode:
         s = self.app.store.get(sid)
         if not s:
             return None
-        return make_gate(self.app, lambda: self.app.store.get(sid) or s, session_cwd(s), [])
+        return make_gate(self.app, lambda: self.app.store.get(sid) or s, session_cwd(s), {})
 
     def _note_plan(self, sid: str, name: str, inp: dict) -> None:
         """Keep the plan text the CLI writes (GDW never reads ~/.claude), for the plan card."""
@@ -1426,7 +1442,7 @@ class ClaudeCode:
     def _plan_mode(self, sid: str) -> bool:
         return ((self.app.store.get(sid) or {}).get("mode")) == "plan"
 
-    async def pre_tool_use(self, sid: str, data: dict) -> dict:
+    async def pre_tool_use(self, sid: str, data: dict, tool_use_id: str | None = None) -> dict:
         """The PreToolUse hook callback: GDW's gate for every tool call, like agent_sdk's pre_tool_use."""
         name = str(data.get("tool_name") or data.get("toolName") or "")
         inp = data.get("tool_input") if isinstance(data.get("tool_input"), dict) else (data.get("input") or {})
@@ -1444,7 +1460,9 @@ class ClaudeCode:
             why = None  # GameDevWorkstation's own tool: it applies its own approvals and Plan mode when it runs
         else:
             gate = self._gate(sid)
-            why = await gate(name, inp) if gate else "This session no longer exists."
+            why = await gate(name, inp, tool_use_id or data.get("tool_use_id")) if gate else "This session no longer exists."
+        if why == DEFER:
+            return {}  # Claude Code decides, with mcp__gdw__approve handling any prompt
         out: dict[str, Any] = {"hookEventName": "PreToolUse", "permissionDecision": "deny" if why else "allow"}
         if why:
             out["permissionDecisionReason"] = why
@@ -1458,9 +1476,9 @@ class ClaudeCode:
         inp = next((a[k] for k in ("input", "tool_input", "toolInput", "arguments") if isinstance(a.get(k), dict)), {})
         if not name:
             return {"behavior": "deny", "message": "Malformed permission request (no tool_name)."}
-        return await self.decide(sid, name, inp)
+        return await self.decide(sid, name, inp, a.get("tool_use_id") or a.get("toolUseId"))
 
-    async def decide(self, sid: str, name: str, inp: dict) -> dict:
+    async def decide(self, sid: str, name: str, inp: dict, tool_use_id: str | None = None) -> dict:
         app = self.app
         allow = {"behavior": "allow", "updatedInput": inp}
         if self._quiet(sid):
@@ -1490,7 +1508,10 @@ class ClaudeCode:
         if name.startswith(GDW_PREFIX):
             return allow  # GDW's own tool: its own checks run when it's called
         gate = self._gate(sid)
-        why = await gate(name, inp) if gate else "This session no longer exists."
+        why = await gate(name, inp, tool_use_id) if gate else "This session no longer exists."
+        if why == DEFER:
+            s = app.store.get(sid)
+            why = await ask_tool(app, sid, session_cwd(s), name, inp) if s else "This session no longer exists."
         return {"behavior": "deny", "message": why} if why else allow
 
     async def _ask_question(self, sid: str, inp: dict) -> dict:

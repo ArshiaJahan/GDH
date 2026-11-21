@@ -44,7 +44,8 @@ DEFERRED_SDK_TOOLS = {"BashOutput", "KillShell", "KillBash", "TaskOutput", "Task
 HOOK_TIMEOUT_S = 24 * 3600
 PROJECT_INSTRUCTIONS = ("CLAUDE.md", ".claude/CLAUDE.md")
 PROJECT_INSTRUCTIONS_MAX_CHARS = 40_000
-SDK_MODE = {"ask": "default", "accept_edits": "acceptEdits", "plan": "plan"}
+SDK_MODE = {"ask": "default", "accept_edits": "acceptEdits", "plan": "plan", "auto": "auto"}
+DEFER = "defer"
 # Recap of earlier turns for a provider thread that starts without them (bounded).
 RECAP_MESSAGES = 12
 RECAP_MESSAGE_CHARS = 400
@@ -107,13 +108,31 @@ def _prompt_text(msg: Message) -> str:
     return "\n\n".join(parts)
 
 
+async def ask_tool(app: "AppState", sid: str, cwd: Path, name: str, inp: dict,
+                   reason: str | None = None) -> str | None:
+    """Show the approval card for a tool, returning a refusal reason if declined."""
+    if name in EDIT_SDK_TOOLS:
+        target = inp.get("file_path") or inp.get("path") or inp.get("notebook_path")
+        res = await app.approvals.ask(sid, "edit", {
+            "subject": target or name, "path": target, "action": name.lower(),
+            "old": str(inp.get("old_string", ""))[:500],
+            "new": str(inp.get("new_string", inp.get("content", "")))[:500]})
+    else:
+        cmd = inp.get("command", "") if name == "Bash" else f"{name} {json.dumps(inp)[:300]}"
+        res = await app.approvals.ask(sid, "command", {
+            "subject": cmd if name == "Bash" else name, "command": cmd, "cwd": str(cwd),
+            **({"reason": f"Auto mode always asks for this: {reason}"} if reason else {})})
+    return None if res["status"] == "approved" else "The user declined."
+
+
 def make_gate(app: "AppState", session: Callable[[], dict], cwd: Path,
-              touched: list[Path]) -> Callable[[str, dict], Awaitable[str | None]]:
+              proposed_edits: dict[str, Path]) -> Callable[[str, dict, str | None], Awaitable[str | None]]:
     """GameDevWorkstation's decision for one Claude Code tool call (Agent SDK and claude_code harnesses):
-    the returned gate(name, input) is None to allow, else the reason it's refused.
+    the returned gate(name, input, tool_use_id) is None to allow, DEFER to leave the decision to Claude Code,
+    or a reason for refusal.
     Folder scope, data policy, Plan mode, git metadata, the before-write snapshot and the approval
     cards all live here. `session()` gives the session as it is now (its mode can change mid-turn);
-    files about to be written are appended to `touched` (for changes.notify after the turn)."""
+    proposed edit paths are keyed by tool use ID for confirmation from the tool result."""
     sid = session()["id"]
     roots = [cwd.resolve(), app.worktrees_root(sid).resolve()]
 
@@ -127,45 +146,46 @@ def make_gate(app: "AppState", session: Callable[[], dict], cwd: Path,
         full = full_path(path_str)
         return any(full == r or r in full.parents for r in roots)
 
-    async def gate(name: str, inp: dict) -> str | None:
+    async def gate(name: str, inp: dict, tool_use_id: str | None) -> str | None:
         s = session()
+        auto = s["mode"] == "auto"
+        allowed = DEFER if auto else None
         target = inp.get("file_path") or inp.get("path") or inp.get("notebook_path")
         if name in READ_ONLY_SDK_TOOLS | EDIT_SDK_TOOLS and not inside(target):
             return f"{target} is outside the session folder."
         if name in READ_ONLY_SDK_TOOLS:
             if target and not app.policy.allows_path(full_path(target), "anthropic"):
                 return "That file is marked sensitive."
-            return None
+            return allowed
         if name in WEB_FETCH_SDK_TOOLS:
-            return await _web_fetch_refusal(str(inp.get("url") or ""))
+            return (await _web_fetch_refusal(str(inp.get("url") or ""))) or allowed
         if name in EDIT_SDK_TOOLS:
             if s["mode"] == "plan":
                 return "Plan only mode: no edits."
             full = full_path(target) if target else None
             if full and (in_git_metadata(full) or in_git_metadata(target)):
                 return GIT_WRITE_REFUSED.format(path=target)
-            if not (s["mode"] == "accept_edits" or app.approvals.allowlisted("edit", str(full or ""))):
-                res = await app.approvals.ask(sid, "edit", {
-                    "subject": target or name, "path": target, "action": name.lower(),
-                    "old": str(inp.get("old_string", ""))[:500],
-                    "new": str(inp.get("new_string", inp.get("content", "")))[:500]})
-                if res["status"] != "approved":
-                    return "The user declined."
+            if not (auto or s["mode"] == "accept_edits" or app.approvals.allowlisted("edit", str(full or ""))):
+                if why := await ask_tool(app, sid, cwd, name, inp):
+                    return why
             if full:
                 app.changes.snapshot(sid, full)  # for the Changes card's diff and revert
-                touched.append(full)
+                if tool_use_id:
+                    proposed_edits[tool_use_id] = full
+            return allowed
+        if name == "Bash" and s["mode"] == "plan":
+            return "Plan only mode: no commands."
+        if auto:
+            from .auto_mode import always_ask_reason
+
+            # Bulk deletes and history-rewriting git commands always ask the user in Auto, never
+            # Claude Code's classifier.
+            if name == "Bash" and (why := always_ask_reason(str(inp.get("command", "")))):
+                return await ask_tool(app, sid, cwd, name, inp, why)
+            return DEFER
+        if name == "Bash" and app.approvals.allowlisted("run_command", inp.get("command", "")):
             return None
-        if name == "Bash":
-            cmd = inp.get("command", "")
-            if s["mode"] == "plan":
-                return "Plan only mode: no commands."
-            if app.approvals.allowlisted("run_command", cmd):
-                return None
-            res = await app.approvals.ask(sid, "command", {"subject": cmd, "command": cmd, "cwd": str(cwd)})
-        else:
-            res = await app.approvals.ask(sid, "command", {"subject": name, "command": f"{name} {json.dumps(inp)[:300]}",
-                                                           "cwd": str(cwd)})
-        return None if res["status"] == "approved" else "The user declined."
+        return await ask_tool(app, sid, cwd, name, inp)
 
     return gate
 
@@ -238,22 +258,27 @@ class Harnesses:
         resume = s["settings"].get("agent_sdk_session")
         prompt = self._prompt(sid, recap=not resume)  # a new SDK session hasn't seen the earlier turns
         cwd = _cwd(s)
+        proposed_edits: dict[str, Path] = {}
         touched: list[Path] = []
-        gate = make_gate(app, lambda: s, cwd, touched)
+        gate = make_gate(app, lambda: s, cwd, proposed_edits)
 
-        async def pre_tool_use(data: Any, _tool_use_id: str | None, _ctx: Any) -> dict:
+        async def pre_tool_use(data: Any, tool_use_id: str | None, _ctx: Any) -> dict:
             name = data.get("tool_name", "")
             if name in DEFERRED_SDK_TOOLS:
                 return {}  # no say: the CLI's own rules, then can_use_tool (which asks), decide
-            why = await gate(name, data.get("tool_input") or {})
+            why = await gate(name, data.get("tool_input") or {}, tool_use_id or data.get("tool_use_id"))
+            if why == DEFER:
+                return {}
             out: dict[str, Any] = {"hookEventName": "PreToolUse", "permissionDecision": "deny" if why else "allow"}
             if why:
                 out["permissionDecisionReason"] = why
             return {"hookSpecificOutput": out}
 
-        async def can_use_tool(name: str, inp: dict, _ctx: Any):
-            # Second line: reached only for calls the hook left undecided (or if a hook didn't run).
-            why = await gate(name, inp)
+        async def can_use_tool(name: str, inp: dict, ctx: Any):
+            # The SDK calls this when Claude Code still needs a decision after its own checks.
+            why = await gate(name, inp, getattr(ctx, "tool_use_id", None))
+            if why == DEFER:
+                why = await ask_tool(app, sid, cwd, name, inp)
             if why:
                 return PermissionResultDeny(behavior="deny", message=why)
             return PermissionResultAllow(behavior="allow")
@@ -301,6 +326,9 @@ class Harnesses:
             elif isinstance(m, UserMessage) and isinstance(m.content, list):
                 for b in m.content:
                     if isinstance(b, SResult):
+                        path = proposed_edits.pop(b.tool_use_id, None)
+                        if path is not None and not b.is_error:
+                            touched.append(path)
                         text = b.content if isinstance(b.content, str) else json.dumps(b.content)[:20000]
                         pending_results.append(ToolResultBlock.text(b.tool_use_id, text or "(no output)",
                                                                     is_error=bool(b.is_error)))
@@ -344,6 +372,7 @@ class Harnesses:
             effort = "low"
         # Codex runs shell commands of its own choosing (sandboxed, but still commands), and shell commands
         # always ask unless allowlisted: once per turn in Ask and Accept edits. Plan runs read-only.
+        # Codex CLI has no Auto mode, so Auto uses the same per-turn approval as Ask.
         if s["mode"] != "plan" and not app.approvals.allowlisted("codex_cli", str(cwd)):
             res = await app.approvals.ask(sid, "command", {
                 "subject": "Codex CLI turn", "command": f"codex exec (sandbox: workspace-write) in {cwd}", "cwd": str(cwd)})

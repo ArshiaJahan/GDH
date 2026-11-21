@@ -23,9 +23,9 @@ SESSION_FIELDS = ("title", "pinned", "folder", "model", "effort", "account", "mo
 # and where its title came from. Duplicates and forks don't copy them.
 NOT_COPIED = ("agent_sdk_session", "codex_thread", "claude_code_session", "claude_code_totals", "claude_code_since",
               "claude_code_sent", "scheduled_task", "title_source")
-# Permission modes a session can have (Plan / Ask / Accept edits). There is no bypass mode: Claude
+# Permission modes a session can have (Plan / Ask / Accept edits / Auto). There is no bypass mode: Claude
 # Code sessions never get bypassPermissions (claude_code.FORBIDDEN_MODES).
-SESSION_MODES = ("plan", "ask", "accept_edits")
+SESSION_MODES = ("plan", "ask", "accept_edits", "auto")
 MAX_CLEARS = 100  # /clear times kept in settings.cleared_at (for forks from before a clear)
 GROUP_COLORS = ("gray", "blue", "teal", "green", "yellow", "orange", "red", "violet")
 VIEWS = {  # GET /api/sessions?view=

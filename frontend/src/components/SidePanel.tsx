@@ -52,7 +52,7 @@ export function SidePanel() {
 
 // ------------------------------------------------------------------ environment
 
-const MODES = [["ask", "Ask before edits"], ["accept_edits", "Accept edits"], ["plan", "Plan only"]];
+const MODES = [["ask", "Ask before edits"], ["accept_edits", "Accept edits"], ["auto", "Auto"], ["plan", "Plan only"]];
 const EFFORTS = ["none", "low", "medium", "high", "xhigh", "max"];
 const ACCOUNT_PROVIDERS = ["anthropic", "openai", "elevenlabs"].map((p) => [p, providerLabel(p)]);
 

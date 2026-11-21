@@ -242,13 +242,13 @@ def test_never_forbidden_modes(tmp_path, monkeypatch):
     base = dict(session_id="00000000-0000-0000-0000-000000000000", resume=None, model="m", effort="high",
                 mcp_config=tmp_path / "m.json", add_dirs=[], system_prompt=None, setting_sources="",
                 strict_mcp=True)
-    for mode in ("ask", "accept_edits", "plan", "bogus"):
+    for mode in ("ask", "accept_edits", "plan", "auto", "bogus"):
         argv = ccm.build_argv("claude", mode=mode, **base)
         pm = _opt(argv, "--permission-mode")
-        assert pm in ("manual", "acceptEdits", "plan") and pm not in ccm.FORBIDDEN_MODES
+        assert pm in ("manual", "acceptEdits", "plan", "auto") and pm not in ccm.FORBIDDEN_MODES
         assert not any(f in argv for f in ccm.FORBIDDEN_FLAGS)
     assert set(ccm.CLI_MODE.values()).isdisjoint(ccm.FORBIDDEN_MODES)
-    assert {"bypassPermissions", "dontAsk", "auto"} <= ccm.FORBIDDEN_MODES
+    assert ccm.FORBIDDEN_MODES == {"bypassPermissions", "dontAsk"} and ccm.CLI_MODE["auto"] == "auto"
     for bad in ccm.FORBIDDEN_MODES:  # even if the mapping were changed, the builder refuses
         monkeypatch.setitem(ccm.CLI_MODE, "ask", bad)
         with pytest.raises(ValueError):
@@ -1275,6 +1275,67 @@ async def test_hooks_not_applied_fails_closed(rig):
     assert rig.sid not in rig.cc.procs
     assert "hook registration failed" in rig.app.store.messages(rig.sid)[-1].text()
     assert not [e for e in rig.entries() if e.get("event") == "user"]
+
+
+@pytest.mark.parametrize("hooks_applied", [True, False, None])
+async def test_auto_mode_requires_the_gdw_hook(rig, hooks_applied):
+    rig.app.store.update(rig.sid, mode="auto")
+    rig.app.config.claude_code["pre_tool_hook"] = False
+    rig.configure(hooks_applied=hooks_applied)
+    await rig.send()
+    init, = [e["request"] for e in rig.entries() if e.get("subtype") == "initialize"]
+    assert init["hooks"]["PreToolUse"][0]["hookCallbackIds"] == [ccm.HOOK_ID]
+    if hooks_applied is True:
+        p = rig.cc.procs[rig.sid]
+        assert p.hook_ok and _user_texts(rig.entries()) == ["hello"]
+        p.hook_ok = False  # simulate a matching process with no confirmed registration
+        rig.configure(hooks_applied=False)
+        await rig.send("again")
+    assert rig.sid not in rig.cc.procs
+    assert "hook registration failed" in rig.app.store.messages(rig.sid)[-1].text()
+    assert _user_texts(rig.entries()) == (["hello"] if hooks_applied is True else [])
+
+
+async def test_denied_auto_edit_is_not_reported_as_changed(rig, monkeypatch):
+    create_app("t", rig.app)  # install the real change notification and indexing path
+    rig.app.store.update(rig.sid, mode="auto")
+    await rig.send()
+    proc = rig.cc.procs[rig.sid]
+    denied = rig.folder / "denied.md"
+    written = rig.folder / "written.md"
+    denied.write_text("original", encoding="utf-8")
+    approvals = AsyncMock()
+    monkeypatch.setattr(rig.app.approvals, "ask", approvals)
+
+    async def send(event):
+        if event["type"] == "control_response":
+            assert event["response"]["subtype"] == "success"
+            assert event["response"]["response"] == {}
+            return
+        assert event["type"] == "user"
+        for call_id, target in (("denied", denied), ("written", written)):
+            data = {"tool_name": "Write", "tool_input": {"file_path": str(target), "content": "new"}}
+            await proc._control({"type": "control_request", "request_id": call_id,
+                                 "request": {"subtype": "hook_callback", "input": data, "tool_use_id": call_id}})
+            if target == written:
+                target.write_text("new", encoding="utf-8")
+        proc._on_event({"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "written", "content": "Written."},
+            {"type": "tool_result", "tool_use_id": "denied", "content": "Denied.", "is_error": True},
+        ]}})
+        proc._on_event({"type": "result", "subtype": "success"})
+
+    with monkeypatch.context() as patch:
+        patch.setattr(proc, "send", send)
+        await rig.send("write notes")
+    approvals.assert_not_called()
+    assert denied.read_text(encoding="utf-8") == "original"
+    assert rig.app.db.one("SELECT content FROM snapshots WHERE session_id=? AND path=?",
+                          [rig.sid, str(denied)]) == {"content": b"original"}
+    assert [json.loads(row["data"])["path"] for row in rig.app.db.all(
+        "SELECT data FROM events WHERE session_id=? AND type='file.changed'", [rig.sid])] == [str(written)]
+    assert rig.app.db.all("SELECT path FROM items WHERE session_id=? AND path IS NOT NULL",
+                          [rig.sid]) == [{"path": str(written)}]
 
 
 async def test_model_missing_from_the_login_shows_a_notice(rig):

@@ -89,7 +89,7 @@ STATUSES = ("draft", "planning", "validating", "awaiting_approval", "running", "
             "interrupted", "done", "parked", "abandoned")
 FINAL = ("done", "abandoned")
 RESUMABLE = ("paused", "waiting_user", "interrupted", "parked")
-MODES = ("ask", "accept_edits", "plan")
+MODES = ("ask", "accept_edits", "plan", "auto")
 CAMPAIGN_SKILL = "campaign"
 BRIEF_MAX = 12_000
 MIN_REQUEST_WORDS = 20
@@ -420,7 +420,7 @@ class Campaigns:
                 raise CampaignError(400, str(e)) from e
         mode = body.get("mode")
         if mode is not None and mode not in MODES:
-            raise CampaignError(400, "mode must be ask, accept_edits or plan")
+            raise CampaignError(400, "mode must be ask, accept_edits, plan or auto")
         request = str(body.get("request") or "").strip()
         session = None
         if kind == "chain":
@@ -1759,7 +1759,7 @@ class Campaigns:
                 raise CampaignError(400, str(e)) from e
         if "mode" in body:
             if body["mode"] not in MODES:
-                raise CampaignError(400, "mode must be ask, accept_edits or plan")
+                raise CampaignError(400, "mode must be ask, accept_edits, plan or auto")
             upd["mode"] = body["mode"]
         if not upd:
             return c

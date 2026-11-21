@@ -391,7 +391,7 @@ function Modes({ st, save }: { st: any; save: Save }) {
       <H2 sub="Shell commands, deletes, above-high effort, large ElevenLabs generations, shared-tool jobs and MCP tools that aren't read-only always ask unless allowlisted.">Modes and approvals</H2>
       <Row label="Default mode for new sessions">
         <select className="input w-56" value={st.modes.default} onChange={(e) => save({ modes: { default: e.target.value } }, "Default mode for new sessions")}>
-          <option value="ask">Ask before edits</option><option value="accept_edits">Accept edits</option><option value="plan">Plan only</option>
+          <option value="ask">Ask before edits</option><option value="accept_edits">Accept edits</option><option value="auto">Auto</option><option value="plan">Plan only</option>
         </select>
       </Row>
       <div className="mt-4">

@@ -181,5 +181,5 @@ def register(app: FastAPI, api: APIRouter, S: "AppState") -> None:
                        for k, v in S.config.models.items()],
             "tiers": S.config.tiers,
             "tier_models": S.config.tier_models(),
-            "modes": list(SESSION_MODES),  # Plan / Ask / Accept edits; no bypass mode
+            "modes": list(SESSION_MODES),  # Plan / Ask / Accept edits / Auto; no bypass mode
         }

@@ -37,10 +37,12 @@ describe("Claude Code session chat box", () => {
     expect((screen.getByLabelText("Model") as HTMLSelectElement).value).toBe("claude-opus-5-5");
     expect((screen.getByLabelText("Effort") as HTMLSelectElement).value).toBe("high");
     const mode = screen.getByLabelText("Permission mode") as HTMLSelectElement;
-    expect(Array.from(mode.options).map((o) => o.value)).toEqual(["plan", "ask", "accept_edits"]); // no bypass
+    expect(Array.from(mode.options).map((o) => o.value)).toEqual(["plan", "ask", "accept_edits", "auto"]); // no bypass
     expect(screen.getByLabelText("Attach files")).toBeTruthy();
     await act(async () => { fireEvent.change(mode, { target: { value: "plan" } }); });
     expect(patch).toHaveBeenCalledWith("/sessions/s1", { mode: "plan" });
+    await act(async () => { fireEvent.change(mode, { target: { value: "auto" } }); });
+    expect(patch).toHaveBeenCalledWith("/sessions/s1", { mode: "auto" });
     await act(async () => { fireEvent.change(screen.getByLabelText("Effort"), { target: { value: "low" } }); });
     expect(patch).toHaveBeenCalledWith("/sessions/s1", { effort: "low" });
   });

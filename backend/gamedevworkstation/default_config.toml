@@ -67,8 +67,10 @@ cli_path = ""                       # comfy-cli; "" = $COMFY_CLI, PATH, ~/.local
 timeout_s = 1800                    # longest wait for one `workflow` job
 
 [modes]
-default = "ask"                     # ask | accept_edits | plan
+default = "ask"                     # ask | accept_edits | plan | auto
 allowlist = []                      # e.g. ["run_command:git status", "run_command:ls*"]
+auto_classifier_tier = "claude.fast"  # Auto mode (built-in sessions): the model that allows, refuses or asks about each action (low effort, a fraction of a cent)
+auto_classifier_timeout_s = 20      # no verdict in this long (or an error) = you get the normal approval card
 
 [data_policy]
 # Which providers may receive files you mark sensitive.

@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   model TEXT NOT NULL,
   effort TEXT NOT NULL DEFAULT 'medium',
   account TEXT NOT NULL DEFAULT 'default',
-  mode TEXT NOT NULL DEFAULT 'ask',    -- ask | accept_edits | plan
+  mode TEXT NOT NULL DEFAULT 'ask',    -- ask | accept_edits | plan | auto
   harness TEXT NOT NULL DEFAULT 'builtin', -- builtin | agent_sdk | codex_cli | claude_code
   location TEXT NOT NULL DEFAULT 'local',
   settings TEXT NOT NULL DEFAULT '{}', -- json: connectors, skills, shared_tools, ...

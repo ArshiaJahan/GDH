@@ -660,7 +660,8 @@ the new session's settings:
   edits and runs commands in that project folder). The folder chip opens the folder picker; your
   recent session folders are the pills under the card, and a click picks one.
 - **Model** (Claude models, with their tiers), **effort**, and **mode**: Plan only, Ask before
-  edits or Accept edits. There is no bypass-permissions mode.
+  edits, Accept edits or Auto ("Claude decides what's safe; risky actions are refused or asked").
+  There is no bypass-permissions mode.
 - **Tools** picks a skill for the first message; `/` commands work as in the chat (`/model`,
   `/effort` and `/mode` change the card; `/task new` makes a board card).
 - **Send** (Enter) creates the session and sends the message.
@@ -774,7 +775,7 @@ when resuming.
 **The chat box.** A Claude Code session keeps the new-session screen's card after it starts: the
 paperclip, *Chat only* or the folder (fixed once the session has started; click the folder to show it in
 Finder), the model (Claude models by name), effort, permission mode (Plan only, Ask before edits,
-Accept edits), Tools and Send. Changing a dropdown updates the session; the next message uses it.
+Accept edits, Auto), Tools and Send. Changing a dropdown updates the session; the next message uses it.
 
 **Session modes (folder sessions).** On the new-session screen, once a folder is chosen, **Modes**
 offers two switches. They're set when the session starts.
@@ -855,7 +856,7 @@ of a `mcp__gdw__*` tool in a conversation takes one extra step.
 
 **Approvals and modes.** Every tool call passes GameDevWorkstation's checks first (a `PreToolUse`
 hook, on by default: folder scope, sensitive files, git metadata, the before-write snapshot for the Changes card),
-then the usual cards: edits in Ask, commands, and anything else Claude Code would ask about (through
+then the usual cards for the session's mode (edits in Ask, commands, and permission requests through
 `--permission-prompt-tool mcp__gdw__approve`). Questions Claude Code asks you (AskUserQuestion) get a
 card with its options, and your pick goes back as its answer. Ask runs Claude Code in `manual`, Accept
 edits in `acceptEdits` and Plan only in `plan`; in Plan known file edits and Bash commands are
@@ -863,9 +864,11 @@ refused, except the plan file Claude Code writes in its own `~/.claude/plans/` f
 directly in that folder) before it asks to leave Plan mode. That request (ExitPlanMode) shows
 GameDevWorkstation's plan card with the plan text; approving it switches the session to Ask, and
 **Keep planning** sends your feedback back. Unrecognized non-GDW tools still get an approval card in Plan mode; the harness cannot classify
-their effects. GameDevWorkstation never starts Claude Code in `bypassPermissions`, `dontAsk` or `auto`.
+their effects. Auto runs Claude Code in its own `auto` mode. Before Claude Code decides, GameDevWorkstation
+checks folder scope, sensitive files, git metadata and Plan restrictions, and takes before-write snapshots.
+It shows a permission card only when Claude Code asks, and deletes of folders or many files, and git commands that rewrite or discard history (force push, reset --hard, rebase, branch -D …), always ask, even in Auto. GameDevWorkstation never uses `bypassPermissions` or `dontAsk`.
 Hook registration failure, timeout or cancellation ends the process with an error; there is no silent
-fallback. An explicit `pre_tool_hook=false` disables that hook.
+fallback. Auto always requires the hook. In other modes, `pre_tool_hook=false` disables it.
 
 **Settings isolation.** **Settings files** defaults to **None (your ~/.claude hooks, plugins and
 settings files are ignored)**. This passes an empty `--setting-sources=`: no user, project or local

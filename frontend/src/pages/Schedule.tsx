@@ -53,7 +53,7 @@ export function SchedulePage() {
                   <button className="btn btn-ghost btn-danger px-1.5" aria-label="Delete" onClick={async () => { if (confirm(`Delete "${t.name}"?`)) { await del(`/tasks/${t.id}`); load(); } }}><Trash2 size={14} /></button>
                 </div>
               </div>
-              <div className="text-[12px] text-muted mt-1">{modelLabel(t.model)} · {t.effort} · {t.mode === "accept_edits" ? "accept edits" : t.mode === "plan" ? "plan only" : "ask before edits"} · {t.folder ?? "chat (no folder)"}</div>
+              <div className="text-[12px] text-muted mt-1">{modelLabel(t.model)} · {t.effort} · {t.mode === "accept_edits" ? "accept edits" : t.mode === "auto" ? "auto" : t.mode === "plan" ? "plan only" : "ask before edits"} · {t.folder ?? "chat (no folder)"}</div>
               <div className="text-[13px] mt-1 line-clamp-2">{t.prompt}</div>
               {t.runs.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
@@ -136,7 +136,7 @@ function TaskEditor({ t, onClose, onSaved }: { t: Partial<Task>; onClose: () => 
         </label>
         <label className={L}><span className="label">Mode</span>
           <select className="input" value={f.mode} onChange={(e) => setF({ ...f, mode: e.target.value })}>
-            <option value="ask">Ask before edits</option><option value="accept_edits">Accept edits</option><option value="plan">Plan only</option>
+            <option value="ask">Ask before edits</option><option value="accept_edits">Accept edits</option><option value="auto">Auto</option><option value="plan">Plan only</option>
           </select>
         </label>
       </div>
