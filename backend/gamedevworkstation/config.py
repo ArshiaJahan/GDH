@@ -146,6 +146,7 @@ class Config(BaseModel):
     unity: dict[str, Any] = Field(default_factory=dict)    # backend (auto|mcp|cli), cli_path, timeouts (features/unity_cli.py)
     claude_code: dict[str, Any] = Field(default_factory=dict)  # cli_path, load_user_mcp, setting_sources (features/claude_code.py)
     prompt_improver: dict[str, Any] = Field(default_factory=dict)  # enabled, max_questions, model, effort, limits (features/prompt_improver.py)
+    comfyplug: dict[str, Any] = Field(default_factory=dict)  # enabled, url, cli_path, timeout_s (features/comfyplug_feature.py)
     models: dict[str, ModelConfig] = Field(default_factory=dict)
 
     def mcp_presets(self) -> dict[str, dict[str, Any]]:
@@ -258,7 +259,7 @@ PRE_OVERRIDES_BACKUP = "config.toml.pre-overrides.bak"  # the old full copy, kep
 # number, bool, string, list or table must have that type, else the default is used (see _check_types).
 TYPED_SECTIONS = ("orchestrator", "delegation", "assistant", "limits", "elevenlabs", "modes", "data_policy",
                   "appearance", "updates", "sessions", "skills", "hooks", "ladder", "campaigns", "fleet", "unity",
-                  "claude_code", "prompt_improver")
+                  "claude_code", "prompt_improver", "comfyplug")
 # Tables inside typed sections that stay free-form (their entries may legitimately differ in type
 # from the defaults: [skills.mcp_on_invoke] takes a server name or a list of them).
 UNTYPED_KEYS = {"skills": ("mcp_on_invoke",)}

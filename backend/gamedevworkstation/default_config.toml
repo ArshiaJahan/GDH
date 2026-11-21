@@ -56,6 +56,14 @@ output_format = "mp3_44100_128"
 stt_model_id = "scribe_v2"
 confirm_over_characters = 2000
 
+[comfyplug]
+# ComfyPlug: the agent's `comfyplug` tool (images, image edits, 3D models, sound, any ComfyUI workflow) on your own
+# ComfyUI. Needs ComfyUI running, comfy-cli, and ffmpeg for sound. Free: your GPU, no credits.
+enabled = true
+url = ""                            # "" = $COMFY_URL, else http://127.0.0.1:8188; another machine: http://<ip>:8188
+cli_path = ""                       # comfy-cli; "" = $COMFY_CLI, PATH, ~/.local/bin
+timeout_s = 1800                    # longest wait for one `workflow` job
+
 [modes]
 default = "ask"                     # ask | accept_edits | plan
 allowlist = []                      # e.g. ["run_command:git status", "run_command:ls*"]

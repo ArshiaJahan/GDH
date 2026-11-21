@@ -135,7 +135,7 @@ Code reply is a real run.</sub>
 
 ## Highlights
 
-The eight that matter most; [all 21 features](docs/GUIDE.md#all-features) are in the guide.
+The eight that matter most; [all 22 features](docs/GUIDE.md#all-features) are in the guide.
 
 | | |
 |---|---|
@@ -376,6 +376,7 @@ Unity CLI path and the Unity job timeouts). See the [guide](docs/GUIDE.md#config
 backend/gamedevworkstation/   FastAPI backend
   agent/                      agent loop and context
   providers/                  Anthropic, OpenAI and ElevenLabs adapters
+  comfyplug/                  ComfyPlug: ComfyUI image, edit, 3D, sound and workflow generation
   features/                   subagents, worktrees, MCP, hooks, ladder, unity_bridge, updates, ...
 frontend/src/                 React UI (Vite)
 src-tauri/                    Tauri v2 desktop shell

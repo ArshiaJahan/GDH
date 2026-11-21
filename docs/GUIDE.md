@@ -27,6 +27,7 @@ transcription, sound and music. Everything runs locally; the backend listens on 
 - [CI failure triage](#ci-failure-triage)
 - [Eval Forge](#eval-forge)
 - [Agent Review Desk](#agent-review-desk)
+- [ComfyPlug (ComfyUI generation)](#comfyplug-comfyui-generation)
 - [Building the app](#building-the-app)
 - [Versions & updates](#versions--updates)
 - [Upgrading from Workspace 0.4](#upgrading-from-workspace-04) <!-- rename:keep -->
@@ -61,6 +62,7 @@ Every feature at a glance; the sections below have the details. The README lists
 | **Trailer maker** | Brief → beat sheet → scripted Play Mode capture (Unity Recorder) → ffmpeg edit from a JSON edit list → ElevenLabs music cut to the beat sheet → three reviewers → Steam, YouTube and vertical exports. |
 | **Record and replay** | Record instrumented Unity sessions in the open Editor, replay them with frame-by-frame checkpoint verification (SHA-256 state hashes), and export silent gameplay GIF/MP4. Input System only; the guarantee is same-environment repeatability for the state you register, and a mismatch is reported, not refused. |
 | **ElevenLabs** | Speech, transcription, sound effects and music (including composition plans with exact section lengths), in chat and on their own page. |
+| **ComfyPlug** | Images, image edits, 3D models (GLB), sound and any other ComfyUI workflow, video included, on your own ComfyUI (this machine or another one). The agent's `comfyplug` tool saves each output as an item and looks at the images; `gdw comfyplug` is the same from a terminal. See [ComfyPlug](#comfyplug-comfyui-generation). |
 | **Native shell, local updates** | Tauri v2 app with a frozen FastAPI backend, keys in the macOS Keychain and in-app updates from GitHub Releases or a local folder. |
 
 ## Prerequisites
@@ -1596,6 +1598,45 @@ gdw review agreement evals/runs/<run>                  # how often it matches th
 
 The page header shows the verdict agreement and kappa once any trial has both reviews. No agreement number is published
 here yet: it needs human reviews of a real run first.
+
+## ComfyPlug (ComfyUI generation)
+
+ComfyPlug drives your own ComfyUI like an API. It ships inside the backend (`gamedevworkstation/comfyplug/`, with its
+workflow templates) and is the agent's `comfyplug` tool:
+
+| Action | What it makes | Notes |
+|---|---|---|
+| `check` | nothing | Is ComfyUI answering at the configured address; are comfy-cli and ffmpeg found |
+| `image` | a PNG (Qwen Image 2.1) | `aspect`: `1:1 (Square)`, `9:16 (Portrait Widescreen)`, `16:9 (Widescreen)`, `21:9 (Ultrawide)`; `transparent` for an alpha PNG |
+| `edit` | a PNG | `image` (an item id or a path) plus an instruction as `prompt`; keeps the input's size, capped near 1 MP |
+| `model` | a GLB (Qwen reference image, then TRELLIS.2) | Run `ref_only` first and look at the reference; then rerun with `from_image` set to it |
+| `sound` | a WAV (Stable Audio 3 medium) | `seconds`; `variants` N for N takes with seeds seed..seed+N-1; `trim` false keeps the raw clip |
+| `workflow` | whatever the workflow outputs: images, video, audio, 3D | Any workflow JSON comfy-cli can run (a path in the session folder, or a bundled template name); `slots` sets node inputs as `{"<node id>.<input>": value}`, `exts` picks the outputs to keep |
+
+`out` sets where the file goes in the session folder (for `workflow`, a folder). Without it, outputs go to the app's
+media folder under `comfyplug/`. Every output becomes an item with its prompt and seed, and images come back to the
+model so it can check them before using them. Prompts are used as written, so name no brands, franchises, films or shows;
+describe the style instead.
+
+ComfyUI runs one prompt at a time, so ComfyPlug runs one job at a time. Each job shows in Jobs and is
+recorded in My usage at $0 (it runs on your own GPU). Stopping a turn stops the wait, but a job ComfyUI has
+already started finishes on the server.
+
+**Settings** (`[comfyplug]`): `enabled` (default on), `url` (empty means `$COMFY_URL`, else `http://127.0.0.1:8188`;
+another machine is `http://<ip>:8188`), `cli_path` (empty means `$COMFY_CLI`, PATH or `~/.local/bin`) and
+`timeout_s` (the longest a `workflow` job waits). It needs comfy-cli (`pip install comfy-cli`), plus ffmpeg for sound.
+The models are the ones the templates name (Qwen Image 2.1, TRELLIS.2, Stable Audio 3 medium), installed in that ComfyUI.
+
+**From a terminal**, `gdw comfyplug` is ComfyPlug's own CLI, pointed at your `[comfyplug]` settings unless `COMFY_URL`
+or `COMFY_CLI` is set. It also has `batch` (a JSON list of jobs that skips outputs that already exist) and the sound
+tools `loop`, `normalize` and `measure` (these need numpy). The full command list is in
+`backend/gamedevworkstation/comfyplug/README.md`, and `REMOTE_MAC.md` there covers a ComfyUI on another machine.
+
+```bash
+gdw comfyplug check
+gdw comfyplug image --prompt "a brass gear on a dark table" --out art/gear.png --aspect "1:1 (Square)"
+gdw comfyplug workflow my_video_workflow.json --out-dir clips --slot 6.text='"a red fox running"' --ext .mp4
+```
 
 ## Building the app
 

@@ -91,6 +91,10 @@ def main() -> None:
         from .features import review_desk
 
         raise SystemExit(review_desk.cli(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "comfyplug":  # `gdw comfyplug ...`: ComfyUI generation, no server
+        from .features import comfyplug_feature
+
+        raise SystemExit(comfyplug_feature.cli(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "triage":  # `gdw triage ...`: CI failure triage, no server
         from .features import ci_triage
 
