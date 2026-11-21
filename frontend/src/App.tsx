@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
 import { connect, inTauri, openEvents } from "./lib/api";
 import { actions, handleEvent, useStore } from "./lib/store";
-import { Chat } from "./components/Chat";
+import { SessionView } from "./components/SessionTabs";
 import { newSession, Sidebar } from "./components/Sidebar";
 import { SidePanel } from "./components/SidePanel";
 import { TerminalDrawer } from "./components/TerminalDrawer";
@@ -152,7 +152,7 @@ export default function App() {
   if (error) return <div className="h-full flex items-center justify-center p-8 text-center"><div><p className="font-medium mb-2">Can't reach the GameDevWorkstation backend</p><p className="text-muted">{error}</p></div></div>;
   if (!ready) return <div className="h-full flex items-center justify-center text-muted">Starting GameDevWorkstation…</div>;
 
-  const main = page === "chat" ? <Chat /> : page === "artifacts" ? <ArtifactsPage /> : page === "elevenlabs" ? <ElevenLabsPage />
+  const main = page === "chat" ? <SessionView /> : page === "artifacts" ? <ArtifactsPage /> : page === "elevenlabs" ? <ElevenLabsPage />
     : page === "board" ? <BoardPage /> : page === "schedule" ? <SchedulePage /> : page === "campaigns" ? <CampaignsPage /> : page === "skills" ? <SkillsPage /> : page === "review" ? <ReviewPage /> : page === "usage" ? <UsagePage /> : <SettingsPage />;
 
   return (

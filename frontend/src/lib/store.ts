@@ -29,6 +29,14 @@ export type Msg = { id: string; role: "user" | "assistant"; content: Block[]; me
 export type ToolRun = { tool_use_id: string; name: string; input?: any; status: "running" | "done"; output?: string; is_error?: boolean; items?: string[] };
 export type Approval = { id: string; kind: string; payload: any; status: string; session_id: string | null };
 export type Job = { id: string; session_id: string | null; kind: string; title: string; status: string; started_at: number; ended_at: number | null; log_tail: string; meta: any; elapsed_s: number };
+export type SubagentCardData = {
+  id: string; name: string; tier: string; model: string; effort: string;
+  status: "queued" | "running" | "done" | "failed" | "cancelled";
+  worktree: string | null; started: number; ended: number | null; cost_usd: number;
+  tokens: { input: number; output: number; reasoning: number };
+  result_preview: string; error: string | null;
+};
+export type SessionSubagent = SubagentCardData & { session_id: string };
 export type AssistStep = { id: string; tool: string; label: string; status: "running" | "done" | "error"; output: string };
 export type AssistLink = { type: "skill" | "mcp"; name: string; path?: string; action: string; source_url?: string | null };
 /** A Skills & MCP assistant run (the Find or create / Find and add boxes). */
@@ -52,6 +60,7 @@ export type Limits = { global: LimitPause | null; sessions: Record<string, Limit
 export type AgentStatus = { kind: string; text: string; retry_in_s?: number; until?: number; attempt?: number; max_attempts?: number };
 
 export type Page = "chat" | "artifacts" | "elevenlabs" | "board" | "schedule" | "campaigns" | "skills" | "review" | "usage" | "settings";
+export type SessionTab = "chat" | "subagents" | "gallery";
 export type Theme = "system" | "light" | "dark";
 
 type State = {
@@ -77,7 +86,8 @@ type State = {
   approvals: Record<string, Approval>;
   jobs: Record<string, Job>;
   jobLogs: Record<string, string>;
-  subagents: Record<string, any>;
+  subagents: Record<string, SessionSubagent>;
+  sessionTabs: Record<string, SessionTab>;
   assistantRuns: Record<string, AssistRun>;
   focusMessage: string | null;
   artifactsTab: string;
@@ -129,6 +139,7 @@ export const useStore = create<State>(() => ({
   jobs: {},
   jobLogs: {},
   subagents: {},
+  sessionTabs: {},
   assistantRuns: {},
   drafts: {},
   skillChips: {},
@@ -171,6 +182,23 @@ type MsgPage = { messages: Msg[]; has_more: boolean; compacted: number };
 const pageUrl = (id: string, o: { before?: string; limit?: number; compacted?: boolean } = {}) =>
   `/sessions/${id}/messages/page?limit=${o.limit ?? PAGE}${o.before ? `&before=${encodeURIComponent(o.before)}` : ""}${o.compacted ? "&compacted=1" : ""}`;
 
+async function loadSessionSubagents(id: string) {
+  const before = st().subagents;
+  const rows = await get<SubagentCardData[]>(`/subagents?session_id=${encodeURIComponent(id)}`);
+  set((s) => {
+    const subagents = { ...s.subagents };
+    const listed = new Set(rows.map((row) => row.id));
+    for (const row of Object.values(before)) {
+      if (row.session_id === id && subagents[row.id] === row && !listed.has(row.id)) delete subagents[row.id];
+    }
+    for (const row of rows) {
+      // A live card received during the request is newer than the response.
+      if (subagents[row.id] === before[row.id]) subagents[row.id] = { ...row, session_id: id };
+    }
+    return { subagents };
+  });
+}
+
 export const actions = {
   async loadAll() {
     const requestedAt = Date.now();
@@ -196,13 +224,12 @@ export const actions = {
   setLiveAppearance(a: any) {
     liveAppearance = a;
   },
-  async openSession(id: string) {
+  async openSession(id: string, tab?: SessionTab) {
     localStorage.setItem("currentSession", id);
-    set({ currentId: id, page: "chat" });
-    if (st().sessions.find((s) => s.id === id)?.unread) actions.markRead(id);
+    set((s) => ({ currentId: id, page: "chat", sessionTabs: tab ? { ...s.sessionTabs, [id]: tab } : s.sessionTabs }));
+    if (viewing(id) && st().sessions.find((s) => s.id === id)?.unread) actions.markRead(id);
     const showCompacted = st().paging[id]?.showCompacted ?? false;
-    const [page, jobs, subs] = await Promise.all([get<MsgPage>(pageUrl(id, { compacted: showCompacted })), get<Job[]>(`/jobs?session_id=${id}`), get<any[]>(`/subagents?session_id=${id}`)]);
-    set((x) => ({ subagents: { ...x.subagents, ...Object.fromEntries(subs.map((s) => [s.id, s])) } }));
+    const [page, jobs] = await Promise.all([get<MsgPage>(pageUrl(id, { compacted: showCompacted })), get<Job[]>(`/jobs?session_id=${id}`), loadSessionSubagents(id)]);
     const jobsById = { ...st().jobs };
     jobs.forEach((j) => (jobsById[j.id] = j));
     set((s) => ({ messages: { ...s.messages, [id]: page.messages }, jobs: jobsById,
@@ -254,9 +281,8 @@ export const actions = {
       else set({ currentId: null });
       if (st().page !== page) set({ page });
     } else if (cur) {
-      const [jobs, subs] = await Promise.all([get<Job[]>(`/jobs?session_id=${cur}`), get<any[]>(`/subagents?session_id=${cur}`), actions.reloadMessages(cur)]);
-      set((x) => ({ jobs: { ...x.jobs, ...Object.fromEntries(jobs.map((j) => [j.id, j])) },
-        subagents: { ...x.subagents, ...Object.fromEntries(subs.map((s) => [s.id, s])) } }));
+      const [jobs] = await Promise.all([get<Job[]>(`/jobs?session_id=${cur}`), loadSessionSubagents(cur), actions.reloadMessages(cur)]);
+      set((x) => ({ jobs: { ...x.jobs, ...Object.fromEntries(jobs.map((j) => [j.id, j])) } }));
     }
   },
   /** Re-read spend-limit pauses (also lifts a daily pause after midnight on the backend). */
@@ -295,6 +321,10 @@ export const actions = {
     const id = st().currentId;
     if (page === "chat" && id && viewing(id) && st().sessions.find((s) => s.id === id)?.unread) actions.markRead(id);
   },
+  setSessionTab(id: string, tab: SessionTab) {
+    set((x) => ({ sessionTabs: { ...x.sessionTabs, [id]: tab } }));
+    if (viewing(id) && st().sessions.find((s) => s.id === id)?.unread) actions.markRead(id);
+  },
   /** Replace the queued text and attachments for a session's composer. */
   setDrafts(sessionId: string, drafts: State["drafts"][string]) {
     set((x) => ({ drafts: { ...x.drafts, [sessionId]: drafts } }));
@@ -302,7 +332,7 @@ export const actions = {
   /** Put a file on a session's composer (from the Artifacts or ElevenLabs page). */
   attachToChat(sessionId: string, att: { path: string; name: string; mime: string; item_id?: string; text?: string }, warning?: string | null) {
     set((x) => ({ drafts: { ...x.drafts, [sessionId]: [...(x.drafts[sessionId] ?? []), att] } }));
-    actions.openSession(sessionId);
+    actions.openSession(sessionId, "chat");
     if (warning) actions.toast(warning);
   },
   /** Attach (or with null, remove) a skill chip on a session's composer. */
@@ -318,7 +348,7 @@ export const actions = {
       sid = s.id;
     }
     actions.setSkillChip(sid, name);
-    await actions.openSession(sid);
+    await actions.openSession(sid, "chat");
     requestAnimationFrame(() => document.getElementById("composer")?.focus());
   },
   /** Put text in the composer. */
@@ -373,7 +403,8 @@ function upsertSession(s: Session) {
 }
 
 /** Is the user looking at this session right now (open, chat page, window visible)? */
-const viewing = (sid: string) => st().currentId === sid && st().page === "chat" && document.visibilityState === "visible";
+const viewing = (sid: string) => st().currentId === sid && st().page === "chat"
+  && (st().sessionTabs[sid] ?? "chat") === "chat" && document.visibilityState === "visible";
 if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {
     const id = st().currentId;
@@ -486,7 +517,7 @@ export function handleEvent(ev: WsEvent) {
       set((x) => ({ jobs: { ...x.jobs, [d.id]: d } }));
       break;
     case "subagent.updated":
-      set((x) => ({ subagents: { ...x.subagents, [d.id]: d } }));
+      if (sid) set((x) => ({ subagents: { ...x.subagents, [d.id]: { ...d, session_id: sid } } }));
       break;
     case "assistant.updated":
       set((x) => ({ assistantRuns: { ...x.assistantRuns, [d.id]: d } }));

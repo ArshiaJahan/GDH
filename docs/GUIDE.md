@@ -253,6 +253,19 @@ in the chat says so). If the live connection drops or falls
 behind, the app shows "Reconnecting…", replays what it missed, or reloads its state when it
 missed too much.
 
+**Session tabs**, above the chat when a session is open. The tab you pick is remembered per
+session (Chat is the default), and Chat stays loaded while you look at another tab, so its
+scroll position and your unsent draft are still there when you come back. Arrow keys, Home and
+End move between the tabs.
+
+1. **Chat** — the conversation.
+2. **Subagents** — every subagent this session started, newest first, updating live. Each row
+   shows the name, tier and model, effort, status (queued, running, done, failed or cancelled),
+   elapsed time, tokens and cost, and a **Stop** button while it runs. Click a row to see its
+   brief, its result (or error) and its worktree path. The tab's badge counts the ones running.
+3. **Gallery** — the session's whole gallery as a grid of thumbnails, with the screenshot box
+   (see [Gallery](#gallery)). The tab shows how many items there are.
+
 **Side panel**, per session, in this order. Until you show or hide it yourself, it's open in
 windows at least 1200 px wide and closed in narrower ones:
 
@@ -274,23 +287,27 @@ windows at least 1200 px wide and closed in narrower ones:
 4. **Shared tools** — let the session use MCP servers from other machines. This is off by
    default, every job asks first, and it can only be changed while the session is idle.
 5. **Outputs** — what this session produced, with a link to the Artifacts page.
-6. **Gallery** — the images, videos and audio this session generated, plus Unity screenshots on
-   request (see [Gallery](#gallery)).
-7. **Changes** — changed files (git diff in a repo, including subagent worktrees; snapshots
+6. **Changes** — changed files (git diff in a repo, including subagent worktrees; snapshots
    otherwise), +/− counts, side-by-side diff and per-file revert. Files over 5 MB aren't
    snapshotted: they're listed as "too large to snapshot", without diff or revert. Each subagent worktree has
    **Discard worktree** (removes it and its `gdw/<unit>` branch; asks again, saying what
    would be lost, when it holds work that isn't merged).
-8. **Background tasks** — subagents, commands, Codex CLI runs and ElevenLabs jobs with a log
+7. **Background tasks** — subagents, commands, Codex CLI runs and ElevenLabs jobs with a log
    tail and cancel.
 
 ### Gallery
 
-The **Gallery** card sits in the side panel under **Outputs**. It shows what the session *generated*
-(media items from the agent, its tools and commands that announce `ARTIFACT:` / `TRAILER_OUTPUT:` lines;
-your own attachments are left out) as a strip from left to right, newest first. The mouse wheel
-scrolls it sideways. Click an image or a video to open it larger, with its prompt, how it was captured
+The **Gallery** tab sits at the top of the session, next to **Chat** and **Subagents**. It shows what
+the session *generated* (media items from the agent, its tools and commands that announce
+`ARTIFACT:` / `TRAILER_OUTPUT:` lines; your own attachments are left out) as a grid, newest first,
+with every item shown. Click an image or a video to open it larger, with its prompt, how it was captured
 and **Open in Finder**. Videos and audio show a play badge.
+
+Images a tool generates (ComfyPlug, screenshots, MCP tools) also appear in the **Chat** itself, inline
+at the tool call that made them. A reply (everything the agent does between two of your messages) that
+produced images ends with a row of small thumbnails of all its images, in order. Click an inline image or a
+thumbnail to open the same preview; with several images, Left / Right (or the arrows) step through them and
+Escape closes it.
 
 **Take a screenshot.** Type what the picture should show in the box ("player at the cave entrance,
 night, low angle") and press **Take screenshot** (or Enter). A spinner card appears right away and says

@@ -13,7 +13,6 @@ vi.mock("../lib/store", () => ({
 vi.mock("./cards/CampaignCard", () => ({ CampaignCard: () => null }));
 vi.mock("./cards/ChangesCard", () => ({ ChangesCard: () => null }));
 vi.mock("./cards/ConnectorsCard", () => ({ ConnectorsCard: () => null, SharedToolsCard: () => null }));
-vi.mock("./cards/GalleryCard", () => ({ GalleryCard: () => null }));
 vi.mock("./cards/OutputsCard", () => ({ OutputsCard: () => null }));
 vi.mock("./cards/QualityCard", () => ({ QualityCard: () => null }));
 vi.mock("./ui", () => ({
@@ -81,4 +80,12 @@ it("refreshes the live split after pin or load settings change", async () => {
   rerender(<SidePanel />);
   await act(async () => {});
   expect(contextCalls()).toBe(initial + 2);
+});
+
+it("no longer shows the gallery (it is a session tab now)", async () => {
+  render(<SidePanel />);
+  await act(async () => {});
+  expect(screen.queryByText(/^Gallery/)).toBeNull();
+  expect(screen.queryByLabelText("Screenshot prompt")).toBeNull();
+  expect(get.mock.calls.some(([path]) => String(path).includes("/gallery"))).toBe(false);
 });

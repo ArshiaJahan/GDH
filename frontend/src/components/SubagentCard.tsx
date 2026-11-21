@@ -6,6 +6,9 @@ import { toolRenderers } from "./toolRenderers";
 import { GenericToolCall } from "./Chat";
 import { EffortMeter, fmtDuration, fmtTokens, fmtUsd, modelName, providerOf, useModelCatalog } from "./ui";
 
+export const subagentStatusColor = (status: string) =>
+  status === "failed" ? "var(--bad)" : status === "done" ? "var(--ok)" : status === "cancelled" ? "var(--faint)" : "var(--action)";
+
 /** A subagent as a "channel strip": provider color rail, tier, effort meter, live tokens and cost. */
 export function SubagentCard({ b, result }: { b: Block; result?: Block }) {
   useModelCatalog();
@@ -22,7 +25,7 @@ export function SubagentCard({ b, result }: { b: Block; result?: Block }) {
   const prov = providerOf(model || (tier?.startsWith("codex") ? "gpt" : "claude"));
   const status = card?.status ?? (result ? (result.is_error ? "failed" : "started") : "launching");
   const elapsed = card ? (card.ended ?? Date.now() / 1000) - card.started : 0;
-  const statusColor = status === "failed" ? "var(--bad)" : status === "done" ? "var(--ok)" : status === "cancelled" ? "var(--faint)" : "var(--action)";
+  const statusColor = subagentStatusColor(status);
 
   return (
     <div className="my-2 rounded-md border border-line surface-raised overflow-hidden flex" role="group" aria-label={`Subagent ${b.input.name}`}>

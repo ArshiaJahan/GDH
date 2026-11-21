@@ -1,26 +1,29 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const list = vi.hoisted(() => vi.fn());
 const screenshot = vi.hoisted(() => vi.fn());
 const handlers = vi.hoisted(() => ({ cb: null as null | ((e: any) => void) }));
-vi.mock("../../lib/api", () => ({
+vi.mock("../lib/api", () => ({
   galleryApi: { list, screenshot },
   galleryMediaUrl: (e: { url: string | null }) => (e.url ? `http://x${e.url}&token=t` : null),
 }));
-vi.mock("../../lib/native", () => ({ revealInFinder: vi.fn(async () => true) }));
-vi.mock("../../lib/store", () => ({ actions: { toast: vi.fn(), onEvent: (cb: any) => { handlers.cb = cb; return () => {}; } } }));
-vi.mock("../SidePanel", () => ({ Card: ({ title, children }: { title: string; children: ReactNode }) => <div><h2>{title}</h2>{children}</div> }));
+vi.mock("../lib/native", () => ({ revealInFinder: vi.fn(async () => true) }));
+vi.mock("../lib/store", () => ({ actions: { toast: vi.fn(), onEvent: (cb: any) => { handlers.cb = cb; return () => {}; } } }));
 
-import { GalleryCard } from "./GalleryCard";
+import { GalleryTab, useGallery } from "./GalleryView";
+
+function GalleryCard({ s }: { s: any }) {
+  const g = useGallery(s.id);
+  return <GalleryTab s={s} entries={g.entries} setEntries={g.setEntries} />;
+}
 
 const E = (o: any) => ({ kind: "image", path: "/p/a.png", url: "/api/gallery/file/i?session_id=s1", title: "a.png", created_at: 1, source: "tool", status: "done", ...o });
 const session = { id: "s1" } as any;
 
 afterEach(() => { cleanup(); list.mockReset(); screenshot.mockReset(); });
 
-describe("GalleryCard", () => {
+describe("Gallery tab", () => {
   it("renders items newest first, video badge, pending and failed cards", async () => {
     list.mockResolvedValue([
       E({ id: "p", status: "pending", url: null, prompt: "the boss room" }),

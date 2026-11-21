@@ -6,6 +6,8 @@ import { openLocalFile } from "../lib/native";
 import { sessionActions } from "../lib/sessions";
 import { actions, useStore, type AgentStatus, type Block, type Msg } from "../lib/store";
 import { ApprovalCard } from "./ApprovalCard";
+import { ChatImageOpenContext, InlineImages, TurnStrip, turnImages, useChatImageViewer, type ChatImage } from "./ChatImages";
+import { useGalleryEntries } from "./GalleryView";
 import { Composer } from "./Composer";
 import { SafeMarkdown } from "./SafeMarkdown";
 import { NoKeyNotice, SetupChecklist } from "./SetupChecklist";
@@ -19,6 +21,7 @@ import { toolRenderers } from "./toolRenderers";
 import { EffortMeter, ProviderDot, fmtUsd, modelLabel, tiersOf, useModelCatalog } from "./ui";
 
 const EMPTY: Msg[] = [];
+const NO_IMAGES: ChatImage[] = [];
 const STOPPABLE_JOBS = new Set(["subagent", "codex_cli", "command"]);
 
 /** A wait as people say it: 45s, 3m 20s, 2h 5m, 6d 7h. */
@@ -110,6 +113,11 @@ export function Chat() {
     for (const msg of messages) for (const b of msg.content) if (b.type === "tool_result") m[b.tool_use_id] = b;
     return m;
   }, [messages]);
+  const toolRuns = useStore((s) => s.toolRuns);
+  const galleryEntries = useGalleryEntries();
+  const visibleMsgs = useMemo(() => messages.filter((m) => !m.meta?.tool_results), [messages]);
+  const imgs = useMemo(() => turnImages(visibleMsgs, results, toolRuns, galleryEntries), [visibleMsgs, results, toolRuns, galleryEntries]);
+  const imageViewer = useChatImageViewer();
   const pending = Object.values(approvals).filter((a) => a.session_id === sid && a.status === "pending");
 
   useEffect(() => {
@@ -119,10 +127,11 @@ export function Chat() {
 
   if (!session) return <NewSession />; // no session open: the new-session screen
   const running = session.status === "running";
-  const visible = messages.filter((m) => !m.meta?.tool_results);
+  const visible = visibleMsgs;
   const firstLive = visible.findIndex((m) => !m.meta?.compacted);
 
   return (
+    <ChatImageOpenContext.Provider value={imageViewer.open}>
     <div className="h-full flex flex-col min-w-0">
       <header className="flex items-center gap-2 px-4 h-11 border-b border-line surface shrink-0" data-tauri-drag-region>
         <h1 className="font-medium truncate min-w-[6rem]">{session.title}</h1>
@@ -160,7 +169,7 @@ export function Chat() {
           {visible.map((m, i) => (
             <div key={m.id} id={`msg-${m.id}`} className={focus === m.id ? "rounded-md outline-2 outline-action outline-offset-4" : ""}>
               {i === firstLive && firstLive > 0 && <div className="my-4 text-center text-[12px] text-faint">Earlier messages are summarized; the model sees the summary.</div>}
-              <MessageView m={m} results={results} onFork={onFork} />
+              <MessageView m={m} results={results} onFork={onFork} own={imgs.own[m.id] ?? NO_IMAGES} turn={imgs.turn[m.id] ?? NO_IMAGES} endOfTurn={imgs.end.has(m.id)} />
             </div>
           ))}
           {streaming && <StreamingView s={streaming} />}
@@ -180,7 +189,9 @@ export function Chat() {
         </div>
       )}
       <Composer session={session} running={running} />
+      {imageViewer.viewer}
     </div>
+    </ChatImageOpenContext.Provider>
   );
 }
 
@@ -271,11 +282,13 @@ function Attachment({ b }: { b: Block }) {
 
 /** Re-render a message only when it, or the result of one of its own tool calls, changed (not on
  *  every streamed token or new message elsewhere in a long session). */
-const sameMessage = (a: MsgProps, b: MsgProps) => a.m === b.m && a.onFork === b.onFork
+const sameImages = (a: ChatImage[], b: ChatImage[]) => a === b || (a.length === b.length && a.every((x, i) => x.key === b[i].key && x.src === b[i].src));
+const sameMessage = (a: MsgProps, b: MsgProps) => a.m === b.m && a.onFork === b.onFork && a.endOfTurn === b.endOfTurn
+  && sameImages(a.own, b.own) && sameImages(a.turn, b.turn)
   && a.m.content.every((c) => c.type !== "tool_use" || a.results[c.id] === b.results[c.id]);
-type MsgProps = { m: Msg; results: Record<string, Block>; onFork: (id: string) => void };
+type MsgProps = { m: Msg; results: Record<string, Block>; onFork: (id: string) => void; own: ChatImage[]; turn: ChatImage[]; endOfTurn: boolean };
 
-const MessageView = memo(function MessageView({ m, results, onFork }: MsgProps) {
+const MessageView = memo(function MessageView({ m, results, onFork, own, turn, endOfTurn }: MsgProps) {
   const compacted = m.meta?.compacted;
   if (m.meta?.notice === "prompt_improver" && m.meta.outcome) return <PromptImproverNotice m={m} />;
   if (m.meta?.notice) return <Notice m={m} />;
@@ -311,10 +324,12 @@ const MessageView = memo(function MessageView({ m, results, onFork }: MsgProps) 
         if (b.type === "thinking") return <Thinking key={i} text={b.thinking} />;
         if (b.type === "tool_use") {
           const R = toolRenderers[b.name] ?? GenericToolCall;
-          return <R key={i} b={b} result={results[b.id]} />;
+          const mine = own.filter((im) => im.key.startsWith(`${b.id}:`));
+          return <div key={i}><R b={b} result={results[b.id]} /><InlineImages images={mine} turn={turn} /></div>;
         }
         return null;
       })}
+      {endOfTurn && <TurnStrip images={turn} />}
       <div className="mt-1 min-h-5 text-[11.5px] text-faint flex items-center gap-1.5">
         {usage && <><ProviderDot model={m.meta.model} />{modelLabel(m.meta.model, m.meta.harness === "codex_cli" && tiersOf(m.meta.model).includes("codex.cli") ? "codex.cli" : undefined)} · {m.meta.effort} · {fmtUsd(usage.cost_usd)}</>}
         <ForkButton onClick={() => onFork(m.id)} />
