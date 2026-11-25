@@ -1,6 +1,8 @@
 ---
 name: perf-pass
 description: Runs a profiler-driven performance pass on Unity 6 (6000.3) 2D games - budgets (16.6 ms at 60 fps, 0 B GC per frame, batches, Physics2D ms), baseline via the runtime PerfProbe ([PERF] lines + CSV) or MCP manage_profiler, a GC/draw-call/physics checklist, and perf_report.py before/after proof. Use when the game has low FPS, stutter, GC spikes or too many draw calls, or when asked to optimize, profile or meet a perf budget.
+index-hint: "Unity performance: low FPS, stutter, GC spikes, too many draw calls; profile against budgets with before/after proof. 'optimize', 'profile'."
+requires: unity-project
 ---
 
 # perf-pass

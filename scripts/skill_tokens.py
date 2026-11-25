@@ -75,7 +75,7 @@ def skill_breakdown(name: str) -> list[tuple[str, int]]:
                                                                      load + 2 * avg),
                  (f"one big file with all {len(refs)} references", load + sum(refs))]
     templates = sum(est(f.read_text(encoding="utf-8", errors="replace")) for f in root.glob("templates/**/*")
-                    if f.is_file())
+                    if f.is_file() and not any(part.startswith(".") for part in f.relative_to(root).parts))
     if templates:
         rows.append(("templates written by scaffold.py (output not generated)", templates))
     return rows
@@ -99,6 +99,10 @@ def main(argv: list[str] | None = None) -> None:
         saved = results[f"{kind} (legacy)"] - results[f"{kind} (progressive)"]
         print(f"saved, {kind:24} {saved:>11,} tokens/call; over {a.calls} calls {saved * a.calls:,} tokens = "
               f"{usd(saved * a.calls, p_cache)}-{usd(saved * a.calls, p_in)}")
+    print("\nskill index (every call of a progressive session):")
+    for label, extra in (("in a Unity project", {"unity_project": True}), ("outside a Unity project", {"unity_project": False})):
+        t = est(skills_index({**PROGRESSIVE, **extra}))
+        print(f"  {label:28} {t:>6,} tokens  {usd(t, p_in)} uncached, {usd(t, p_cache)} cached")
     rows = skill_breakdown(a.skill)
     if rows:
         print(f"\n{a.skill}:")

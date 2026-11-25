@@ -1,6 +1,8 @@
 ---
 name: build-ship
 description: Ships a Unity 6 (6000.3) game from macOS - preflight (compile, tests via headless-ops, clean git), SemVer + build-number bump, Build Profiles per platform (macOS primary, Windows Mono, Web), builds into builds/<version>/<platform>/, player smoke test, Keep a Changelog section, git tag, macOS ad-hoc sign/zip/dmg. Use when asked to make a release or test build, ship, bump the version, write the changelog, tag a release (e.g. v1.2.0), or smoke test the player.
+index-hint: "Release a Unity build: version bump, Build Profiles, player smoke test, changelog, git tag, macOS zip/dmg. 'ship it', 'make a build', 'release'."
+requires: unity-project
 ---
 
 # build-ship

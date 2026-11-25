@@ -100,6 +100,12 @@ class SessionStore:
         global_skills = self.db.kv_get("skills_global", ["delegation"])
         if "skill_mode" not in settings:  # a caller choosing the mode brings its own skill settings
             settings = {**self.skill_disclosure_defaults(global_skills), **settings}
+        if settings.get("skill_mode") == "progressive" and "unity_project" not in settings:
+            from .skills import unity_project_flag
+
+            # Frozen for the skill index from the first call on (the session_start hook refreshes it).
+            if (in_unity := unity_project_flag(folder)) is not None:
+                settings["unity_project"] = in_unity
         row = {
             "id": new_id("ses_"), "title": title, "created_at": now(), "updated_at": now(), "pinned": 0,
             "folder": folder, "model": self.config.resolve(model or o.get("model", "claude-opus-5-5")),

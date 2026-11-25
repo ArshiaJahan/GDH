@@ -1,6 +1,8 @@
 ---
 name: project-memory
 description: Maintains PROJECT.md at a Unity 6 (6000.3) project root - ADR-lite decisions, conventions, folder layout, build/test commands, gotchas, current-milestone pointer - plus a generated facts block (Unity version, render pipeline, packages, asmdefs, build scenes) with a drift check. Use when PROJECT.md is missing or stale (first session in a project, handoff), after a decision, package, folder or milestone change, or when asked to record or check conventions.
+index-hint: "PROJECT.md for a Unity project: decisions, conventions, folder layout, commands, generated facts with a drift check; missing or stale."
+requires: unity-project
 ---
 
 # project-memory

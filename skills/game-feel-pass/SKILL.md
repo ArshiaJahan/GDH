@@ -1,6 +1,8 @@
 ---
 name: game-feel-pass
 description: Adds and tunes game feel (juice) in Unity 6 (6000.3) 2D games with dependency-free Harness.Feel components (ScreenShake, HitStop, SquashStretch, Flash, Knockback, Tween, DamageNumbers, AudioVariation, FeedbackPlayer, optional Cinemachine 3 adapter) that log [FEEL] lines for play-verify, plus an input/camera/accessibility checklist. Use when a working mechanic "feels flat" or needs juice, hit stop, screen shake, hit flash, impact or combat polish.
+index-hint: "Unity game feel and juice: screen shake, hit stop, squash and stretch, flash, knockback, damage numbers; a mechanic 'feels flat'."
+requires: unity-project
 ---
 
 # game-feel-pass

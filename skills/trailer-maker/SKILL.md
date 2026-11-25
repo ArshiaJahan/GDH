@@ -1,6 +1,8 @@
 ---
 name: trailer-maker
 description: Plans, captures and cuts a game trailer for a Unity 6 project - creative brief, beat sheet per trailer type (Steam gameplay, announce/teaser, launch, festival/demo, social cutdown), shot list captured in Play Mode with Unity Recorder, deterministic ffmpeg edit from a JSON EDL, ElevenLabs music/VO/SFX cut to the beat sheet, trailer review, and platform exports (Steam, YouTube, X, Shorts/TikTok vertical). Use for "make a trailer", teaser, launch/announce video, Steam trailer, Next Fest video, gameplay capture, social clip, vertical cutdown.
+index-hint: "Make a game trailer from a Unity project: brief, beat sheet, Play Mode capture, ffmpeg edit, music and VO, Steam and social exports."
+requires: unity-project
 ---
 
 # trailer-maker

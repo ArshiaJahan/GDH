@@ -1,6 +1,8 @@
 ---
 name: compile-fix-loop
 description: Recompiles a Unity 6 (6000.3) project, reads C# compiler errors from the editor console via MCP for Unity (or from a batchmode log when no editor is open), fixes root causes one at a time and repeats until the console is clean, stopping after N failed attempts (default 5) with a report. Use when scripts do not compile, the console is red, "error CS…", "fix compile errors", after code/asmdef/package changes, or before Play Mode, tests and builds.
+index-hint: "Fix Unity C# compile errors ('error CS…', red console) one at a time until clean; after code, asmdef or package changes."
+requires: unity-project
 ---
 
 # compile-fix-loop

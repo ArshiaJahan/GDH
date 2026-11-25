@@ -1,6 +1,7 @@
 ---
 name: unity-router
 description: Picks which Unity game-creation skills to load for a task (at most 3, in order) and whether to use MCP for Unity (editor open) or batchmode (editor closed, CI); holds the idea -> playable build pipeline for Unity 6 (6000.3) 2D roguelikes. Use when starting any Unity task or session, when unsure which skill applies, when a pipeline stage or milestone ends, or for "make a game" or "what next".
+index-hint: "Start here for any Unity task or new Unity game: picks up to 3 Unity skills and MCP vs batchmode; 'make a game', 'what next'."
 ---
 
 # unity-router
@@ -57,7 +58,7 @@ Signals are words or situations in the task. Load in order, at most 3. "Skip" li
 | 2 | GDD or spec ready, plan, milestones, backlog, tickets, scope, "what first" | gdd-to-backlog, project-memory | implementation skills |
 | 3 | new or unfamiliar project, first session, "where are we", handoff, record a decision, conventions | project-memory | everything else until PROJECT.md is current |
 | 4 | git setup, .gitignore, LFS, merge conflict in .unity/.prefab/.meta, commit/branch hygiene | vcs-hygiene | scene-prefab-safety (unless repairing YAML by hand) |
-| 5 | implement a system: player, enemy, combat, data (ScriptableObjects), events, input, save, scene loading, procgen, UI flow | architecture-patterns, compile-fix-loop | perf-pass, game-feel-pass, build-ship |
+| 5 | implement a system: player, enemy, combat, data (ScriptableObjects), events, input, save, scene loading, procgen, UI flow | architecture-patterns, unity-practices, compile-fix-loop | perf-pass, game-feel-pass, build-ship |
 | 6 | compile errors, red console, "doesn't build", after any script edit | compile-fix-loop (+ headless-ops if batchmode) | play-verify until clean |
 | 7 | "does it work", check a story, acceptance criteria, Play Mode, screenshot, runtime exception | play-verify (+ compile-fix-loop if not clean) | headless-ops when MCP is available |
 | 8 | run tests, CI, batchmode, editor closed, `-executeMethod`, import from CLI, nightly | headless-ops | play-verify |
@@ -71,6 +72,7 @@ Signals are words or situations in the task. Load in order, at most 3. "Skip" li
 | 16 | failure analysis, postmortem, exhausted gate, parked campaign, "that broke" | postmortem | implementation skills until the cause and prevention rule are recorded |
 | 17 | trailer, teaser, announce/launch/festival video, Steam trailer, gameplay capture, b-roll, social clip, vertical cut, press-kit GIF | trailer-maker (+ unity-mcp-orchestrator on demand) | game-feel-pass, play-verify (unless a shot needs a scripted-input fix) |
 | 18 | record/replay a run, reproduce inputs deterministically, verify replay checkpoints, GIF/video of a recorded run, bug-to-test, repeatability evidence | replay | play-verify (replay verifies at the frame-hash level, not acceptance criteria), trailer-maker (replay render captures PNG frames by default, silent MP4/GIF, for evidence; trailers are trailer-maker's) |
+| 19 | code review, readable code, refactor, naming, object pooling, enemies/spawners/waves, texture import or memory, magic numbers, tunable parameters, debug scene, cheats, overlay, a bug that keeps coming back | unity-practices (+ compile-fix-loop after code edits) | architecture-patterns unless a whole new system is needed, perf-pass unless frame time is measured |
 
 ## Workflows and gates
 Chains are workflow templates run by the harness in one session; they are a harness feature, not additional skills. Campaigns span multiple sessions and keep their durable brief, design target and continuation state in `.gamedevworkstation/campaigns/<slug>.md` at the project root. Use the matching template:
@@ -114,7 +116,7 @@ Stop and ask the user when: the GDD lacks a decision a story needs, compile-fix-
 ## Context budget
 - At most 3 task skills loaded at once (this router not counted). Prefer 1-2.
 - Load a skill's references only when its "read when" hint matches the current step.
-- Drop a skill (stop following it, do not reread it) when its stage is done. Re-route instead of stacking.
+- Drop a skill (stop following it, do not reread it) when its stage is done; in GameDevWorkstation call `unload_skill(name)`. Re-route instead of stacking.
 - unity-mcp-orchestrator counts toward the 3 and is loaded on demand only (parameters, failures).
 - Pass state between stages through files, not memory: BACKLOG.md (what), PROJECT.md (how and why), test results and logs (proof).
 

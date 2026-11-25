@@ -93,7 +93,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from ..agent.tools import ToolContext, ToolOutput, obj, wrap_untrusted
 from ..core.types import Message, TextBlock
 from ..legacy import migrate_project_dir
-from ..skills import builtin_skills_dir, user_skills_dir
+from ..skills import builtin_skills_dir, user_skills_dir, unity_project_flag
 from .hookbus import EVENTS, HookEvent, HookResult, TurnState, glob_match, hook_context
 from .unity_bridge import (BridgeResult, _cmd_result, get_bridge, is_unity_project, load_script, skill_script,
                            unwrap_untrusted, UNITY_SERVER)
@@ -1185,6 +1185,9 @@ class HooksEngine:
             upd["context_pack"] = pack
         if unity:
             upd["unity_route"] = unity
+        in_unity = unity_project_flag(s.get("folder"))
+        if in_unity is not None and (s.get("settings") or {}).get("unity_project") is not in_unity:
+            upd["unity_project"] = in_unity  # frozen for the skill index (skills.outside_unity_project)
         if upd:
             self.app.store.update(ev.session_id, settings=upd)
         return None
@@ -1200,6 +1203,8 @@ class HooksEngine:
         upd: dict = {"context_pack": pack or {}}
         if unity:
             upd["unity_route"] = unity
+        if (in_unity := unity_project_flag(s.get("folder"))) is not None:
+            upd["unity_project"] = in_unity
         self.app.store.update(sid, settings=upd)
         return pack
 

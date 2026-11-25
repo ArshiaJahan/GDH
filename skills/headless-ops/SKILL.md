@@ -1,6 +1,8 @@
 ---
 name: headless-ops
 description: Runs a Unity 6 (6000.3) project with no editor open via batchmode - compile check, EditMode/PlayMode tests with NUnit summary, asset (re)import, player builds (Build Profile or target) and -executeMethod jobs - through one wrapper (unity.sh) with watchdog, project-open check and a RESULT line. Use when the editor is closed or in CI - "run tests from the command line", batchmode, headless, -executeMethod, reimport from the CLI, a raw CLI player build. Release flow (version, changelog, smoke test) is build-ship.
+index-hint: "Unity with no editor open (batchmode, CI): compile check, EditMode/PlayMode tests, reimport, CLI player builds, -executeMethod."
+requires: unity-project
 ---
 
 # headless-ops

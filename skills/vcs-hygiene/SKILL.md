@@ -1,6 +1,8 @@
 ---
 name: vcs-hygiene
 description: Sets up and audits git for Unity 6 (6000.3) projects - .gitignore, .gitattributes (LF, merge=unityyamlmerge, Git LFS for binaries), local LFS, the UnityYAMLMerge Smart Merge driver in repo config, Force Text + Visible Meta Files, and agent commit rules; vcs_check.py verifies. Use when setting up git, editing .gitignore/.gitattributes, adding LFS or smart merge, resolving a merge conflict in a scene/prefab/.meta, when the repo is too big, or when deciding what to commit.
+index-hint: "Git for Unity projects: .gitignore, .gitattributes, LFS, UnityYAMLMerge, scene/prefab/.meta merge conflicts, what to commit."
+requires: unity-project
 ---
 
 # vcs-hygiene

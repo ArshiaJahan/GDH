@@ -1,6 +1,7 @@
 ---
 name: gdd-to-backlog
 description: Turns a game design doc (game-designer GDD and feature specs) into BACKLOG.md for a Unity 6 (6000.3) 2D roguelike - playable milestones M0-M4, stories, Given/When/Then criteria each with a test type, an observable signal and an owner skill - and lints it. Use when asked to plan, scope or break a GDD down into milestones, stories, tickets or a backlog, or to lint BACKLOG.md after hand edits.
+index-hint: "Turn a game design doc into BACKLOG.md: milestones, stories, Given/When/Then criteria; plan, scope or lint the backlog."
 ---
 
 # gdd-to-backlog

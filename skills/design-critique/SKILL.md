@@ -2,6 +2,8 @@
 name: design-critique
 description: >
   Use when a Unity milestone exits, a juice-pass or release needs design review, or a BACKLOG.md story is marked '- Critique: yes'. Reviews fresh play-verify screenshots against the design target, player experience and TASTE.md with three independent reviewers.
+index-hint: "Design review of fresh play-verify screenshots against the design target and TASTE.md at milestone exits or 'Critique: yes' stories."
+requires: unity-project
 ---
 
 # design-critique

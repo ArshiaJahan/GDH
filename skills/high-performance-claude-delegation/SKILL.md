@@ -1,6 +1,7 @@
 ---
 name: high-performance-claude-delegation
 description: Finish a task as fast and as well as possible by splitting it into independent units and running them all at once on Opus subagents (tier claude.deep, effort high), each code-writing unit in its own git worktree, then an independent Opus reviewer. Use when speed and quality matter more than cost; for cheap runs use the delegation skill instead.
+index-hint: "Fastest, best result: parallel Opus subagents in worktrees plus an independent reviewer; when speed and quality matter more than cost."
 runtime: gamedevworkstation
 ---
 

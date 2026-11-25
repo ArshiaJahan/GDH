@@ -1,6 +1,8 @@
 ---
 name: scene-prefab-safety
 description: Edits Unity 6 (6000.3) scenes, prefabs, prefab variants and asset files without breaking GUIDs, .meta files, prefab overrides or references - MCP-first call order, editor-API fallbacks (PrefabUtility, EditorSceneManager, Undo, AssetDatabase.MoveAsset), the YAML hand-edit procedure, a .meta/GUID checker and a missing-script/reference audit. Use when editing a scene or prefab, moving/renaming/duplicating/deleting assets, fixing "Missing (Mono Script)" or broken references, or before committing scene/prefab changes.
+index-hint: "Safe Unity scene, prefab and asset edits: GUIDs, .meta files, overrides, moving or renaming assets, 'Missing (Mono Script)', broken references."
+requires: unity-project
 ---
 
 # scene-prefab-safety

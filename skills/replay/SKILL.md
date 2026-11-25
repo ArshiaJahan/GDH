@@ -1,6 +1,8 @@
 ---
 name: replay
 description: Records and replays instrumented Unity sessions deterministically, verifies frame-by-frame checkpoint hashes, and exports gameplay GIF/MP4 on request. Use for "record this run", "reproduce inputs", "verify replay", "GIF/video of this run".
+index-hint: "Record and replay Unity runs deterministically, verify checkpoint hashes, export a GIF or MP4; 'record this run', 'reproduce inputs'."
+requires: unity-project
 ---
 
 # replay

@@ -1,6 +1,8 @@
 ---
 name: architecture-patterns
 description: Drops dependency-free C# architecture templates (namespace Harness.Arch) into Unity 6 (6000.3) 2D roguelikes - ScriptableObject definitions and runtime sets, SO event channels, an Input System InputReader, versioned JSON saves with migrations, bootstrap + additive scene loading, a service locator, asmdef layout, run-vs-meta state, a seeded RNG and pooling, with EditMode/PlayMode tests. Use when starting a game's code structure, adding saves/input/scene flow/events/pooling/RNG, or deciding which pattern fits.
+index-hint: "Unity C# code structure templates: ScriptableObject data and events, input, saves, scene loading, services, seeded RNG, pooling, asmdefs. Use when starting game code."
+requires: unity-project
 ---
 
 # architecture-patterns

@@ -89,10 +89,13 @@ def test_index_sorted_excludes_pins_and_limits_descriptions(app):
     index = sk.skills_index(settings)
     lines = [line for line in index.splitlines() if line.startswith("- ")]
     names = [line[2:].split(": ", 1)[0] for line in lines]
-    assert names == sorted(x["name"] for x in sk.list_skills() if x["name"] not in settings["pinned_skills"])
+    assert names == sorted(x["name"] for x in sk.list_skills()
+                           if x["name"] not in settings["pinned_skills"] and x["model_invocable"])
+    assert "claude-handoff" not in names  # disable-model-invocation: only the user invokes it
     assert all(len(line.split(": ", 1)[1]) <= 19 for line in lines)
-    assert index.endswith("To follow a skill, load it first with read_skill(name); a loaded skill stays loaded until "
-                          "the conversation is compacted and it is no longer among the 3 most recent.\n</skill-index>")
+    assert index.endswith("Load a skill with read_skill(name) before following it, and unload_skill(name) once its "
+                          "task is done; the 3 most recently loaded skills are kept when the conversation is "
+                          "compacted.\n</skill-index>")
     system = sk.system_skill_segments(settings)
     assert sk.skill_load_text("delegation") in system[0]
     assert sk.skill_load_text("graphify") in system[0]

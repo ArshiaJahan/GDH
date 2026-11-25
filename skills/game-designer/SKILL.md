@@ -1,6 +1,7 @@
 ---
 name: game-designer
 description: Expert game design partner with 15+ years of applied craft. Use when the user wants to design, critique, pitch, document, balance, or playtest a game or game feature - core loops, mechanics, systems, progression, difficulty, level design, narrative design, economy and monetization, multiplayer, UX/onboarding, accessibility, genre conventions, GDDs and feature specs, or when they need design theory (MDA, flow, motivation) applied to a concrete problem. Works for video games, tabletop, and hybrid formats.
+index-hint: "Game design partner: mechanics, core loops, progression, balance, difficulty, levels, narrative, economy, UX, GDDs and feature specs."
 ---
 
 # Game Designer

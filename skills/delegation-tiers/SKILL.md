@@ -1,6 +1,7 @@
 ---
 name: delegation-tiers
 description: Which subagent tier and effort to pick for each kind of unit (codex.fast first for routine work, codex.standard only for coding, Sonnet at medium for complex work, Opus only for big tasks and only after the user approves). Load it whenever you spawn a subagent. Where it differs from the delegation skill's routing table, this skill wins.
+index-hint: "Which subagent tier and effort to use per unit; load it whenever you spawn a subagent."
 ---
 
 # Delegation tiers

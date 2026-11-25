@@ -339,3 +339,16 @@ def test_issue_cache_round_trip(tmp_path):
         "--project", str(tmp_path))
     entries = [json.loads(x) for x in store.read_text(encoding="utf-8").splitlines()]
     assert len(entries) == 2 and entries[1]["fix"] == "add using UnityEngine.Pool"
+
+
+def test_unity_router_routes_to_unity_practices():
+    router = (ROOT.parent / "unity-router" / "SKILL.md").read_text(encoding="utf-8")
+    rows = [line for line in router.splitlines() if line.startswith("| ") and "unity-practices" in line]
+    assert any(line.startswith("| 5 |") for line in rows)  # implementing a system
+    assert any("pooling" in line and "magic numbers" in line and line.split("|")[3].strip().startswith("unity-practices")
+               for line in rows)
+    assert "unload_skill" in router
+    r = subprocess.run([sys.executable, "-I", str(ROOT.parent / "unity-router" / "scripts" / "check_skills.py"), "--all",
+                        "--root", str(ROOT.parent)], capture_output=True, text=True, encoding="utf-8", timeout=60,
+                       stdin=subprocess.DEVNULL)
+    assert r.returncode == 0 and "unity-practices" in r.stdout, r.stdout

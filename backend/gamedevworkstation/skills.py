@@ -153,6 +153,12 @@ def list_skills() -> list[dict]:
             found[name] = {"name": name, "description": meta.get("description", ""), "path": str(f), "source": src,
                            "native": is_native(name, meta), "featured": src == "builtin" and name in FEATURED_SKILLS,
                            "argument_hint": meta.get("argument-hint", ""),
+                           # The skill index's line (a short trigger); the description when absent.
+                           "index_hint": meta.get("index-hint", ""),
+                           # "unity-project": only listed in the index of sessions in a Unity project.
+                           "requires": meta.get("requires", "").strip().lower(),
+                           # Claude Code's disable-model-invocation: the user invokes it, the model isn't offered it.
+                           "model_invocable": meta.get("disable-model-invocation", "").strip().lower() != "true",
                            # a user copy that takes precedence over the built-in of the same name
                            "overrides_builtin": src == "user" and found.get(name, {}).get("source") == "builtin"}
     return list(found.values())
@@ -376,29 +382,70 @@ def index_hidden_skills(settings: dict) -> set[str]:
     return set()
 
 
+def unity_project_flag(folder: str | None) -> bool | None:
+    """Whether a session folder is a Unity project (ProjectSettings/ProjectVersion.txt): False with
+    no folder, None when the folder is set but missing (it may appear later, so nothing is decided).
+    Frozen into settings.unity_project at session creation and at session start."""
+    if not folder:
+        return False
+    try:
+        p = Path(folder).expanduser().resolve()
+    except OSError:
+        return None
+    if not p.is_dir():
+        return None
+    return (p / "ProjectSettings" / "ProjectVersion.txt").is_file()
+
+
+def outside_unity_project(settings: dict) -> bool:
+    """Whether the session is known not to be in a Unity project: settings.unity_project, frozen
+    with the context pack at session start, is False. Unknown (older sessions, hooks off) is not
+    outside, so nothing is hidden."""
+    return (settings or {}).get("unity_project") is False
+
+
+def index_line(s: dict, limit: int) -> str:
+    """One skill's index line: its index-hint (a short trigger) when it has one and
+    [skills].index_hints is on, else its description; cut at `limit` characters."""
+    hints = get_config().skills.get("index_hints", True)
+    text = s.get("index_hint") if hints and s.get("index_hint") else s["description"]
+    return f"- {s['name']}: {' '.join(text.split())[:limit]}"
+
+
 def skills_index(settings: dict) -> str:
-    """A stable, name-sorted index of installed skills, excluding the pinned full text (and
-    index_hidden_skills)."""
+    """A stable, name-sorted index of installed skills, excluding the pinned full text,
+    index_hidden_skills, skills only the user invokes (disable-model-invocation), and, outside a
+    Unity project, skills that require one (one line says so). Decided from frozen settings only,
+    so the cached index stays the same all session; read_skill still reads any skill."""
     pinned = set(pinned_skill_names(settings))
     skip = pinned | index_hidden_skills(settings)
-    limit = max(0, int(get_config().skills.get("index_description_chars", 300)))
-    lines = ["<skill-index>"]
+    cfg = get_config().skills
+    limit = max(0, int(cfg.get("index_description_chars", 300)))
+    hide_unity = cfg.get("hide_unity_skills_outside_unity", True) and outside_unity_project(settings)
+    lines, hidden = ["<skill-index>"], 0
     for s in sorted(list_skills(), key=lambda s: s["name"]):
-        if s["name"] not in skip:
-            description = " ".join(s["description"].split())[:limit]
-            lines.append(f"- {s['name']}: {description}")
-    lines += ["To follow a skill, load it first with read_skill(name); a loaded skill stays loaded until the "
-              "conversation is compacted and it is no longer among the 3 most recent.", "</skill-index>"]
+        if s["name"] in skip or not s.get("model_invocable", True):
+            continue
+        if hide_unity and s.get("requires") == "unity-project":
+            hidden += 1
+            continue
+        lines.append(index_line(s, limit))
+    if hidden:
+        lines.append(f"- ({hidden} Unity project skills are not listed: this session's folder isn't a Unity project. "
+                     "To make or open one, read_skill(\"unity-router\").)")
+    keep = int(cfg.get("max_loaded", 3))
+    lines += [f"Load a skill with read_skill(name) before following it, and unload_skill(name) once its task is done; "
+              f"the {keep} most recently loaded skills are kept when the conversation is compacted.", "</skill-index>"]
     return "\n".join(lines)
 
 
 def full_disclosure_text(settings: dict) -> str:
     """The skill text a "full" session would carry on every call to offer this session the same
-    skills: every skill the index lists, plus the pinned ones, whole, in the system prompt. The
-    baseline the Context card compares progressive loading against."""
+    skills: every installed skill the model may invoke, whole, in the system prompt (full mode
+    hides nothing by route or project). The baseline the Context card compares progressive
+    loading against."""
     names = [*pinned_skill_names(settings),
-             *(s["name"] for s in sorted(list_skills(), key=lambda s: s["name"])
-               if s["name"] not in set(pinned_skill_names(settings)) | index_hidden_skills(settings))]
+             *(s["name"] for s in sorted(list_skills(), key=lambda s: s["name"]) if s.get("model_invocable", True))]
     return skills_prompt(list(dict.fromkeys(names)))
 
 

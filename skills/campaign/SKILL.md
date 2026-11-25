@@ -1,6 +1,7 @@
 ---
 name: campaign
 description: How to work inside a GameDevWorkstation campaign or workflow chain - read the brief, work only on the current phase, log decisions, finish each phase with a HANDOFF block and campaign_phase_done (chain_step_done in a chain), ask through campaign_pause. Pinned in campaign and chain sessions.
+index-hint: "Working inside a campaign or chain: current phase only, log decisions, HANDOFF block, campaign_phase_done / chain_step_done, campaign_pause."
 runtime: gamedevworkstation
 ---
 

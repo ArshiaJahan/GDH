@@ -1,6 +1,8 @@
 ---
 name: play-verify
 description: Verifies a Unity 6 (6000.3) game in Play Mode against acceptance criteria from BACKLOG.md (gdd-to-backlog). Enters Play Mode through MCP for Unity, drives input with a scripted autoplay, captures Game-view screenshots and [VERIFY] log lines, marks every criterion PASS/FAIL with evidence and writes a VERIFY report; has a headless PlayMode-test path. Use when asked to "play test it", "verify the feature works", check acceptance criteria, take Play Mode screenshots, or before marking a story done.
+index-hint: "Play-test a Unity feature in Play Mode against BACKLOG acceptance criteria: scripted input, screenshots, PASS/FAIL report. 'verify it works'."
+requires: unity-project
 ---
 
 # play-verify

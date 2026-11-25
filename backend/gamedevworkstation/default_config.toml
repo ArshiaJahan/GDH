@@ -150,6 +150,8 @@ description = "MCP for Unity 10.3 — needs the com.coplaydev.unity-mcp package 
 disclosure = "progressive"          # progressive | full (new sessions; existing sessions keep full)
 max_loaded = 3                      # loaded (non-pinned) skills kept across compaction
 index_description_chars = 300       # each skill's description in the index is cut here
+index_hints = true                  # use a skill's short index-hint (if any) in the index instead of its description
+hide_unity_skills_outside_unity = true  # sessions whose folder isn't a Unity project don't list `requires: unity-project` skills
 
 [skills.mcp_on_invoke]
 # Invoking one of these skills (or ticking it in a session's Connectors card) turns these MCP

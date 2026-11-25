@@ -1,6 +1,8 @@
 ---
 name: asset-pipeline
 description: Sets up and audits the Unity 6 (6000.3) asset pipeline for 2D pixel-art games - folder-filtered Presets, an AssetPostprocessor enforcing Point/uncompressed/fixed-PPU sprites and SFX/music audio settings, Sprite Atlas v2 per folder, labelled placeholder sprites, optional Addressables 2.x content builds, and a .meta import-settings audit. Use when importing art or audio, sprites look blurry or compressed, setting up atlases, generating placeholder art, deciding on Addressables, or auditing import settings.
+index-hint: "Unity art and audio import: pixel-art sprite settings, Presets, Sprite Atlas, placeholder art, Addressables, import audit; blurry or compressed sprites."
+requires: unity-project
 ---
 
 # asset-pipeline

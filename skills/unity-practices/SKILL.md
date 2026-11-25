@@ -1,6 +1,8 @@
 ---
 name: unity-practices
-description: Unity 6 best practices by topic - C# coding, enemies/object systems, pooling, textures, performance, readable code, tunable parameters (ScriptableObjects), debug scenes/tools. Use when writing or reviewing Unity gameplay code or fixing a repeated issue.
+description: Unity 6 best practices by topic - C# coding and review, readable code, enemy systems (waves, health, spawners), object pooling, textures, performance, tunable parameters (magic numbers to ScriptableObjects), debug scenes and cheats for recurring bugs. Use when writing or reviewing Unity gameplay code or fixing a repeated issue.
+index-hint: "Unity best practices: C# review, readable code, enemies (waves, health, spawners), object pooling, textures, performance, magic numbers to ScriptableObjects, debug scenes for recurring bugs."
+requires: unity-project
 argument-hint: "[topic] [task]"
 ---
 

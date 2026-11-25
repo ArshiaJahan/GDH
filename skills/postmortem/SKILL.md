@@ -1,6 +1,7 @@
 ---
 name: postmortem
 description: Use when a gate is exhausted, a campaign parks, the user reverts a change on the Changes card, or the user says 'that broke'. Records an evidenced failure and a scoped prevention rule in POSTMORTEMS.md, links it from PROJECT.md, and proposes enforcement for user approval.
+index-hint: "Record a failure and a prevention rule in POSTMORTEMS.md when a gate fails, a campaign parks, a change is reverted, or 'that broke'."
 ---
 
 # postmortem

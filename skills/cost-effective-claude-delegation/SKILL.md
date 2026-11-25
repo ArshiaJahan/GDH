@@ -1,6 +1,7 @@
 ---
 name: cost-effective-claude-delegation
 description: Do a task in any project at the lowest total cost (tokens, retries, rework, wall-clock), choosing per step between doing it directly, scripting it, or delegating to a right-sized Claude subagent.
+index-hint: "Do a task at the lowest total cost: do it directly, script it, or delegate to a right-sized subagent."
 argument-hint: <describe the task>
 ---
 
