@@ -21,7 +21,7 @@ def _feature_modules() -> list:
         "usage_routes", "tracing", "cost_attribution", "session_routes", "subagents", "delegation", "terminal",
         "elevenlabs_feature",
         "comfyplug_feature",  # the agent's `comfyplug` tool: images, edits, 3D, sound, any workflow on ComfyUI
-        "items_routes", "changes_routes", "worktrees", "web_tools", "mcp_feature", "skill_editor", "skill_assistant", "tasks_feature", "task_board", "harnesses", "claude_code", "settings_routes", "updates", "prompt_improver",
+        "items_routes", "changes_routes", "worktrees", "web_tools", "mcp_feature", "skill_editor", "skill_assistant", "skill_unload", "tasks_feature", "task_board", "harnesses", "claude_code", "settings_routes", "updates", "prompt_improver",
         "storage",
         # Hooks & gates, quality ladder, campaigns, fleet: added by later work packages; a module
         # that doesn't exist yet is skipped below.

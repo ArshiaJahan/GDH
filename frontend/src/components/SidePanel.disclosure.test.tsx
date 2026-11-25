@@ -89,3 +89,38 @@ it("no longer shows the gallery (it is a session tab now)", async () => {
   expect(screen.queryByLabelText("Screenshot prompt")).toBeNull();
   expect(get.mock.calls.some(([path]) => String(path).includes("/gallery"))).toBe(false);
 });
+
+it("shows skill tokens saved and the API-price total, not as a receipt", async () => {
+  get.mockImplementation(async (path: string) => {
+    if (path === "/sessions/s1/context") return {
+      ...context(true),
+      skill_savings: { full_tokens: 50_000, now_tokens: 5_000, saved_tokens_per_call: 45_000, main_calls: 4,
+        saved_tokens_session: 180_000, saved_usd_per_call: 0.225, saved_usd_per_call_cached: 0.0225,
+        saved_usd_session: 0.9, saved_usd_session_cached: 0.09, priced: true },
+    };
+    if (path === "/usage/session/s1") return {
+      models: [{ model: "claude-opus-5-5", billing: "subscription", input: 10, output: 5, cached: 0, cost: 0.4, api_price: 0.4 }],
+      total_cost: 0, subscription_estimated: 0.4, api_price_total: 0.4,
+    };
+    if (path === "/environment") return { harnesses: { builtin: true }, models: [] };
+    return [];
+  });
+  render(<SidePanel />);
+  await act(async () => {});
+  expect(screen.getByText("Skill tokens saved per call").closest("div")?.textContent).toContain("45000");
+  expect(screen.getByText("Saved this session (4 calls)").closest("div")?.textContent).toContain("180000");
+  expect(screen.getByText(/per call · .* this session at API prices/).textContent).toContain("0.0225–0.225");
+  expect(screen.getByText("At API prices").closest("div")?.textContent).toContain("0.4");
+});
+
+it("hides the savings line when progressive loading saves nothing", async () => {
+  get.mockImplementation(async (path: string) => {
+    if (path === "/sessions/s1/context") return { ...context(true), skill_savings: { saved_tokens_per_call: 0, main_calls: 0, priced: true } };
+    if (path === "/usage/session/s1") return { models: [] };
+    if (path === "/environment") return { harnesses: { builtin: true }, models: [] };
+    return [];
+  });
+  render(<SidePanel />);
+  await act(async () => {});
+  expect(screen.queryByText("Skill tokens saved per call")).toBeNull();
+});

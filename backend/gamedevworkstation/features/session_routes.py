@@ -15,7 +15,7 @@ from fastapi import APIRouter, FastAPI, HTTPException
 
 from ..agent import context as cx
 from ..core.types import ToolResultBlock
-from ..skills import skills_prompt, turn_skill_segments
+from ..skills import full_disclosure_text, skills_prompt, turn_skill_segments
 from ..store import SESSION_MODES
 
 if TYPE_CHECKING:
@@ -73,6 +73,7 @@ def context_breakdown(app: "AppState", sid: str) -> dict:
     last = app.db.one("SELECT input_tokens + cache_read_tokens + cache_write_tokens AS t, model FROM usage_records "
                       "WHERE session_id=? AND role='main' AND ok=1 AND billing != 'subscription' ORDER BY ts DESC LIMIT 1", [sid])
     calibrated = False
+    f = 1.0
     if last and last["t"] and est_total and last["model"] == s["model"]:
         f = last["t"] / est_total
         if 0.4 < f < 2.5:
@@ -83,13 +84,37 @@ def context_breakdown(app: "AppState", sid: str) -> dict:
             calibrated = True
     window = app.config.model(s["model"]).context_window
     total = sum(parts.values())
+    savings = skill_savings(app, s, skill_parts, f if calibrated else 1.0) if skill_parts is not None else None
     fraction = total / window if window else 0
     return {"model": s["model"], "window": window, "total": total, "fraction": fraction,
             "parts": parts, "calibrated": calibrated,
             **({"skill_parts": skill_parts} if skill_parts is not None else {}),
+            **({"skill_savings": savings} if savings else {}),
             "compactable_messages": max(0, len(msgs) - 2 * KEEP_RECENT_TURNS),
             "can_compact": cx.manual_cut(msgs) is not None, "auto_compact_at": cx.AUTO_COMPACT_AT,
             "level": "danger" if fraction >= cx.DANGER_AT else "warn" if fraction >= cx.WARN_AT else "ok"}
+
+
+def skill_savings(app: "AppState", s: dict, skill_parts: dict, factor: float = 1.0) -> dict:
+    """Skill tokens per call now vs. a "full" session that offers the same skills (every one whole
+    in the system prompt), and that difference priced at the session model's API list prices: per
+    call, and for this session's main-agent calls so far. An estimate: it assumes today's loaded
+    skills for every call, and prices the saved tokens as uncached input (most) and cache reads (least)."""
+    full = int(_est(full_disclosure_text(s["settings"])) * factor)
+    now = sum(skill_parts.values())
+    saved = max(0, full - now)
+    m = app.config.model(s["model"])
+    cache_read = m.cache_read if m.cache_read is not None else m.input * 0.1
+    row = app.db.one("SELECT COUNT(*) AS n FROM usage_records WHERE session_id=? AND role='main' AND ok=1 "
+                     "AND billing != 'subscription'", [s["id"]])  # Claude Code calls don't carry GDW's skill prompt
+    calls = int((row or {}).get("n") or 0)
+    return {"full_tokens": full, "now_tokens": now, "saved_tokens_per_call": saved, "main_calls": calls,
+            "saved_tokens_session": saved * calls,
+            "saved_usd_per_call": round(saved * m.input / 1e6, 6),
+            "saved_usd_per_call_cached": round(saved * cache_read / 1e6, 6),
+            "saved_usd_session": round(saved * calls * m.input / 1e6, 4),
+            "saved_usd_session_cached": round(saved * calls * cache_read / 1e6, 4),
+            "priced": m.input > 0}
 
 
 async def compact(app: "AppState", sid: str) -> dict:

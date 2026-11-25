@@ -392,6 +392,16 @@ def skills_index(settings: dict) -> str:
     return "\n".join(lines)
 
 
+def full_disclosure_text(settings: dict) -> str:
+    """The skill text a "full" session would carry on every call to offer this session the same
+    skills: every skill the index lists, plus the pinned ones, whole, in the system prompt. The
+    baseline the Context card compares progressive loading against."""
+    names = [*pinned_skill_names(settings),
+             *(s["name"] for s in sorted(list_skills(), key=lambda s: s["name"])
+               if s["name"] not in set(pinned_skill_names(settings)) | index_hidden_skills(settings))]
+    return skills_prompt(list(dict.fromkeys(names)))
+
+
 def skill_load_text(name: str) -> str:
     """The same skill wrapper as skills_prompt, without the system-wide tool mapping note."""
     s = get_skill(name)

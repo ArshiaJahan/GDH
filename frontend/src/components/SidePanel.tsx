@@ -202,6 +202,7 @@ function ContextCard({ s }: { s: Session }) {
             </tbody>
           </table>
           {!ctx.calibrated && <div className="text-[11.5px] text-faint mt-1">Estimated until the first reply; then calibrated to real token counts.</div>}
+          {ctx.skill_savings && <SkillSavings sv={ctx.skill_savings} />}
           {ctx.level !== "ok" && (
             <div role="alert" className={`mt-2 flex items-start gap-2 rounded border px-2 py-1.5 text-[12.5px] ${ctx.level === "danger" ? "border-bad text-bad" : "border-warn text-warn"}`}>
               <span className="flex-1">
@@ -217,6 +218,11 @@ function ContextCard({ s }: { s: Session }) {
       {usage && usage.models.length > 0 && (
         <div className="mt-2 pt-2 border-t border-line">
           <div className="flex justify-between font-medium text-[12.5px]"><span>This session</span><span>{fmtUsd(usage.total_cost)}</span></div>
+          {usage.api_price_total > 0 && (
+            <div className="flex justify-between text-[12.5px] text-muted" title="What every call in this session would cost at API list prices, including calls on a Claude subscription. Not a receipt.">
+              <span>At API prices</span><span className="tabular-nums">{fmtUsd(usage.api_price_total)}</span>
+            </div>
+          )}
           {usage.models.map((m: any) => (
             <div key={m.model} className="text-[12.5px] text-muted py-0.5">
               <div className="flex justify-between gap-2"><span className="truncate" title={m.model}>{modelLabel(m.model)}</span><span className="tabular-nums shrink-0">{fmtUsd(m.cost)}</span></div>
@@ -226,6 +232,25 @@ function ContextCard({ s }: { s: Session }) {
         </div>
       )}
     </Card>
+  );
+}
+
+/** Progressive skill loading vs. a session that carries every available skill whole on every call. */
+function SkillSavings({ sv }: { sv: any }) {
+  if (!sv.saved_tokens_per_call) return null;
+  const range = (lo: number, hi: number) => (lo === hi ? fmtUsd(hi) : `${fmtUsd(lo)}–${fmtUsd(hi)}`);
+  return (
+    <div className="mt-2 pt-2 border-t border-line text-[12.5px]" title={`Compared with every available skill in full in the system prompt (${fmtTokens(sv.full_tokens)} tokens). Dollar amounts use API list prices for this model, as cache reads (low) to uncached input (high); not a receipt.`}>
+      <div className="flex justify-between"><span>Skill tokens saved per call</span><span className="tabular-nums">{fmtTokens(sv.saved_tokens_per_call)}</span></div>
+      {sv.main_calls > 0 && (
+        <div className="flex justify-between text-muted"><span>Saved this session ({sv.main_calls} calls)</span><span className="tabular-nums">{fmtTokens(sv.saved_tokens_session)}</span></div>
+      )}
+      {sv.priced && (
+        <div className="text-[11.5px] text-faint tabular-nums">
+          ≈ {range(sv.saved_usd_per_call_cached, sv.saved_usd_per_call)} per call{sv.main_calls > 0 ? ` · ${range(sv.saved_usd_session_cached, sv.saved_usd_session)} this session` : ""} at API prices
+        </div>
+      )}
+    </div>
   );
 }
 

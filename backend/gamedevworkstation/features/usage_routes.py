@@ -315,10 +315,24 @@ def register(app: FastAPI, api: APIRouter, S: "AppState") -> None:
             m["characters"] += r["characters"]
             m["credits"] += r["credits"] or 0
             m["cost"] += r["cost_usd"]
+            m["api_price"] = m.get("api_price", 0.0) + api_price(r)
             m["requests"] += 1
         return {"models": list(per.values()),
                 "total_cost": sum(m["cost"] for m in per.values() if m["billing"] != SUBSCRIPTION),
-                "subscription_estimated": sum(m["cost"] for m in per.values() if m["billing"] == SUBSCRIPTION)}
+                "subscription_estimated": sum(m["cost"] for m in per.values() if m["billing"] == SUBSCRIPTION),
+                # What every call in this session would cost at API list prices, whatever was actually billed.
+                "api_price_total": round(sum(m["api_price"] for m in per.values()), 6)}
+
+    def api_price(r: dict) -> float:
+        """One record at API list prices. API-billed rows already are (their cost came from the same
+        prices, plus any per-request fees); subscription rows are re-priced from their tokens, falling
+        back to the CLI's own estimate for a model without prices in the config."""
+        if not _sub(r):
+            return r["cost_usd"] or 0.0
+        u = Usage(input_tokens=r["input_tokens"], output_tokens=r["output_tokens"],
+                  cache_read_tokens=r["cache_read_tokens"], cache_write_tokens=r["cache_write_tokens"])
+        priced = compute_cost(S.config.model(r["model"]), u)
+        return priced if priced > 0 else (r["cost_usd"] or 0.0)
 
     @api.get("/usage/export.csv")
     async def export_csv(since: float | None = None, until: float | None = None, session_id: str | None = None,
