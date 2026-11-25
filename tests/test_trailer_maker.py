@@ -109,8 +109,8 @@ def test_router_and_check_skills_know_trailer_maker():
     assert r.returncode == 0 and last(r) == "RESULT: OK 1 skill(s) found", r.stdout
     r = run(CHECK_SKILLS, "--all")
     assert r.returncode == 0, r.stdout
-    assert last(r) == "RESULT: OK 19 skill(s) found"  # 17 harness skills + unity-mcp-orchestrator + game-designer
-    assert "17 harness skills" in CHECK_SKILLS.read_text()
+    assert last(r) == "RESULT: OK 20 skill(s) found"  # 18 harness skills + unity-mcp-orchestrator + game-designer
+    assert "18 harness skills" in CHECK_SKILLS.read_text()
 
 
 def test_config_turns_unity_on_for_trailer_maker(cfg):

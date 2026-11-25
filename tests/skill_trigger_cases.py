@@ -47,6 +47,8 @@ CASES: list[tuple[str, set[str]]] = [
     ("smoke test the player build before we ship", {"build-ship"}),
     ("build enemy waves and a health system", {"unity-practices", "architecture-patterns"}),
     ("balance the difficulty and the economy", {"game-designer"}),
+    ("new session: get up to speed on this project, where are we?", {"unity-orientation"}),
+    ("orient yourself in this Unity project and tell me what is left to do", {"unity-orientation"}),
 ]
 
 STOP = {"the", "and", "for", "with", "this", "that", "into", "from", "after", "before", "some", "there", "now", "use",
