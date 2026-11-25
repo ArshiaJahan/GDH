@@ -24,7 +24,8 @@ beforeEach(() => {
   list.mockResolvedValue([]);
   get.mockResolvedValue({});
   post.mockResolvedValue({ stopped: true });
-  useStore.setState({ currentId: "s1", page: "chat", sessions: [{ id: "s1", title: "S", unread: false } as any], subagents: {}, sessionTabs: {} });
+  // Not a Unity project: the three base tabs (the Prefabs tab has its own test below).
+  useStore.setState({ currentId: "s1", page: "chat", sessions: [{ id: "s1", title: "S", unread: false, settings: { unity_project: false } } as any], subagents: {}, sessionTabs: {} });
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
@@ -45,6 +46,20 @@ describe("session tabs", () => {
     expect(screen.getByRole("tabpanel", { name: /Subagents/ })).toBeTruthy();
     fireEvent.click(tab("Chat"));
     expect(draft.closest("[role=tabpanel]")!.hasAttribute("hidden")).toBe(false);
+  });
+
+  it("adds a Prefabs tab for sessions that may be in a Unity project, and falls back to Chat without it", () => {
+    useStore.setState({ sessions: [{ id: "s1", title: "S", unread: false, settings: { unity_project: true } } as any], sessionTabs: { s1: "prefabs" } });
+    const { unmount } = render(<SessionView />);
+    expect(tab("Prefabs").getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(tab("Prefabs"), { key: "Home" });
+    fireEvent.keyDown(tab("Chat"), { key: "End" });
+    expect(tab("Prefabs").getAttribute("aria-selected")).toBe("true");
+    unmount();
+    useStore.setState({ sessions: [{ id: "s1", title: "S", unread: false, settings: { unity_project: false } } as any], sessionTabs: { s1: "prefabs" } });
+    render(<SessionView />);
+    expect(screen.queryByRole("tab", { name: "Prefabs" })).toBeNull();
+    expect(tab("Chat").getAttribute("aria-selected")).toBe("true");
   });
 
   it("moves between tabs with the arrow keys, Home and End", () => {

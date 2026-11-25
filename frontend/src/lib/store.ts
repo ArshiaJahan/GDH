@@ -60,7 +60,7 @@ export type Limits = { global: LimitPause | null; sessions: Record<string, Limit
 export type AgentStatus = { kind: string; text: string; retry_in_s?: number; until?: number; attempt?: number; max_attempts?: number };
 
 export type Page = "chat" | "artifacts" | "elevenlabs" | "board" | "schedule" | "campaigns" | "skills" | "review" | "usage" | "settings";
-export type SessionTab = "chat" | "subagents" | "gallery";
+export type SessionTab = "chat" | "subagents" | "gallery" | "prefabs";
 export type Theme = "system" | "light" | "dark";
 
 type State = {

@@ -2,10 +2,11 @@ import { useRef, type KeyboardEvent } from "react";
 import { actions, useStore, type SessionTab } from "../lib/store";
 import { Chat } from "./Chat";
 import { GalleryEntriesContext, GalleryTab, useGallery } from "./GalleryView";
+import { PrefabsTab } from "./PrefabsTab";
+import { tabsFor } from "../lib/prefabs";
 import { isLive, SubagentsTab, useSessionSubagents } from "./SubagentsTab";
 
-const TABS: SessionTab[] = ["chat", "subagents", "gallery"];
-const LABEL: Record<SessionTab, string> = { chat: "Chat", subagents: "Subagents", gallery: "Gallery" };
+const LABEL: Record<SessionTab, string> = { chat: "Chat", subagents: "Subagents", gallery: "Gallery", prefabs: "Prefabs" };
 
 function Badge({ n, label, running }: { n: number; label: string; running?: boolean }) {
   if (!n) return null;
@@ -14,7 +15,7 @@ function Badge({ n, label, running }: { n: number; label: string; running?: bool
   );
 }
 
-function Strip({ sid, tab, running, items }: { sid: string; tab: SessionTab; running: number; items: number }) {
+function Strip({ sid, tab, tabs: TABS, running, items }: { sid: string; tab: SessionTab; tabs: SessionTab[]; running: number; items: number }) {
   const refs = useRef<Record<string, HTMLButtonElement | null>>({});
   const onKey = (e: KeyboardEvent) => {
     const i = TABS.indexOf(tab);
@@ -50,7 +51,9 @@ export function SessionView() {
 
 function Tabs({ sid }: { sid: string }) {
   const session = useStore((s) => s.sessions.find((x) => x.id === sid))!;
-  const tab = useStore((s) => s.sessionTabs[sid]) ?? "chat";
+  const tabs = tabsFor(session.settings?.unity_project);
+  const stored = useStore((s) => s.sessionTabs[sid]) ?? "chat";
+  const tab = tabs.includes(stored) ? stored : "chat";
   const subs = useSessionSubagents(sid);
   const gallery = useGallery(sid);
   const panel = (t: SessionTab, body: React.ReactNode) => (
@@ -58,10 +61,11 @@ function Tabs({ sid }: { sid: string }) {
   );
   return (
     <div className="h-full flex flex-col min-w-0">
-      <Strip sid={sid} tab={tab} running={subs.filter((x) => isLive(x.status)).length} items={gallery.entries.length} />
+      <Strip sid={sid} tab={tab} tabs={tabs} running={subs.filter((x) => isLive(x.status)).length} items={gallery.entries.length} />
       {panel("chat", <GalleryEntriesContext.Provider value={gallery.entries}><Chat /></GalleryEntriesContext.Provider>)}
       {panel("subagents", tab === "subagents" && <SubagentsTab sessionId={sid} />)}
       {panel("gallery", tab === "gallery" && <GalleryTab s={session} entries={gallery.entries} setEntries={gallery.setEntries} />)}
+      {tabs.includes("prefabs") && panel("prefabs", tab === "prefabs" && <PrefabsTab s={session} />)}
     </div>
   );
 }
