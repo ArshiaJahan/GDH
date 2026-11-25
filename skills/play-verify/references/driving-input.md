@@ -20,7 +20,7 @@ Best when the criterion is "pressing X does Y" or the game reads `PlayerInput`/a
 - It sets `InputSettings.editorInputBehaviorInPlayMode = AllDeviceInputAlwaysGoesToGameView` and `backgroundBehavior = IgnoreFocus` so input arrives with the Game view unfocused, and restores both on quit (exit Play Mode).
 - Gamepad/mouse: same pattern (`InputSystem.AddDevice<Gamepad>()` + `InputSystem.QueueStateEvent(pad, new GamepadState{ buttons = ... })`); add only when a criterion needs it.
 - Legacy Input Manager (`UnityEngine.Input.GetKey`) cannot be fed this way. If the project's Active Input Handling is "Input System Package (New)" only, `Input.GetKey` throws InvalidOperationException at runtime; use option A for such code or port it.
-- Prior art on this Mac: `~/HtmlTo2D/Assets/_Project/Scripts/Runtime/DevTools/DebugInputDriver.cs` (same technique) and `.../Editor/Playtest/Autopilot.cs` (timed command scripts with `until` conditions, run from execute_code).
+- The technique scales to two pieces: a runtime debug input driver (the virtual-device approach above, behind a dev-only flag), and an editor-side autopilot. The autopilot runs timed command scripts with `until` conditions and is started from execute_code.
 
 ## C. InputTestFixture (PlayMode tests only)
 The Input System's own test helper isolates devices per test and gives `Press(key)`, `Release`, `PressAndRelease`, `Set(control, value)`.
@@ -34,4 +34,4 @@ A game-specific MonoBehaviour that plays by simple rules (move toward nearest en
 - Seed every random source from one seed and log it: `VerifyProbe.Log("seed", seed)`. Re-runs with the same seed must produce the same `[VERIFY]` values.
 - `fps N` in ScriptedInput sets `Time.captureFramerate`, so game time advances exactly 1/N per rendered frame however slowly the editor renders; `wait`/`hold` are then frame-exact. Turn it off (`fps 0`) for real-time fps metrics.
 - Prefer `until key op value timeout` over fixed waits; fixed waits flake when the editor is busy or unfocused.
-- Batchmode play jobs with `Time.captureFramerate`, screenshots at game seconds and video: see the prior art in `~/Documents/SHAY_PC/SHAY_PC/Tools/unity-cli/shay play` (README in the same folder); run such jobs through headless-ops.
+- Batchmode play jobs work the same way: set `Time.captureFramerate`, take screenshots at fixed game seconds, and assemble video from the frames. Run such jobs through headless-ops.

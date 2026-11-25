@@ -58,7 +58,7 @@ def build_parser():
     p.add_argument("--category", default="SFX")
     p.add_argument("--raw-out", help="also keep the untouched model output here")
     p.add_argument("--no-trim", action="store_true", help="skip silence cut / fade / normalise")
-    p.add_argument("--sample-rate", type=int, default=44100, help="44100, or 22050 for short fidget clips")
+    p.add_argument("--sample-rate", type=int, default=44100, help="44100, or 22050 for short UI and sound-effect clips")
     p.add_argument("--variants", type=int, default=0, help="make N takes with seed+i")
 
     p = sub.add_parser("workflow", help="run any ComfyUI workflow JSON and keep all its outputs (video too)")

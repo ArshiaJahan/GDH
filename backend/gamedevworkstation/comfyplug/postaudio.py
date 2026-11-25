@@ -335,7 +335,7 @@ def normalize_rules(rules_path, root=None, backup=None, report=None, dry_run=Fal
 
 
 def write_report(rows, path, dry_run=False):
-    out = ["# Fidget sounds wave 1: loudness before / after", "",
+    out = ["# Sound batch: loudness before / after", "",
            "Gain-only pass (`comfyplug normalize`), sample rate and channels untouched. LUFS is integrated EBU R128; clips "
            "under 1.2 s are tiled before measuring, so their LUFS is the energy mean over the clip. TP = true peak "
            "(dBTP), RMS = whole-file RMS (dBFS). `lim` = gain capped by the peak ceiling (-1.2 dB; main sounds -3.2, soft sounds a further -3), so the LUFS target "

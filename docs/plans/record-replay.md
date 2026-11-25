@@ -1,6 +1,6 @@
 # Deterministic record/replay implementation plan
 
-Scope: reproduce instrumented sessions on the same Unity build, platform and project content; export real gameplay GIF/video on request. This is checkpoint-verified repeatability, not cross-platform lockstep or automatic serialization of arbitrary games. Bug-to-test, visual regression and softlock diagnosis remain later work. Never access SHAY_PC or HtmlTo2D. Local Unity runs require the user's OK and a disposable fixture.
+Scope: reproduce instrumented sessions on the same Unity build, platform and project content; export real gameplay GIF/video on request. This is checkpoint-verified repeatability, not cross-platform lockstep or automatic serialization of arbitrary games. Bug-to-test, visual regression and softlock diagnosis remain later work. Never access the user's other projects. Local Unity runs require the user's OK and a disposable fixture.
 
 ## Reuse and delivery boundary
 
@@ -136,6 +136,6 @@ Integration: `uv run pytest` after ownership merges; approved fixture smoke firs
 
 1. **Guarantee:** never refuse on environment mismatch. Always replay and compare; when Unity version, OS/CPU, package or content digests differ, the report status keeps its gameplay meaning (`pass|diverged|error|cancelled`) and adds `environment: "matched"|"differs"` plus the list of differing fields. `incompatible` is only for format/major-version or missing-trace problems that make replay impossible.
 2. **Scope v1:** Input System only; projects whose gameplay reads the legacy Input Manager get a clear readiness error naming the files/calls. Hold/Tap and other timed interactions are in v1 if the fixture proves they replay identically when the replay preserves recorded event timing; if not, strict v1 rejects them (as originally planned). Start point: scene reset/load, plus an `IReplaySnapshot` interface (capture/restore) a game may implement later; v1 ships the interface and uses it only if registered.
-3. **Local validation:** approved. Run the full fixture suite (logic + capture) on Unity 6000.3.21f1 against copies of `tests/fixtures/unity/replay/` in temporary directories, before the release. Never touch SHAY_PC or HtmlTo2D.
+3. **Local validation:** approved. Run the full fixture suite (logic + capture) on Unity 6000.3.21f1 against copies of `tests/fixtures/unity/replay/` in temporary directories, before the release. Never touch the user's other projects.
 4. **Capture:** the PNG-per-frame path is the default backend (`auto` = png); Unity Recorder is used only when `backend:"recorder"` is requested and the project already has `com.unity.recorder` (never installed automatically). MP4 is silent in v1.
 5. **Retention:** keep `.gdwreplay`, reports and exports. After a successful export, delete only that export's own intermediate `capture/frames/` PNGs (files this feature created in its own run folder). `[unity.replay] warn_total_mb = 2048`: status/Settings warn when a project's `Logs/harness/replay/` exceeds it. No other automatic deletion.

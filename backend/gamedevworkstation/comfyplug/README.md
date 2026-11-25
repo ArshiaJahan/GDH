@@ -49,7 +49,7 @@ python -m comfyplug measure a.wav b.wav [--loop]
 
 Aspect labels: `"1:1 (Square)"`, `"9:16 (Portrait Widescreen)"`, `"16:9 (Widescreen)"`, `"21:9 (Ultrawide)"`.
 
-`--transparent` wraps the prompt so Qwen returns an RGBA image. `--sample-rate 22050` suits short fidget clips.
+`--transparent` wraps the prompt so Qwen returns an RGBA image. `--sample-rate 22050` suits short UI and sound-effect clips.
 `--no-trim` keeps the clip as generated (no silence cut, fade or normalise).
 
 **Model in two steps.** Run `model --ref-only` first: it writes `<name>_ref.png` and stops. Look at the image. If it

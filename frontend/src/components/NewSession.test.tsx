@@ -152,50 +152,50 @@ describe("NewSession", () => {
   });
 
   it("picks Chat only, a recent folder or Choose a folder… from the location menu", async () => {
-    useStore.setState({ sessions: [ses("a", "/Users/me/Apiva", 30)] });
+    useStore.setState({ sessions: [ses("a", "/Users/me/GameA", 30)] });
     await mount();
     expect(subtitle()).toBe("Chat only: no folder; Claude Code works in a private scratch folder.");
     expect(place()).toBe("Chat only");
     await act(async () => { fireEvent.click(screen.getByTestId("location")); });
     expect(screen.getAllByRole("menuitem").map((m) => m.textContent)).toEqual([
-      expect.stringContaining("Chat only"), expect.stringContaining("Apiva"), expect.stringContaining("Choose a folder…")]);
+      expect.stringContaining("Chat only"), expect.stringContaining("GameA"), expect.stringContaining("Choose a folder…")]);
     fireEvent.keyDown(window, { key: "Escape" });
     await pickPlace("Choose a folder");
     expect(pickFolder).toHaveBeenCalled();
     expect(subtitle()).toBe("The project stays in Forklift. Claude Code reads, edits and runs commands there.");
     expect(place()).toBe("Forklift");
-    await pickPlace("Apiva");
-    expect(place()).toBe("Apiva");
+    await pickPlace("GameA");
+    expect(place()).toBe("GameA");
     await pickPlace("Chat only");
     expect(subtitle()).toContain("Chat only");
     expect(place()).toBe("Chat only");
   });
 
   it("lists recent folders as chips; clicking one selects it", async () => {
-    useStore.setState({ sessions: [ses("a", "/Users/me/SHAY_PC_rework", 30), ses("b", "/Users/me/Apiva", 20), ses("c", "/Users/me/SHAY_PC_rework", 10),
+    useStore.setState({ sessions: [ses("a", "/Users/me/GameB", 30), ses("b", "/Users/me/GameA", 20), ses("c", "/Users/me/GameB", 10),
       ses("d", null, 40), ses("e", "/Users/me/Old", 50, { deleted: true })] });
     await mount();
     const chips = screen.getByRole("group", { name: "Recent folders" }).querySelectorAll("button");
-    expect(Array.from(chips).map((c) => c.textContent)).toEqual(["SHAY_PC_rework", "Apiva"]);
+    expect(Array.from(chips).map((c) => c.textContent)).toEqual(["GameB", "GameA"]);
     expect(chips[1].getAttribute("aria-pressed")).toBe("false");
     await act(async () => { fireEvent.click(chips[1]); });
     expect(chips[1].getAttribute("aria-pressed")).toBe("true");
-    expect(place()).toBe("Apiva");
-    expect(subtitle()).toContain("The project stays in Apiva.");
-    expect(screen.getByTestId("new-session-subtitle").querySelector("[title]")?.getAttribute("title")).toBe("~/Apiva");
+    expect(place()).toBe("GameA");
+    expect(subtitle()).toContain("The project stays in GameA.");
+    expect(screen.getByTestId("new-session-subtitle").querySelector("[title]")?.getAttribute("title")).toBe("~/GameA");
     expect(pickFolder).not.toHaveBeenCalled();
   });
 
   it("sends: creates a claude_code session with the chosen folder, model, effort and mode, then the message", async () => {
-    useStore.setState({ sessions: [ses("a", "/Users/me/Apiva", 30, { group_id: "g1" } as any)], draftGroup: "g1" });
+    useStore.setState({ sessions: [ses("a", "/Users/me/GameA", 30, { group_id: "g1" } as any)], draftGroup: "g1" });
     await mount();
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Apiva" })); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "GameA" })); });
     fireEvent.change(select("Model"), { target: { value: "claude-sonnet-5-5" } });
     fireEvent.change(select("Effort"), { target: { value: "high" } });
     fireEvent.change(select("Permission mode"), { target: { value: "accept_edits" } });
     await act(async () => { fireEvent.change(box(), { target: { value: "Fix the double jump" } }); });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Send" })); });
-    expect(post).toHaveBeenNthCalledWith(1, "/sessions", { harness: "claude_code", folder: "/Users/me/Apiva", model: "claude-sonnet-5-5",
+    expect(post).toHaveBeenNthCalledWith(1, "/sessions", { harness: "claude_code", folder: "/Users/me/GameA", model: "claude-sonnet-5-5",
       effort: "high", mode: "accept_edits", group_id: "g1" });
     expect(post).toHaveBeenNthCalledWith(2, "/sessions/s9/messages", { text: "Fix the double jump", attachments: [] });
     expect(useStore.getState().currentId).toBe("s9");
@@ -203,10 +203,10 @@ describe("NewSession", () => {
   });
 
   it("offers Skipper and Central doc for folder sessions and sends them with the new session", async () => {
-    useStore.setState({ sessions: [ses("a", "/Users/me/Apiva", 30)] });
+    useStore.setState({ sessions: [ses("a", "/Users/me/GameA", 30)] });
     await mount();
     expect(screen.queryByTestId("session-modes")).toBeNull(); // Chat only: no session modes
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Apiva" })); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "GameA" })); });
     const modes = () => screen.getByTestId("session-modes");
     expect(modes().textContent).toBe("Modes");
     const pick = async (label: string) => {
@@ -220,7 +220,7 @@ describe("NewSession", () => {
     await act(async () => { fireEvent.change(box(), { target: { value: "Fix the double jump" } }); });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Send" })); });
     expect(post).toHaveBeenNthCalledWith(1, "/sessions", expect.objectContaining({
-      folder: "/Users/me/Apiva", skipper: true, central_doc: true }));
+      folder: "/Users/me/GameA", skipper: true, central_doc: true }));
   });
 
   it("sends a chat-only session with Enter, and /model changes the screen's model", async () => {
