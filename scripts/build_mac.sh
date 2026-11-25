@@ -86,8 +86,10 @@ if [[ -n "$SIGN" ]]; then
   done < <(find "$BACKEND_DIR" -type f ! -name gamedevworkstation-backend -print0)
   codesign --force --sign "$SIGN" -i dev.local.gamedevworkstation.backend "$BACKEND_DIR/gamedevworkstation-backend"
   codesign --force --deep --sign "$SIGN" "$DIST/GameDevWorkstation.app"
-  # --deep re-signs nested bundles only; check the backend kept its identifier and certificate.
-  codesign -dr - "$BACKEND_DIR/gamedevworkstation-backend" 2>&1 | grep -q 'identifier "dev.local.gamedevworkstation.backend" and certificate' \
+  # --deep re-signs nested bundles only; check the backend kept its identifier and a certificate
+  # (not an ad-hoc cdhash). An Apple-issued identity puts "anchor apple generic" between the two.
+  DR="$(codesign -dr - "$BACKEND_DIR/gamedevworkstation-backend" 2>&1)"
+  [[ "$DR" == *'identifier "dev.local.gamedevworkstation.backend"'* && "$DR" == *" certificate "* && "$DR" != *cdhash* ]] \
     || { echo "The backend isn't signed with the stable identity." >&2; exit 1; }
 elif [[ -n "${GDW_ALLOW_ADHOC:-}" ]]; then
   echo "==> Signing (ad-hoc, GDW_ALLOW_ADHOC: the Keychain will ask again for this build)"
