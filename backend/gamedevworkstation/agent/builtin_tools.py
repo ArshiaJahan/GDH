@@ -151,6 +151,15 @@ def register_builtin(reg: ToolRegistry) -> None:
         off = max(int(a.get("offset") or 1), 1)
         lim = min(max(int(a.get("limit") or 2000), 1), 5000)
         text, is_err = await asyncio.to_thread(_read_slice, p, a["path"], off, lim)  # big files must not block the loop
+        if not is_err:
+            try:  # telemetry-grade: remember secret values from secret files for the egress scan
+                from .. import egress
+                named = next((x for x in (a["path"], p) if egress.is_secret_file(x)), None)  # requested name or symlink target
+                if named is not None:
+                    full = await asyncio.to_thread(lambda: p.read_text(encoding="utf-8", errors="replace")[:200000])
+                    egress.taint_file(ctx.app, ctx.session_id, named, full)
+            except Exception:  # noqa: BLE001
+                pass
         return ToolOutput(text, is_error=is_err)
 
     @reg.add("list_dir", "List files in a folder of the session (recursive up to depth 3).",
@@ -180,6 +189,12 @@ def register_builtin(reg: ToolRegistry) -> None:
         rx, note = _safe_regex(a["pattern"])
         # The walk reads many files; run it off the event loop (resolve_path/within_roots are pure path ops).
         out = await asyncio.to_thread(_search_tree, ctx, root, rx, a.get("glob") or "*")
+        try:  # secret files that appear in the results taint their values for the egress scan
+            from .. import egress
+            for rel in dict.fromkeys(m.group(1) for m in re.finditer(r"^(.+?):\d+: ", out, re.M)):
+                await asyncio.to_thread(egress.taint_secret_path, ctx.app, ctx.session_id, root / rel)
+        except Exception:  # noqa: BLE001
+            pass
         return ToolOutput((note + "\n" if note else "") + out)
 
     @reg.add("write_file", "Create or overwrite a file in the session folder.",

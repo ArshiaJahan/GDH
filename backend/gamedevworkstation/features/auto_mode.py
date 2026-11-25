@@ -7,7 +7,10 @@ nothing is ever allowed on a failure."""
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import json
+import os
+import posixpath
 import re
 import time
 from typing import TYPE_CHECKING, Any
@@ -182,16 +185,154 @@ def is_bulk_delete(command: str) -> bool:
     return any(_segment_is_bulk(t) for t in _segments(command))
 
 
-def always_ask_reason(command: str) -> str | None:
+_INTERPRETERS = {"python", "python2", "python3", "node", "deno", "bun", "perl", "ruby", "php", "osascript",
+                 "pwsh", "powershell", "lua"}
+_INTERPRETER_RE = re.compile(r"(python|node|perl|ruby|php|lua)[0-9.]*|deno|bun|osascript|pwsh|powershell")  # python3.13, node18, ...
+_SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
+_CODE_FLAGS = {"-c", "-e", "-p", "-r", "-command", "--eval"}
+_DELETE_MARKERS = ("rmtree", "rmsync", "rmdirsync", "unlinksync", "os.remove", "os.unlink", "shutil.move",
+                   "os.rename", "directory.delete", "file.delete", "deleteasset", "remove-item", "fileutils.rm")
+_PROTECTED_ROOTS = {"Assets", "ProjectSettings", "Packages"}
+_PATH_REMOVERS = {"rm", "rmdir", "unlink", "shred"}
+_SECRET_MARKERS = ("/.ssh/", "~/.ssh", "id_rsa", "id_ed25519", ".aws/credentials", ".netrc", ".gnupg",
+                   "/etc/shadow", "library/keychains", "gamedevworkstation/config.toml",
+                   "gamedevworkstation/tool_policy.toml", "gamedevworkstation.db")
+_SECURITY_SUBS = {"find-generic-password", "find-internet-password", "find-certificate", "find-identity", "dump-keychain",
+                  "export", "unlock-keychain", "set-generic-password", "delete-generic-password", "add-generic-password"}
+_ENV_TEMPLATES = {".env.example", ".env.sample", ".env.template", ".env.dist"}  # no secrets by convention
+_WRAPPERS = {"sudo", "env", "command", "exec", "nohup", "time", "doas"}
+
+
+def _word(raw: str) -> str:
+    return raw.lstrip("\\").rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
+
+
+_DELETE_WORDS = re.compile(
+    r"(?<![A-Za-z0-9_])(rm|rmsync|rmdir|rmdirsync|unlink|unlinksync|rmtree|remove|removedirs|delete|del|truncate|"
+    r"remove-item|fileutils\.rm)(?![A-Za-z0-9_])", re.IGNORECASE)
+
+
+def _scripted_delete(command: str, segs: list[list[str]]) -> bool:
+    """An interpreter run with inline code (-c/-e/-r/--eval) or a heredoc while the text mentions any
+    deletion-ish identifier. The code may contain `;` or `|`, so the whole text is searched. Over-carding
+    inline code is accepted."""
+    low = command.lower()
+    if not (_DELETE_WORDS.search(command) or any(m in low for m in _DELETE_MARKERS)):
+        return False
+    # Inline code can contain `(`, `;` or `|`, which would split it into separate segments: look at all words.
+    words = [t for t in re.split(r"[\s;|&()`\"']+", command) if t]
+    has_interp = any(_word(t) in _INTERPRETERS or _INTERPRETER_RE.fullmatch(_word(t)) for t in words)
+    return has_interp and ("<<" in command or any(
+        x.lower() in _CODE_FLAGS or x.lower().startswith("--eval=") for x in words))
+
+
+def _is_protected(token: str, cwd: str | None = None) -> bool:
+    if token.startswith("-"):
+        return False
+    # Resolve `.`, `..` and repeated slashes first; macOS paths are case-insensitive.
+    parts = [p for p in posixpath.normpath(token).split("/") if p not in ("", ".", "..")] if token.strip() else []
+    if not parts:
+        return False
+    roots = {r.lower() for r in _PROTECTED_ROOTS}
+    if token.startswith(("/", "~")):  # absolute: any component, e.g. /x/proj/Assets/Foo.cs
+        hit = any(p.lower() in roots for p in parts)
+    else:
+        hit = parts[0].lower() in roots
+    return hit or bool(cwd and _resolves_into_protected(token, cwd))
+
+
+def _resolves_into_protected(token: str, cwd: str) -> bool:
+    """Does the path, resolved against the project folder (symlinks and `..` followed), land in one of the
+    project's protected folders? Compared case-insensitively."""
+    try:
+        target = os.path.realpath(os.path.join(cwd, os.path.expanduser(token))).lower()
+        for root in _PROTECTED_ROOTS:
+            real = os.path.realpath(os.path.join(cwd, root)).lower()
+            if target == real or target.startswith(real.rstrip("/") + "/"):
+                return True
+    except (ValueError, OSError, RuntimeError):  # NUL byte, over-long path, symlink loop: can't resolve, so ask
+        return True
+    return False
+
+
+def _segment_touches_protected(tokens: list[str], cwd: str | None = None) -> bool:
+    for i, raw in enumerate(tokens):
+        name = _word(raw)
+        rest = tokens[i + 1:]
+        if name in _PATH_REMOVERS and any(_is_protected(t, cwd) for t in rest):
+            return True
+        if name == "mv":
+            paths = [t for t in rest if not t.startswith("-")]
+            if any(_is_protected(t, cwd) for t in paths[:-1]):  # a source; `mv a.txt Assets/` stays allowed
+                return True
+        if name == "rsync" and any(t.startswith("--delete") for t in rest) and any(_is_protected(t, cwd) for t in rest):
+            return True
+        if name == "find" and any(_is_protected(t, cwd) for t in rest) and (
+                "-delete" in rest or any(t in ("-exec", "-execdir", "-ok", "-okdir") and any(
+                    _word(x) in _DELETERS for x in rest[j + 1:j + 3]) for j, t in enumerate(rest))):
+            return True
+    return False
+
+
+_SECURITY_SECRET = re.compile(r"(?<![A-Za-z0-9_-])security(?![A-Za-z0-9_])[\s\S]*?(?<![A-Za-z0-9_-])(" +
+                              "|".join(re.escape(x) for x in sorted(_SECURITY_SUBS)) + r")(?![A-Za-z0-9_-])", re.IGNORECASE)
+_GIT_MESSAGE = re.compile(r"""(\s(?:-m|--message)(?:=|\s+))("[^"]*"|'[^']*')""")
+
+
+def _security_keychain_access(command: str) -> bool:
+    """The word `security` followed anywhere later by one of its secret subcommands (no wrapper parsing).
+    The quoted message of a `git commit -m '...'` segment is ignored, so commit text can mention it."""
+    parts = []
+    for seg in re.split(r"(?<!\\)(?:&&|\|\||[;|&\n\r`])", command):
+        if re.match(r"\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:\S*/)?git\b", seg):
+            seg = _GIT_MESSAGE.sub(r"\1\"\"", seg)
+        parts.append(seg)
+    return bool(_SECURITY_SECRET.search(";".join(parts)))
+
+
+_REDIRECT_PREFIX = re.compile(r"^(?:\d*[<>]+|[-\w]+=@|@)+")  # `<.env`, `2>x`, `-d @.env`, `f=@.env`
+_MORE_SECRET_NAMES = (".envrc", ".npmrc", ".git-credentials", ".pgpass", "*.pfx", "secrets.*")
+
+
+def _segment_is_secret(tokens: list[str]) -> bool:
+    cands = [x for raw in tokens for x in (raw, _REDIRECT_PREFIX.sub("", raw), *re.split(r"[<>@=]", raw)) if x]
+    for t in cands:
+        for form in {t.lower(), posixpath.normpath(t).lower() if t.strip() else ""}:
+            if any(m in form or m in form + "/" for m in _SECRET_MARKERS) or form.startswith(".ssh/"):
+                return True
+            last = form.rstrip("/").rsplit("/", 1)[-1]
+            if (last == ".env" or last.startswith(".env.")) and last not in _ENV_TEMPLATES:
+                return True
+            if any(fnmatch.fnmatchcase(last, pat) for pat in _MORE_SECRET_NAMES):
+                return True
+    return False
+
+
+def always_ask_reason(command: str, cwd: str | None = None) -> str | None:
     """Why Auto must always show the user a card for this command: "bulk delete", "git history rewrite",
-    or None. Same segment splitting and nested-shell handling for both."""
+    "scripted delete", "protected path" (rm/mv/... of Assets, ProjectSettings or Packages), "secret access"
+    (SSH/AWS/Keychain files, .env, the app's own config), or None. Same segment splitting and
+    nested-shell handling for all; checked in that order."""
     if not isinstance(command, str) or not command.strip():
         return None
+    try:
+        return _always_ask_reason(command, cwd)
+    except Exception:  # noqa: BLE001  never let a parsing surprise escape: fail closed with a card
+        return "protected path"
+
+
+def _always_ask_reason(command: str, cwd: str | None) -> str | None:
     segs = list(_segments(command))
     if any(_segment_is_bulk(t) for t in segs):
         return "bulk delete"
     if any(_segment_rewrites_history(t) for t in segs):
         return "git history rewrite"
+    if _scripted_delete(command, segs):
+        return "scripted delete"
+    if any(_segment_touches_protected(t, cwd) for t in segs):
+        return "protected path"
+    if any(_segment_is_secret(t) for t in segs) or _security_keychain_access(command):
+        return "secret access"
     return None
 
 

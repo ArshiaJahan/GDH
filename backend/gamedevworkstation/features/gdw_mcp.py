@@ -143,13 +143,14 @@ class GdwMcp:
         """[{name, description, inputSchema, source: "tool" | "mcp" | "approve"}] for this session now."""
         out: list[dict] = []
         excluded = EXCLUDED_TOOLS | set((self.app.config.claude_code or {}).get("exclude_tools") or [])
-        for spec in self.app.tools.specs(role="main", session=session):
+        policy = self.app.current_tool_policy()
+        for spec in self.app.tools.specs(role="main", session=session, agent="claude_code", policy=policy):
             if spec.name in excluded or spec.name == APPROVE_TOOL:
                 continue
             out.append({"name": spec.name, "description": spec.description, "inputSchema": spec.input_schema,
                         "source": "tool", **({"annotations": {"readOnlyHint": True}} if spec.read_only else {})})
         if self.app.mcp:
-            for spec in self.app.mcp.tool_specs(session):
+            for spec in self.app.mcp.tool_specs(session, policy_agent="claude_code"):
                 out.append({"name": spec.name, "description": spec.description, "inputSchema": spec.input_schema,
                             "source": "mcp"})
         out.append({"name": APPROVE_TOOL, "description": APPROVE_DESCRIPTION, "inputSchema": APPROVE_SCHEMA,
@@ -179,7 +180,11 @@ class GdwMcp:
             decision = await self.approver(sid, args)
             return _text_result(json.dumps(decision), False)
         model = app.config.resolve(session["model"])
-        ctx = ToolContext(app=app, session=session, run_id=f"main:{sid}", role="main", provider="anthropic", model=model)
+        d = app.current_tool_policy().decide("claude_code", name)
+        if not d.allowed:
+            return _text_result(f"Tool {name} is not allowed for Claude Code sessions by the tool policy: {d.reason}", True)
+        ctx = ToolContext(app=app, session=session, run_id=f"main:{sid}", role="main", provider="anthropic", model=model,
+                          agent="claude_code")
         if (blocked := await run_pre_tool(app, ctx, name, args)) is not None:
             out = ToolOutput(blocked.block_text(), is_error=True)
         else:

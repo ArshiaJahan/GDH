@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from gamedevworkstation.agent.tools import ToolContext, ToolOutput
 from gamedevworkstation.app import AppState
+from gamedevworkstation.config import data_dir
 from gamedevworkstation.core.types import Message, Usage
 from gamedevworkstation.features import claude_code, subagents
 from gamedevworkstation.features.sessions_mgmt import Titler
@@ -125,6 +126,8 @@ async def test_queued_api_unit_and_followup_use_their_own_task_snapshots(app):
     subagents._register_tools(app, manager)
     pool = manager.pools["api"] = asyncio.Semaphore(1)
     ctx = ToolContext(app=app, session=session, run_id=f"main:{sid}")
+    (data_dir() / "tool_policy.toml").write_text(
+        'version = 1\n[agents.subagent]\nallow = ["test_usage_tool"]\n', encoding="utf-8")
     fake = FakeProvider(script=[tool_response("test_usage_tool", {}), text_response("done"), text_response("resumed")])
     app.providers.override("anthropic", "default", fake)
 

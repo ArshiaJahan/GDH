@@ -32,6 +32,31 @@ jobs:
         # Live tests hit real provider APIs and skip themselves without keys.
         run: uv run --frozen pytest -q -p no:cacheprovider -m "not live"
 
+  guardrails:
+    name: Guardrail suite and eval fingerprint
+    runs-on: macos-latest
+    timeout-minutes: 15
+    env:
+      UV_PYTHON: "3.13"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --frozen --all-extras
+      - name: Guardrail block rate
+        # Offline attack suite; fails the job on any violation. No live or paid runs in CI.
+        run: uv run --frozen python scripts/guardrail_report.py --out guardrails-report.json --summary "$GITHUB_STEP_SUMMARY"
+      - name: Prompt improver eval fingerprint
+        # Warn-only: a stale or never-run fingerprint never fails the job; only a corrupt published file does.
+        run: uv run --frozen python scripts/eval_regression.py check --github
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: guardrails-report
+          path: guardrails-report.json
+
   frontend:
     name: Frontend typecheck and tests
     runs-on: macos-latest

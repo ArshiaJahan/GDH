@@ -18,6 +18,7 @@ from ..core.types import Usage
 from ..providers.anthropic_provider import STOP_MAP, usage_from_wire
 from ..providers.base import ProviderError, compute_cost
 from ..providers.registry import attempt_failure, chat_result, chat_span
+from .. import egress
 from ..safe_fetch import UnsafeURL, safe_fetch
 
 if TYPE_CHECKING:
@@ -91,6 +92,11 @@ def register(app_: FastAPI, api: APIRouter, S: "AppState") -> None:
                  obj({"query": {"type": "string"}, "allowed_domains": {"type": "array", "items": {"type": "string"}}},
                      ["query"]), read_only=True)
     async def web_search(ctx: ToolContext, a: dict) -> ToolOutput:
+        pol = S.current_tool_policy()
+        if pol.egress_scan_web_fetch():
+            refusal = egress.check_url(S, ctx.session_id, str(a.get("query") or ""), pol.egress_extra_patterns())
+            if refusal:
+                return ToolOutput(refusal.replace("this URL", "this query"), is_error=True, denied=True)
         with S.usage.scope(ctx.session_id):
             S.usage.check(ctx.session_id)
             model = S.config.resolve("claude.fast")
@@ -148,6 +154,11 @@ def register(app_: FastAPI, api: APIRouter, S: "AppState") -> None:
     async def web_fetch(ctx: ToolContext, a: dict) -> ToolOutput:
         url = a["url"].strip()
         src = f"web_fetch:{url}"
+        pol = S.current_tool_policy()
+        if pol.egress_scan_web_fetch():
+            refusal = egress.check_url(S, ctx.session_id, url, pol.egress_extra_patterns())
+            if refusal:
+                return ToolOutput(refusal, is_error=True, denied=True)
         try:
             r = await safe_fetch(url, max_bytes=MAX_FETCH_BYTES, user_agent="GameDevWorkstation/0.1 (personal agent)")
         except UnsafeURL as e:

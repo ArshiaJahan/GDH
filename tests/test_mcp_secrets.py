@@ -111,6 +111,7 @@ def test_env_secret_goes_to_keychain_and_resolves_at_connect(env, keychain):
     async def check() -> str:
         sess = s.store.create()
         ctx = ToolContext(app=s, session=sess, run_id="main:x")
+        s.config.modes["allowlist"] = ["mcp:envy__getenv"]  # outbound read-only hints are not trusted
         await s.mcp.connect("envy")
         return (await s.mcp.call(ctx, "mcp__envy__getenv", {"name": "API_TOKEN"})).text
 

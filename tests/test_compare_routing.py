@@ -41,6 +41,12 @@ def suite(tmp_path):
 def app(cfg, tmp_path):
     cfg.tracing.update(enabled=False)
     cfg.limits.update(global_daily_usd=0, session_usd=0, task_usd=0)
+    # These suites route as "extract" but their units fix files, so this test's own tool policy lets extract
+    # units write; the default policy keeps extract read-only.
+    from gamedevworkstation.config import data_dir
+    (data_dir() / "tool_policy.toml").write_text(
+        'version = 1\n[agents.subagent.job_types.extract]\n'
+        'allow = ["read_file", "list_dir", "search", "write_file", "edit_file", "delete_file"]\n', encoding="utf-8")
     state = AppState(config=cfg, db_path=tmp_path / "ledger.db")
     state.claude, state.codex = FakeProvider("anthropic"), FakeProvider("openai")
     state.providers.override("anthropic", "default", state.claude)

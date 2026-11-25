@@ -157,6 +157,9 @@ async def test_explicit_tier_and_cli_stay_pinned(app, cfg, tmp_path, monkeypatch
 
 async def test_failed_check_escalates_without_replaying_tools(app):
     ran = []
+    from gamedevworkstation.config import data_dir  # the tool policy must allow this test-only tool for extract jobs
+    (data_dir() / "tool_policy.toml").write_text(
+        'version = 1\n[agents.subagent]\nallow = ["count_tool"]\n[agents.subagent.job_types.extract]\nallow = ["count_tool"]\n', encoding="utf-8")
 
     @app.tools.add("count_tool", "Count", {"type": "object", "properties": {}}, read_only=True)
     async def count_tool(_ctx, _args):

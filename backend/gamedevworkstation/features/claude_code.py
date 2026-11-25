@@ -1565,6 +1565,11 @@ class ClaudeCode:
         if self._quiet(sid):
             return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                            "permissionDecisionReason": QUIET_DENY}}
+        if name in DEFERRED_SDK_TOOLS or (self._plan_mode(sid) and is_plan_file(name, inp)):
+            gate = self._gate(sid)
+            if gate and (why := gate.policy_refusal(name)):  # the tool policy applies to every tool
+                return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                               "permissionDecisionReason": why}}
         if name in DEFERRED_SDK_TOOLS:
             return {}  # no say: the CLI's mode rules, then the permission prompt tool (GDW's card)
         if self._plan_mode(sid) and is_plan_file(name, inp):

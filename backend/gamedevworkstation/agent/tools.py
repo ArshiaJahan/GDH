@@ -15,6 +15,7 @@ from ..core.types import ImageBlock, TextBlock, ToolResultBlock, ToolSpec, new_i
 if TYPE_CHECKING:
     from ..app import AppState
     from ..features.tracing import Span
+    from ..tool_policy import ToolPolicy
 
 
 class ToolDenied(Exception):
@@ -60,6 +61,12 @@ class ToolContext:
     # (e.g. {"run_command": {"<command line>"}, "mcp": {"<server>__<tool>"}}). Only hook contexts
     # (hookbus.hook_context) carry any; for the main agent and subagents it's always empty.
     consent: dict[str, set[str]] = field(default_factory=dict)
+    agent: str = ""     # tool-policy agent (main | claude_code | subagent); empty = derived from role
+    job_type: str = ""  # a subagent's job type, for the policy's per-job rules
+
+    @property
+    def effective_agent(self) -> str:
+        return self.agent or {"main": "main", "subagent": "subagent", "hook": "main"}.get(self.role, "main")
 
     def consented(self, kind: str, subject: str) -> bool:
         """True if `subject` is exactly one of the consented subjects of `kind`."""
@@ -128,7 +135,7 @@ class ToolContext:
             # that rewrites or discards history) always show the card in Auto; everything else that would be a user question reaches the classifier, which
             # fails closed to "ask".
             why = next((r for v in (subject, payload.get("command")) if v
-                        and (r := always_ask_reason(str(v)))), None)
+                        and (r := always_ask_reason(str(v), str(self.folder) if self.folder else None))), None)
             if why:
                 payload = {**payload, "reason": f"Auto mode always asks for this: {why}"}
             if not (why or "delete" in kind):
@@ -204,7 +211,8 @@ class ToolRegistry:
         self.tools[tool.spec.name] = tool
 
     def specs(self, names: list[str] | None = None, *, role: str = "main",
-              session: dict | None = None) -> list[ToolSpec]:
+              session: dict | None = None, agent: str | None = None, job_type: str | None = None,
+              policy: "ToolPolicy | None" = None) -> list[ToolSpec]:
         """Specs to offer: `names` (plus `always` tools) when given, without main_only tools for
         other roles, and without tools whose `when(session)` is false (see Tool.when)."""
         out = []
@@ -216,6 +224,10 @@ class ToolRegistry:
             if role == "main" and t.subagent_only:
                 continue
             if not t.offered(session):
+                continue
+            if policy is not None and not policy.decide(
+                    agent or {"main": "main", "subagent": "subagent", "hook": "main"}.get(role, "main"),
+                    n, job_type=job_type or None).allowed:
                 continue
             out.append(t.spec)
         return out
@@ -236,6 +248,13 @@ class ToolRegistry:
                 (ctx.role != "main" and t.main_only) or (ctx.role == "main" and t.subagent_only) or \
                 not t.offered(ctx.session):
             return ToolOutput(f"Tool '{name}' is not available here.", is_error=True, denied=True)
+        get_policy = getattr(ctx.app, "current_tool_policy", None)
+        if get_policy is not None:
+            agent = ctx.effective_agent
+            d = get_policy().decide(agent, name, job_type=ctx.job_type or None)
+            if not d.allowed:
+                return ToolOutput(f"Tool '{name}' is not allowed for {agent} agents by the tool policy: {d.reason}",
+                                  is_error=True, denied=True)
         try:
             return finalize_output(ctx, name, await t.handler(ctx, args))
         except ToolDenied as e:

@@ -19,6 +19,7 @@ from .items import ItemIndex
 from .policy import DataPolicy
 from .providers.registry import ProviderRegistry
 from .services import Changes, Commands, Jobs
+from .tool_policy import PolicyHolder, ToolPolicy, user_policy_path
 from .store import SessionStore
 from .usage import UsageTracker
 
@@ -39,6 +40,8 @@ class AppState:
         self.changes = Changes(self.db, self.bus)
         self.items = ItemIndex(self.db, self.bus)
         self.policy = DataPolicy(self.db, self.config)
+        self.tool_policy = PolicyHolder(user_policy_path())  # per-agent tool access (tool_policy.py)
+        self._tool_policy_error: str | None = None
         self.turn_started: dict[str, float] = {}
         self.tools = ToolRegistry()
         register_builtin(self.tools)
@@ -54,6 +57,18 @@ class AppState:
         # The port this backend listens on (set by __main__), for local callbacks such as the MCP
         # server Claude Code sessions reach GameDevWorkstation's tools through (features/gdw_mcp.py).
         self.listen_port: int | None = None
+
+    def current_tool_policy(self) -> ToolPolicy:
+        """The tool policy now in force (reloaded when the user file changes). `self.policy` is the
+        data policy, so this one has its own name. A broken file is logged and published once per
+        distinct error as `tool_policy.error`."""
+        current = self.tool_policy.current()
+        if current.broken != self._tool_policy_error:
+            self._tool_policy_error = current.broken
+            if current.broken:
+                log.warning("tool policy is malformed, failing closed: %s", current.broken)
+                self.bus.publish("tool_policy.error", {"error": current.broken})
+        return current
 
     def worktrees_root(self, session_id: str) -> Path:
         return data_dir() / "worktrees" / session_id

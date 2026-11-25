@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any, Iterable
 from fastapi import APIRouter, Body, FastAPI, HTTPException
 
 from ..agent.tools import ToolContext, ToolOutput, finalize_output, finish_tool_span, obj, tool_span
+from .. import egress
 from ..children import CHILDREN
 from ..config import delete_secret, get_secret, keychain_enabled, set_secret
 from ..core.types import ImageBlock, ToolSpec
@@ -262,19 +263,21 @@ def _attr(o: Any, *names: str) -> Any:
     return None
 
 
-def mcp_policy(mode: str, hints: dict[str, Any]) -> str:
+def mcp_policy(mode: str, hints: dict[str, Any], trust_read_only: bool = True) -> str:
     """allow | ask | deny for one MCP tool call, from the session mode and the tool's annotations.
     MCP's defaults apply to missing hints (readOnly false, destructive true, openWorld true), so an
     unannotated tool counts as one that changes things.
     - Plan: only readOnlyHint=true tools run; everything else is refused.
-    - readOnlyHint=true: runs in every mode (like read_file and web_search).
+    - readOnlyHint=true: runs in every mode (like read_file and web_search) when the server's hint
+      is trusted. With trust_read_only=False (every outbound server unless tool_policy.toml opts it
+      in) the hint is not believed: the call asks in every mode, Plan included.
     - Accept edits: also runs tools that say they are neither destructive nor open-world (additive,
       local changes, the MCP counterpart of an edit); the rest ask.
     - Ask: everything else asks.
     Asking can be skipped with an `mcp:<server>__<tool>` allowlist rule (not in Plan). Shared servers
     keep their own rules on top: Shared tools must be on and every job asks (shared_tool:...)."""
     if hints.get("readOnlyHint") is True:
-        return "allow"
+        return "allow" if trust_read_only else "ask"
     if mode == "plan":
         return "deny"
     if mode == "accept_edits" and hints.get("destructiveHint") is False and hints.get("openWorldHint") is False:
@@ -282,11 +285,13 @@ def mcp_policy(mode: str, hints: dict[str, Any]) -> str:
     return "ask"
 
 
-def hint_notes(hints: dict[str, Any]) -> list[str]:
+def hint_notes(hints: dict[str, Any], trust_read_only: bool = True) -> list[str]:
     """What the approval card says about the tool's own annotations."""
     if not hints:
         return ["not annotated: may change or delete things, or reach outside this Mac"]
     out = []
+    if hints.get("readOnlyHint") is True and not trust_read_only:
+        out.append("marked read-only by the server (not trusted)")
     if hints.get("destructiveHint") is not False:
         out.append("may delete or overwrite data" if hints.get("destructiveHint") else
                    "may delete or overwrite data (not stated otherwise)")
@@ -633,13 +638,18 @@ class MCPManager:
 
     # --------------------------------------------------------------- as tools
 
-    def tool_specs(self, session: dict) -> list[ToolSpec]:
+    def tool_specs(self, session: dict, policy_agent: str | None = None, job_type: str | None = None) -> list[ToolSpec]:
+        """Specs offered to a session; with `policy_agent`, tools the tool policy denies are left out."""
+        policy = self.app.current_tool_policy() if policy_agent else None
         specs = []
         for s in self.enabled_for(session):
             c = self.conns.get(s["name"])
             if not c or not c.session:
                 continue
             for t in c.tools:
+                if policy is not None and not policy.decide(policy_agent, tool_name(s["name"], t.name),
+                                                            job_type=job_type or None).allowed:
+                    continue
                 specs.append(ToolSpec(name=tool_name(s["name"], t.name),
                                       description=f"[MCP {s['name']}{' · other machine' if s['shared'] else ''}] "
                                                   f"{t.description or ''}"[:1024],
@@ -670,8 +680,24 @@ class MCPManager:
             finish_tool_span(span, out)
             return out
 
+    def _is_gdw_builtin(self, cfg: dict) -> bool:
+        """Is this outbound server GDH's own MCP endpoint? Identified by the exact loopback URL GDH serves,
+        never by the server's name."""
+        from .gdw_mcp import GdwMcp
+
+        try:
+            return cfg.get("transport") == "http" and cfg.get("url") == GdwMcp(self.app).url()
+        except Exception:  # noqa: BLE001  (port unknown)
+            return False
+
     async def _call(self, ctx: ToolContext, name: str, args: dict) -> ToolOutput:
         server, tool = self._names[name]
+        policy = self.app.current_tool_policy()
+        agent = ctx.effective_agent
+        d = policy.decide(agent, name, job_type=ctx.job_type or None)
+        if not d.allowed:
+            return ToolOutput(f"Tool '{name}' is not allowed for {agent} agents by the tool policy: {d.reason}",
+                              is_error=True, denied=True)
         cfg = self.server(server) or {}
         if not any(s["name"] == server for s in self.enabled_for(ctx.session)):
             # Connected for another session, but turned off (or removed) for this one.
@@ -679,17 +705,22 @@ class MCPManager:
                 return ToolOutput("Shared tools are off for this session.", is_error=True, denied=True)
             return ToolOutput(f"MCP server {server} is turned off for this session.", is_error=True, denied=True)
         hints = self.hints(server, tool)
-        decision = mcp_policy(ctx.mode, hints)
+        trust = policy.mcp_trust_read_only(server, builtin=self._is_gdw_builtin(cfg))
+        decision = mcp_policy(ctx.mode, hints, trust)
         if decision == "deny":
             return ToolOutput(f"Plan only mode: {server}.{tool} isn't marked read-only (readOnlyHint), so it isn't "
                               "run. Describe the call instead.", is_error=True, denied=True)
+        if policy.mcp_scan_args(server):
+            refusal = egress.check_args(self.app, ctx.session_id, args, policy.egress_extra_patterns())
+            if refusal:
+                return ToolOutput(refusal, is_error=True, denied=True)
         if not cfg.get("shared") and decision == "ask" and not (ctx.consented("mcp", f"{server}__{tool}")
                                                                 or self.app.approvals.allowlisted("mcp", f"{server}__{tool}")):
             # Allowlist rule: `mcp:<server>__<tool>` (glob), e.g. `mcp:github__get_*`. ctx.consented: a
             # hook context's consented tools (hookbus.hook_context; always empty for agents).
             res = await self.app.approvals.ask(ctx.session_id, "mcp_tool", {
                 "subject": f"{server}.{tool}", "tool": tool, "server": server, "summary": json.dumps(args)[:300],
-                "hints": hint_notes(hints), "role": ctx.role, "run_id": ctx.run_id})
+                "hints": hint_notes(hints, trust), "role": ctx.role, "run_id": ctx.run_id})
             if res["status"] != "approved":
                 return ToolOutput(f"User declined {server}.{tool}.", is_error=True, denied=True)
         if cfg.get("shared"):

@@ -42,8 +42,18 @@ if TYPE_CHECKING:
     from ..app import AppState
     from .tracing import Span
 
+class PolicyGrantError(ValueError):
+    """The tool policy grants none of the tools a spawn asked for."""
+
+
 READ_ONLY_TOOLS = ["read_file", "list_dir", "search"]
 WRITE_TOOLS = {"write_file", "edit_file", "delete_file", "run_command"}
+
+
+def cli_sandbox(granted) -> str:
+    """The Codex CLI sandbox can't enforce anything narrower than workspace-write, so it needs the full write
+    grant (write, edit, delete and run_command); any narrower grant runs read-only."""
+    return "workspace-write" if WRITE_TOOLS <= set(granted) else "read-only"
 RESULT_CAP = 6000
 SUBAGENT_SYSTEM = """You are a subagent working for an orchestrator agent, not talking to the user.
 Do exactly the task in the brief, nothing more. When done, reply with only the requested output:
@@ -66,6 +76,7 @@ class Subagent:
     instructions: str
     tools: list[str]
     job_type: str = "other"
+    not_granted: list[str] = field(default_factory=list)  # requested tools the tool policy removed
     worktree: Path | None = None
     job_id: str = ""
     status: str = "queued"  # queued | running | done | failed | cancelled
@@ -258,6 +269,12 @@ class SubagentManager:
         if is_cli and not shutil.which("codex"):
             raise ValueError("The Codex CLI isn't installed (npm i -g @openai/codex). Use codex.standard instead.")
         tools = list(a.get("tools") or READ_ONLY_TOOLS)
+        requested_tools = bool(a.get("tools"))
+        granted = self.app.current_tool_policy().filter_names("subagent", tools, job_type=job_type)
+        removed = [t for t in tools if t not in granted]
+        if removed and requested_tools and not granted:
+            raise PolicyGrantError(f"The tool policy grants none of the requested tools to {job_type} units.")
+        tools = granted
         writes = bool(WRITE_TOOLS & set(tools))
         if writes and not a.get("worktree") and not is_cli:
             # One writer per folder: a second concurrent writer always gets its own worktree.
@@ -274,7 +291,7 @@ class SubagentManager:
             raise ValueError("worktree=true needs a session folder that is a git repo.")
         sub = Subagent(id=sub_id, session_id=ctx.session_id, name=a.get("name") or sub_id, provider=provider,
                        tier=tier, model=model, effort=effort, instructions=a["instructions"], tools=tools,
-                       job_type=job_type, approval_token=token, route=route,
+                       job_type=job_type, approval_token=token, route=route, not_granted=removed,
                        escalation_step=int(a.get("escalation_step") or 0),
                        run_cap=float(a["run_cap_usd"]) if a.get("run_cap_usd") else None,
                        max_turns=min(int(a.get("max_turns") or cfg.delegation.get("subagent_max_turns", 30)), 100),
@@ -285,7 +302,7 @@ class SubagentManager:
             sub.worktree_plan = self.app.worktrees_root(ctx.session_id) / sub_id
         if is_cli and not self.app.approvals.allowlisted("codex_cli", str(sub.worktree_plan)):
             res = await self.app.approvals.ask(ctx.session_id, "command", {
-                "subject": f"Codex CLI: {sub.name}", "command": f"codex exec (sandbox: workspace-write) — {sub.name}",
+                "subject": f"Codex CLI: {sub.name}", "command": f"codex exec (sandbox: {cli_sandbox(sub.tools)}) — {sub.name}",
                 "cwd": str(sub.worktree_plan), "role": "main"})
             if res["status"] != "approved":
                 raise PermissionError("User declined the Codex CLI run.")
@@ -408,7 +425,7 @@ class SubagentManager:
         app = self.app
         ctx = ToolContext(app=app, session=parent.session, run_id=sub.id, role="subagent", provider=sub.provider,
                           model=sub.model, extra_roots=[sub.worktree] if sub.worktree else [],
-                          cwd_override=sub.worktree)
+                          cwd_override=sub.worktree, agent="subagent", job_type=sub.job_type)
         return app.providers.for_model(sub.model, sub.profile), app.config.model(sub.model), ctx
 
     def _cap(self, sub: Subagent | None = None) -> float | None:
@@ -465,9 +482,11 @@ class SubagentManager:
         app = self.app
         prov, mcfg, ctx = self._bind(sub, parent)
         folder = sub.worktree or parent.folder
-        specs = [s for s in app.tools.specs(sub.tools, role="subagent", session=parent.session)]
+        specs = [s for s in app.tools.specs(sub.tools, role="subagent", session=parent.session, agent="subagent",
+                                            job_type=sub.job_type, policy=app.current_tool_policy())]
         if app.mcp:
-            specs += [s for s in app.mcp.tool_specs(parent.session) if s.name in sub.tools]
+            specs += [s for s in app.mcp.tool_specs(parent.session, policy_agent="subagent", job_type=sub.job_type)
+                      if s.name in sub.tools]
         system = SUBAGENT_SYSTEM.format(folder=folder or "none (no file access)")
         for _ in range(sub.max_turns):
             sub.turns += 1
@@ -572,7 +591,10 @@ class SubagentManager:
         # The session may have switched to Plan only while this unit waited: then it runs read-only,
         # like the Codex CLI harness does in Plan.
         session = app.store.get(sub.session_id) or {}
-        sandbox = "read-only" if session.get("mode") == "plan" else "workspace-write"
+        # The grant is recomputed against the policy as it is now (a change while queued applies, including the
+        # malformed-policy fallback); only a full write grant gets workspace-write.
+        granted = app.current_tool_policy().filter_names("subagent", sub.tools, job_type=sub.job_type)
+        sandbox = "read-only" if session.get("mode") == "plan" else cli_sandbox(granted)
         cmd = ["codex", "exec", "--json", "--skip-git-repo-check", "--sandbox", sandbox,
                "-m", sub.model, "-c", f'model_reasoning_effort="{effort}"', "-C", str(sub.worktree), "-"]
         env = dict(os.environ)
@@ -722,15 +744,18 @@ def _register_tools(app: "AppState", mgr: SubagentManager) -> None:
             sub = await mgr.spawn(ctx, a)
         except EffortApprovalRequired as e:
             return ToolOutput(str(e), is_error=True)
+        except PolicyGrantError as e:
+            return ToolOutput(str(e), is_error=True, denied=True)
         except (ValueError, PermissionError, worktrees.GitError, BudgetExceeded) as e:
             return ToolOutput(str(e), is_error=True)
+        note = f" Not granted by the tool policy: {', '.join(sub.not_granted)}." if sub.not_granted else ""
         if a.get("run_in_background", True):
             return ToolOutput(f"Started {sub.name} as {sub.id} on {sub.model} ({sub.tier}, effort {sub.effort})"
                               + (f" in worktree {sub.worktree or sub.worktree_plan} (created when it starts)"
                                  if sub.worktree or sub.worktree_plan else "")
-                              + ". Use get_subagent_result to collect it.")
+                              + "." + note + " Use get_subagent_result to collect it.")
         await sub.done_event.wait()
-        return ToolOutput(mgr.compact_result(sub), is_error=sub.status != "done", untrusted=f"subagent:{sub.name}")
+        return ToolOutput(mgr.compact_result(sub) + note, is_error=sub.status != "done", untrusted=f"subagent:{sub.name}")
 
     add("spawn_subagent",
         "Launch a subagent for one unit of work (see the delegation and delegation-tiers skills). provider: claude|codex. tier: "

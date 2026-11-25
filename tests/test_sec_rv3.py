@@ -93,6 +93,7 @@ async def test_connector_turned_off_for_a_session_is_not_callable(app):
         out = await app.mcp.call(ToolContext(app=app, session=off, run_id="main:x"), "mcp__demo__add",
                                  {"a": 1, "b": 2})
         assert out.is_error and "turned off for this session" in out.text
+        app.config.modes["allowlist"] = ["mcp:demo__add"]  # outbound read-only hints are not trusted
         ok = await app.mcp.call(ToolContext(app=app, session=on, run_id="main:y"), "mcp__demo__add", {"a": 1, "b": 2})
         assert untrusted(ok.text) == ("mcp:demo.add", "3")
 

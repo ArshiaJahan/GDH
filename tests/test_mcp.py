@@ -46,7 +46,16 @@ async def test_session_tools_call_and_shared_approval(tmp_path):
     names = [t.name for t in s.mcp.tool_specs(sess)]
     assert "mcp__demo__add" in names
     ctx = ToolContext(app=s, session=sess, run_id="main:x")
-    out = await s.mcp.call(ctx, "mcp__demo__add", {"a": 2, "b": 40})
+    # `add` is annotated read-only, but an outbound server's hint is not trusted: the call asks once.
+    task0 = asyncio.create_task(s.mcp.call(ctx, "mcp__demo__add", {"a": 2, "b": 40}))
+    for _ in range(200):
+        pend0 = s.approvals.pending(sess["id"])
+        if pend0:
+            break
+        await asyncio.sleep(0.01)
+    assert pend0[0]["kind"] == "mcp_tool" and "marked read-only by the server (not trusted)" in pend0[0]["payload"]["hints"]
+    s.approvals.resolve(pend0[0]["id"], "approve")
+    out = await task0
     assert untrusted(out.text) == ("mcp:demo.add", "42") and not out.is_error  # marked as outside content
     # Per-session toggle off → not offered.
     sess2 = s.store.update(sess["id"], settings={"connectors": {"demo": False}})

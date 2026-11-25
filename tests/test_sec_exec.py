@@ -405,8 +405,13 @@ async def test_local_mcp_tools_follow_the_session_mode(tmp_path):
             u = untrusted(out.text)
             return u[1] if u else out.text
 
-        # Ask: read-only runs; the rest asks (the card says what the annotations claim).
+        # Ask: read-only asks too; the rest asks (the card says what the annotations claim).
+        # The server's read-only hint is not trusted (outbound server): it asks, unless allowlisted.
+        out, card = await call("ask", "look", "deny")
+        assert out.is_error and "marked read-only by the server (not trusted)" in card["payload"]["hints"]
+        s.config.modes["allowlist"] = ["mcp:hints__look"]
         assert text((await call("ask", "look"))[0]) == "look:t"
+        s.config.modes["allowlist"] = []
         out, card = await call("ask", "plain", "deny")
         assert out.is_error and card["kind"] == "mcp_tool" and card["payload"]["server"] == "hints"
         assert card["payload"]["tool"] == "plain" and "not annotated" in card["payload"]["hints"][0]

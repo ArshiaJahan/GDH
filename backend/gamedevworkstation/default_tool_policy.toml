@@ -1,0 +1,37 @@
+version = 1
+
+[defaults]
+unlisted = "deny"
+
+[agents.main]
+allow = ["*"]
+deny = []
+
+[agents.claude_code]
+allow = ["*"]
+deny = []
+builtin_deny = []
+
+[agents.subagent]
+allow = ["read_file", "list_dir", "search", "get_item", "list_items", "read_output", "read_skill", "web_fetch", "web_search", "write_file", "edit_file", "delete_file", "run_command", "unity", "gallery_*", "view_image", "screenshot_plan", "task_boards", "task_search", "task_get", "transcribe", "sound_effect", "music", "list_voices", "comfyplug"]
+deny = ["mcp__*"]
+
+[agents.subagent.job_types.extract]
+allow = ["read_file", "list_dir", "search", "get_item", "list_items", "read_output", "web_fetch", "web_search", "view_image", "task_boards", "task_search", "task_get"]
+deny = ["mcp__*"]
+
+[agents.subagent.job_types.mechanical_edit]
+allow = ["read_file", "list_dir", "search", "read_output", "write_file", "edit_file", "run_command"]
+deny = ["mcp__*"]
+
+[agents.subagent.job_types.implement_feature]
+allow = ["read_file", "list_dir", "search", "read_output", "write_file", "edit_file", "delete_file", "run_command", "unity", "gallery_*", "view_image", "screenshot_plan", "task_boards", "task_search", "task_get", "transcribe", "sound_effect", "music", "list_voices", "comfyplug"]
+deny = ["mcp__*"]
+
+[mcp.servers.default]
+trust_read_only_hint = false
+scan_args = true
+
+[egress]
+scan_web_fetch = true
+extra_patterns = []

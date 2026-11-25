@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import shutil
 import time
@@ -23,6 +24,7 @@ from fastapi import APIRouter, FastAPI
 
 from ..procs import NEW_GROUP
 from ..agent.tools import GIT_WRITE_REFUSED, in_git_metadata
+from .. import egress
 from ..config import get_key, sessions_dir
 from ..core.effort import check_effort
 from ..core.types import (Message, TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock, Usage,
@@ -48,6 +50,7 @@ HOOK_TIMEOUT_S = 24 * 3600
 PROJECT_INSTRUCTIONS = ("CLAUDE.md", ".claude/CLAUDE.md")
 PROJECT_INSTRUCTIONS_MAX_CHARS = 40_000
 SDK_MODE = {"ask": "default", "accept_edits": "acceptEdits", "plan": "plan", "auto": "auto"}
+log = logging.getLogger(__name__)
 DEFER = "defer"
 # Recap of earlier turns for a provider thread that starts without them (bounded).
 RECAP_MESSAGES = 12
@@ -160,19 +163,57 @@ def make_gate(app: "AppState", session: Callable[[], dict], cwd: Path,
         full = full_path(path_str)
         return any(full == r or r in full.parents for r in roots)
 
-    async def gate(name: str, inp: dict, tool_use_id: str | None) -> str | None:
+    def policy_refusal(name: str) -> str | None:
+        """The policy part of the gate: malformed-policy fallback and builtin_deny. Applies to every tool."""
+        tool_policy = app.current_tool_policy() if hasattr(app, "current_tool_policy") else None
+        if tool_policy is None:
+            return None
+        if why := tool_policy.cc_broken_refusal(name):
+            return why  # malformed policy: fail closed, allowlists don't override
+        if tool_policy.builtin_denied(name):
+            return f"{name} is not allowed for Claude Code sessions by the tool policy."
+        return None
+
+    async def _gate(name: str, inp: dict, tool_use_id: str | None) -> str | None:
         s = session()
         auto = s["mode"] == "auto"
         allowed = DEFER if auto else None
         target = inp.get("file_path") or inp.get("path") or inp.get("notebook_path")
+        tool_policy = app.current_tool_policy() if hasattr(app, "current_tool_policy") else None
+        if why := policy_refusal(name):
+            return why
         if name in READ_ONLY_SDK_TOOLS | EDIT_SDK_TOOLS and not inside(target):
             return f"{target} is outside the session folder."
         if name in READ_ONLY_SDK_TOOLS:
             if target and not app.policy.allows_path(full_path(target), "anthropic"):
                 return "That file is marked sensitive."
+            if name == "WebSearch" and tool_policy is not None and tool_policy.egress_scan_web_fetch():
+                for text in (str(inp.get("query") or ""), str(inp.get("url") or "")):
+                    if refusal := egress.check_url(app, sid, text, tool_policy.egress_extra_patterns()):
+                        return refusal
+                if refusal := egress.check_args(app, sid, inp, tool_policy.egress_extra_patterns()):
+                    return refusal
+            if name in ("Grep", "Glob") and (target or name == "Glob"):  # secret files reached by a search
+                root = full_path(target) if target else cwd
+                found = await asyncio.to_thread(egress.search_targets, root, [inp.get("glob"), inp.get("pattern") if name == "Glob" else None])
+                for secret in found:
+                    await asyncio.to_thread(egress.taint_secret_path, app, sid, secret)
+            named = next((x for x in (target, full_path(target)) if egress.is_secret_file(x)), None) if target else None
+            if name == "Read" and named is not None:  # the requested name or the symlink target's
+                try:  # remember the secret values so a later tool call that carries them is refused
+                    with full_path(target).open(encoding="utf-8", errors="replace") as fh:
+                        egress.taint_file(app, sid, named, fh.read(200000))
+                except Exception:  # noqa: BLE001
+                    pass
             return allowed
         if name in WEB_FETCH_SDK_TOOLS:
-            return (await _web_fetch_refusal(str(inp.get("url") or ""))) or allowed
+            url = str(inp.get("url") or "")
+            if refusal := await _web_fetch_refusal(url):
+                return refusal
+            if tool_policy is not None and tool_policy.egress_scan_web_fetch():
+                if refusal := egress.check_url(app, sid, url, tool_policy.egress_extra_patterns()):
+                    return refusal
+            return allowed
         if name in EDIT_SDK_TOOLS:
             if s["mode"] == "plan":
                 return "Plan only mode: no edits."
@@ -194,13 +235,21 @@ def make_gate(app: "AppState", session: Callable[[], dict], cwd: Path,
 
             # Bulk deletes and history-rewriting git commands always ask the user in Auto, never
             # Claude Code's classifier.
-            if name == "Bash" and (why := always_ask_reason(str(inp.get("command", "")))):
+            if name == "Bash" and (why := always_ask_reason(str(inp.get("command", "")), str(cwd))):
                 return await ask_tool(app, sid, cwd, name, inp, why)
             return DEFER
         if name == "Bash" and app.approvals.allowlisted("run_command", inp.get("command", "")):
             return None
         return await ask_tool(app, sid, cwd, name, inp)
 
+    async def gate(name: str, inp: dict, tool_use_id: str | None) -> str | None:
+        try:
+            return await _gate(name, inp, tool_use_id)
+        except Exception:  # noqa: BLE001  fail closed: never hand Claude Code an error instead of a decision
+            log.exception("Claude Code gate failed for %s", name)
+            return f"GameDevWorkstation could not check this {name} call, so it was refused."
+
+    gate.policy_refusal = policy_refusal  # type: ignore[attr-defined]
     return gate
 
 
@@ -283,6 +332,9 @@ class Harnesses:
         async def pre_tool_use(data: Any, tool_use_id: str | None, _ctx: Any) -> dict:
             name = data.get("tool_name", "")
             if name in DEFERRED_SDK_TOOLS:
+                if why := gate.policy_refusal(name):  # the tool policy applies to deferred tools too
+                    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                                   "permissionDecisionReason": why}}
                 return {}  # no say: the CLI's own rules, then can_use_tool (which asks), decide
             why = await gate(name, data.get("tool_input") or {}, tool_use_id or data.get("tool_use_id"))
             if why == DEFER:

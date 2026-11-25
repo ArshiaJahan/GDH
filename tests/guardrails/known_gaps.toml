@@ -1,0 +1,36 @@
+# Known enforcement gaps tracked by the guardrail catalogue.
+
+[[wrap_gap]]
+id = "A01"
+gap = "G6"
+reason = "wrapping file and command output is deferred: measure now, wrap later"
+
+[[wrap_gap]]
+id = "A02"
+gap = "G6"
+reason = "wrapping file and command output is deferred: measure now, wrap later"
+
+[[wrap_gap]]
+id = "A03"
+gap = "G6"
+reason = "wrapping file and command output is deferred: measure now, wrap later"
+
+[[wrap_gap]]
+id = "C01"
+gap = "G6"
+reason = "wrapping file and command output is deferred: measure now, wrap later"
+
+[[wrap_gap]]
+id = "C02"
+gap = "G6"
+reason = "wrapping file and command output is deferred: measure now, wrap later"
+
+[[wrap_gap]]
+id = "C03"
+gap = "G6"
+reason = "wrapping file and command output is deferred: measure now, wrap later"
+
+[[wrap_gap]]
+id = "C04"
+gap = "G6"
+reason = "wrapping file and command output is deferred: measure now, wrap later"

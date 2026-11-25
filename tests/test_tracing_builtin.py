@@ -247,6 +247,7 @@ async def test_mcp_discovery_and_tool_rpc_spans(app, monkeypatch):
                    "enabled_default": True})
     mgr._names[name] = (server, tool)
     monkeypatch.setattr(mgr, "hints", lambda *args: {"readOnlyHint": True})
+    app.config.modes["allowlist"] = [f"mcp:{server}__{tool}"]  # outbound read-only hints are not trusted
     observed = []
 
     class Session:
