@@ -463,7 +463,7 @@ async def test_context_pack_unity_route_unknown_when_the_probe_is_slow(app, fold
 
     class Slow(FakeUnityBridge):
         async def editor_state(self, session, op="compile", **kw):
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(3.0)  # far past the 0.05 s cap, so a slow CI runner can't blur the two
             return await super().editor_state(session, op, **kw)
 
     unity_project(folder)
@@ -472,7 +472,7 @@ async def test_context_pack_unity_route_unknown_when_the_probe_is_slow(app, fold
     s = session(app, folder, **PROGRESSIVE)
     t0 = time.monotonic()
     await turn(app, s["id"])
-    assert time.monotonic() - t0 < 0.45  # didn't wait for the probe
+    assert time.monotonic() - t0 < 2.0  # didn't wait for the 3 s probe (a turn takes ~0.1 s locally)
     st = app.store.get(s["id"])["settings"]
     assert "Unity: backend=auto route=unknown (the route check took over 0.05 s)" in st["context_pack"]["text"]
     assert 'op="status"' in st["context_pack"]["text"] and st["unity_route"]["route"] == "unknown"
