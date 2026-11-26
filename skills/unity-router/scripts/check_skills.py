@@ -19,7 +19,7 @@ HARNESS = [
     "unity-router", "compile-fix-loop", "play-verify", "headless-ops", "scene-prefab-safety", "gdd-to-backlog",
     "project-memory", "architecture-patterns", "asset-pipeline", "perf-pass", "game-feel-pass", "build-ship",
     "vcs-hygiene", "design-critique", "postmortem", "trailer-maker", "unity-practices",
-    "unity-orientation",
+    "unity-onboarding",
 ]
 EXISTING = ["unity-mcp-orchestrator", "game-designer"]
 

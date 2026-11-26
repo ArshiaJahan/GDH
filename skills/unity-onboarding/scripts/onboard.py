@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """Map a Unity project for a new session in one cheap, read-only pass.
 
-    orient.py [<folder>] [--refresh] [--json] [--max-todos 12]
+    onboard.py [<folder>] [--refresh] [--json] [--max-todos 12]
 
 Finds the Unity project (the folder or one up to 3 levels below), its docs and handoff notes (read
 by heading, not whole), its tools (graphify graph, MCP for Unity, tests, CI), Unity facts (through
 project-memory's project_snapshot.py when it is installed), git state, and the open to-dos:
 BACKLOG.md stories in progress, then to do; next steps in handoff docs; unchecked TODO.md items.
 
-The map is cached in <project>/.gdw/orientation.json with a fingerprint (git HEAD, working-tree
+The map is cached in <project>/.gdw/onboarding.json with a fingerprint (git HEAD, working-tree
 changes, the docs' sizes and mtimes). A repeat run prints `CACHED`, and lists only the docs that
-changed since the last orientation, so a session re-reads just those. Prints markdown (or --json)
+changed since the last onboarding, so a session re-reads just those. Prints markdown (or --json)
 and a last line `RESULT: OK todos=N changed_docs=N cached=yes|no`. Python 3.9+ standard library.
 """
 from __future__ import annotations
@@ -25,7 +25,8 @@ import sys
 import time
 from pathlib import Path
 
-CACHE_VERSION = 3
+CACHE_VERSION = 4
+CATEGORIES = "prefab-categories.json"  # what GameDevWorkstation's Prefabs tab groups by
 DOC_FOLDERS = {"HandOffDocs", "docs", "Docs", "design", "production"}
 MAX_TRACKED_DOCS = 60
 MAX_FOLDER_DOCS = 6
@@ -300,6 +301,93 @@ def layout(root: Path, limit: int = 12) -> list[str]:
     return [r for _n, r in rows[:limit]]
 
 
+GUID = re.compile(r"guid:[ \t]*([0-9a-fA-F]{32})")
+
+
+def _guid(meta: Path) -> str | None:
+    m = GUID.search(read(meta, 4000))
+    return m[1].lower() if m else None
+
+
+def _variant_source(text: str) -> str | None:
+    """The base prefab's GUID when this .prefab is a variant (its root is a PrefabInstance), else None."""
+    if "--- !u!1001 " not in text or re.search(r"^  m_Father: \{fileID: 0\}", text, re.M):
+        return None
+    for doc in re.split(r"^--- !u!", text, flags=re.M):
+        if doc.startswith("1001 ") and re.search(r"^    m_TransformParent: \{fileID: 0\}", doc, re.M):
+            m = re.search(r"^  m_SourcePrefab: \{[^}\n]*guid: ([0-9a-fA-F]{32})", doc, re.M)
+            return m[1].lower() if m else None
+    return None
+
+
+def prefabs(root: Path) -> dict:
+    """Prefabs by folder (non-recursive, so nested folders are their own group), variants and their depth, and
+    variants whose base prefab is missing. Reads each .prefab once; no Unity needed."""
+    assets = root / "Assets"
+    by_dir: dict[str, int] = {}
+    guid_of: dict[str, str] = {}
+    source: dict[str, str] = {}
+    if assets.is_dir():
+        for d, dirs, names in os.walk(assets):
+            dirs[:] = sorted(x for x in dirs if not x.startswith(".") and x not in SKIP_DIRS
+                             and not (Path(d) / x).is_symlink())
+            for n in names:
+                if not n.endswith(".prefab"):
+                    continue
+                f = Path(d) / n
+                rel = f.relative_to(root).as_posix()
+                folder = Path(rel).parent.as_posix()
+                by_dir[folder] = by_dir.get(folder, 0) + 1
+                if g := _guid(f.with_name(n + ".meta")):
+                    guid_of[g] = rel
+                if s := _variant_source(read(f, 2_000_000)):
+                    source[rel] = s
+    def depth(rel: str) -> int:
+        seen, n = set(), 0
+        while rel in source and rel not in seen:
+            seen.add(rel)
+            n += 1
+            rel = guid_of.get(source[rel], "")
+        return n
+    broken = sorted(rel for rel, g in source.items() if g not in guid_of)
+    return {"total": sum(by_dir.values()), "folders": dict(sorted(by_dir.items())), "variants": len(source),
+            "max_depth": max((depth(r) for r in source), default=0), "broken_variants": broken[:10],
+            "broken_total": len(broken)}
+
+
+def category_name(folder: str) -> str:
+    rel = folder.removeprefix("Assets").strip("/")
+    return rel or "Assets"
+
+
+def write_categories(root: Path, info: dict, write: bool) -> str:
+    """Fill the Prefabs tab's categories, one per folder, unless the user already set their own (a file without our
+    marker). Our own earlier file is refreshed so new folders show up. Returns what happened."""
+    if not info["total"]:
+        return "none"
+    path = root / ".gdw" / CATEGORIES
+    try:
+        old = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        old = None
+    except (OSError, ValueError):
+        return "kept"
+    if old is not None and old.get("generated_by") != "onboarding":
+        return "kept"
+    cats = {category_name(f): [f"{f}/*.prefab"] for f in info["folders"]}
+    data = {"categories": cats, "generated_by": "onboarding"}
+    if old == data:
+        return "unchanged"
+    if not write:
+        return "would write"
+    try:
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    except OSError:
+        return "kept"
+    return "written" if old is None else "updated"
+
+
 def tools(root: Path, facts: dict) -> list[str]:
     out = []
     graph = next((p for p in (root / "graphify-out", root.parent / "graphify-out") if p.is_dir()), None)
@@ -351,15 +439,24 @@ def fingerprint(root: Path, doc_list: list[dict]) -> str:
             pass
     for d in doc_list:
         h.update(f"{d['path']}:{d['sha']}".encode())
+    for d, dirs, names in os.walk(root / "Assets"):  # prefabs added, moved or edited outside git (names + stat only)
+        dirs[:] = sorted(x for x in dirs if not x.startswith(".") and x not in SKIP_DIRS)
+        for n in sorted(names):
+            if n.endswith((".prefab", ".prefab.meta")):
+                try:
+                    st = os.stat(os.path.join(d, n))
+                    h.update(f"{d}/{n}:{st.st_size}:{st.st_mtime_ns}".encode())
+                except OSError:
+                    pass
     return h.hexdigest()[:16]
 
 
-def orient(folder: Path, refresh: bool = False, max_todos: int = 12, write: bool = True) -> dict:
+def onboard(folder: Path, refresh: bool = False, max_todos: int = 12, write: bool = True) -> dict:
     projects = find_projects(folder)
     if not projects:
         return {"error": f"no Unity project (ProjectSettings/ProjectVersion.txt) in {folder} or 3 levels below"}
     root = projects[0]
-    cache_file = root / ".gdw" / "orientation.json"
+    cache_file = root / ".gdw" / "onboarding.json"
     try:
         old = json.loads(cache_file.read_text(encoding="utf-8")) if cache_file.is_file() else None
     except ValueError:
@@ -368,7 +465,8 @@ def orient(folder: Path, refresh: bool = False, max_todos: int = 12, write: bool
     fp = fingerprint(root, doc_list)
     if old and old.get("version") == CACHE_VERSION and old.get("fingerprint") == fp and not refresh:
         return {**old, "docs": doc_list, "doc_summaries": doc_summaries, "cached": True, "changed_docs": [],
-                "other_projects": [str(p) for p in projects[1:]]}
+                "other_projects": [str(p) for p in projects[1:]],
+                "prefab_categories": write_categories(root, old["prefabs"], write)}
     prev = {d["path"]: d["sha"] for d in (old or {}).get("docs", [])}
     changed = [d["path"] for d in doc_list if prev.get(d["path"]) != d["sha"]] if old else []
     facts = unity_facts(root)
@@ -396,6 +494,7 @@ def orient(folder: Path, refresh: bool = False, max_todos: int = 12, write: bool
         "active_milestone": active, "todos": uniq[:max_todos], "todos_total": len(uniq),
         "blocked": blocked[:5], "code_todos": n_code, "code_todo_files": code_top,
         "last_session": last_log_entry(root, log) if log else "",
+        "prefabs": prefabs(root),
     }
     try:
         if not write:
@@ -403,18 +502,20 @@ def orient(folder: Path, refresh: bool = False, max_todos: int = 12, write: bool
         cache_file.parent.mkdir(exist_ok=True)
         cache_file.write_text(json.dumps(result, indent=1), encoding="utf-8")
         ignore = root / ".gdw" / ".gitignore"
-        if not ignore.exists():
-            ignore.write_text("orientation.json\n", encoding="utf-8")  # a per-machine cache, not project content
+        lines = read(ignore).splitlines()
+        if "onboarding.json" not in lines:  # a per-machine cache, not project content
+            ignore.write_text("\n".join(lines + ["onboarding.json"]) + "\n", encoding="utf-8")
     except OSError:
         pass
-    return {**result, "cached": False, "changed_docs": changed, "other_projects": [str(p) for p in projects[1:]]}
+    return {**result, "cached": False, "changed_docs": changed, "other_projects": [str(p) for p in projects[1:]],
+            "prefab_categories": write_categories(root, result["prefabs"], write)}
 
 
 def render(r: dict) -> str:
     if "error" in r:
         return f"RESULT: FAIL {r['error']}"
     f, g = r["facts"], r.get("git") or {}
-    L = [f"# Orientation: {Path(r['root']).name} ({'CACHED, unchanged since ' + r['at'] if r['cached'] else 'fresh scan'})",
+    L = [f"# Onboarding: {Path(r['root']).name} ({'CACHED, unchanged since ' + r['at'] if r['cached'] else 'fresh scan'})",
          f"root: {r['root']}" + (f"  (other Unity projects: {', '.join(r['other_projects'])})" if r["other_projects"] else ""),
          f"unity: {f.get('unity', '?')} | pipeline: {f.get('pipeline', '?')} {'/'.join(x for x in f.get('renderers', []) if x)}"
          f" | input: {f.get('input', '?')} | asmdefs: {f.get('asmdefs', 0)} | packages: {len(f.get('packages', []))}"]
@@ -425,6 +526,21 @@ def render(r: dict) -> str:
         L.append(f"git: {g['branch']} @ {g['head']}, {g['dirty']} uncommitted; last: {(g['recent'] or ['-'])[0]}")
     if r["layout"]:
         L.append("assets: " + "; ".join(r["layout"][:8]))
+    pf = r.get("prefabs") or {}
+    if pf.get("total"):
+        cats = {"written": f"Prefabs tab categories written: one per folder (.gdw/{CATEGORIES})",
+                "updated": f"Prefabs tab categories updated with the current folders (.gdw/{CATEGORIES})",
+                "kept": f"kept the user's own Prefabs tab categories (.gdw/{CATEGORIES})",
+                "would write": "Prefabs tab categories not written (--no-write)"}.get(r.get("prefab_categories", ""), "")
+        L += ["", "## Prefabs",
+              f"- {pf['total']} prefabs in {len(pf['folders'])} folders; {pf['variants']} variants"
+              + (f" (up to {pf['max_depth']} deep)" if pf["variants"] else "")]
+        top = sorted(pf["folders"].items(), key=lambda kv: -kv[1])[:6]
+        L.append("- biggest folders: " + ", ".join(f"{category_name(k)} {v}" for k, v in top))
+        if pf["broken_total"]:
+            L.append(f"- **{pf['broken_total']} variants have a missing base prefab**: " + ", ".join(pf["broken_variants"][:5]))
+        if cats:
+            L.append("- " + cats)
     if r["tools"]:
         L += ["", "## Tools"] + [f"- {t}" for t in r["tools"]]
     doc_start = len(L)
@@ -475,7 +591,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-todos", type=int, default=12)
     ap.add_argument("--no-write", action="store_true", help="don't write the cache (read-only run)")
     a = ap.parse_args(argv)
-    r = orient(a.folder.expanduser().resolve(), a.refresh, a.max_todos, write=not a.no_write)
+    r = onboard(a.folder.expanduser().resolve(), a.refresh, a.max_todos, write=not a.no_write)
     print(json.dumps(r, indent=1) if a.json else render(r))
     return 0 if "error" not in r else 1
 

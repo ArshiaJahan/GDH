@@ -16,7 +16,7 @@ Tools are MCP for Unity 10.3 tools; your client may prefix them (e.g. mcp__Unity
 - Not needed inside a skill that already says which skill to call next.
 
 ## Procedure
-1. First task of a session in a project: run unity-orientation (one cached script call) instead of reading docs by hand. Otherwise read `PROJECT.md` at the project root if it exists; if it does not exist and the task touches a project, include project-memory.
+1. First task of a session in a project: run unity-onboarding (one cached script call) instead of reading docs by hand. Otherwise read `PROJECT.md` at the project root if it exists; if it does not exist and the task touches a project, include project-memory.
 2. Pick the execution mode (next section).
 3. Match the task to the first fitting row of the routing table. If several rows fit, take the earliest pipeline stage first.
 4. Load the listed skills in order, at most 3 at once (Context budget below). Load unity-mcp-orchestrator only when you need tool parameters or a tool call fails.
@@ -56,7 +56,7 @@ Signals are words or situations in the task. Load in order, at most 3. "Skip" li
 |---|---|---|---|
 | 1 | game idea, "make a game", no GDD, pitch, design a mechanic, balance, tuning numbers | game-designer | all Unity skills until a GDD or spec exists |
 | 2 | GDD or spec ready, plan, milestones, backlog, tickets, scope, "what first" | gdd-to-backlog, project-memory | implementation skills |
-| 3 | new or unfamiliar project, first session, "where are we", "get up to speed", handoff, what to work on | unity-orientation, then project-memory if PROJECT.md is missing or stale | everything else until the user picks a to-do |
+| 3 | new or unfamiliar project, first session, "where are we", "get up to speed", handoff, what to work on | unity-onboarding, then project-memory if PROJECT.md is missing or stale | everything else until the user picks a to-do |
 | 3b | record a decision, conventions, PROJECT.md drift | project-memory | implementation skills |
 | 4 | git setup, .gitignore, LFS, merge conflict in .unity/.prefab/.meta, commit/branch hygiene | vcs-hygiene | scene-prefab-safety (unless repairing YAML by hand) |
 | 5 | implement a system: player, enemy, combat, data (ScriptableObjects), events, input, save, scene loading, procgen, UI flow | architecture-patterns, unity-practices, compile-fix-loop | perf-pass, game-feel-pass, build-ship |

@@ -1,19 +1,20 @@
 ---
-name: unity-orientation
-description: Orients a session in a Unity project before any work - one cheap scan (cached, so repeats only re-read what changed) of the project's rules, handoff and central docs, Unity facts, tools (graphify graph, MCP for Unity, tests, CI) and git state, then lists the open to-dos and asks the user which one to do. Use at the start of a session or handoff, "where are we", "get up to speed", "orient yourself", or when picking up a project you haven't seen.
-index-hint: "Orient a session in a Unity project (start or handoff): map docs, tools, git and open to-dos cheaply, then ask which to do. 'where are we', 'get up to speed'."
+name: unity-onboarding
+description: Onboards a session onto a Unity project before any work - one cheap scan (cached, so repeats only re-read what changed) of the project's rules, handoff and central docs, Unity facts, tools (graphify graph, MCP for Unity, tests, CI), git state and prefabs (fills GameDevWorkstation's Prefabs tab, one category per folder, and flags variants with a missing base), then lists the open to-dos and asks the user which one to do. Use at the start of a session or handoff, "where are we", "get up to speed", "onboard", "orient yourself", or when picking up a project you haven't seen.
+index-hint: "Onboard / orient yourself in a Unity project (start or handoff): map docs, tools, git, prefabs and open to-dos cheaply, then ask which to do. 'where are we', 'get up to speed'."
 argument-hint: "[project folder]"
 ---
 
-# unity-orientation
+# unity-onboarding
 
 Get ready to work with the fewest tokens: one script for the map, targeted reads for the rest, and the user picks the work. `<skill>` = this skill's folder.
 
 ## 1. Scan (one call)
-`python3 <skill>/scripts/orient.py <project or parent folder>`
-- `CACHED`: nothing changed since the last orientation. Use the printed map and don't re-read the docs; go to step 3.
+`python3 <skill>/scripts/onboard.py <project or parent folder>`
+- `CACHED`: nothing changed since the last onboarding. Use the printed map and don't re-read the docs; go to step 3.
 - Fresh scan with `**CHANGED**` docs: re-read only those docs.
 - Several Unity projects found: ask which one, then rerun on it.
+- `## Prefabs`: fills the Prefabs tab's categories, one per folder (a user's own are kept). A variant with a missing base is a blocker. Don't open prefabs or render thumbnails here.
 - `RESULT: FAIL`: no Unity project. Ask where it is, or offer unity-router to make one.
 
 ## 2. Read, in this order, and stop as soon as you know enough
@@ -25,7 +26,7 @@ Get ready to work with the fewest tokens: one script for the map, targeted reads
 
 Targeted lookups, not tours:
 - With a fresh graphify graph, answer "where is X / what uses Y" with graphify query, path or explain.
-- Otherwise use `rg -n` on symbols and file names. Don't open scenes, prefabs or whole Assets folders during orientation.
+- Otherwise use `rg -n` on symbols and file names. Don't open scenes, prefabs or whole Assets folders during onboarding.
 
 Details and the reasons behind them: `references/practices.md`. Read it only if you're unsure.
 
@@ -42,4 +43,4 @@ Write five lines at most: the project, its state, what changed since last time, 
 Don't start a to-do until the user picks one. Then load its owner skill (BACKLOG `Owner skill:`) or route with unity-router.
 
 ## Leaving the project
-Before ending a session that changed things, update the handoff doc in the format of `references/handoff-template.md` (or the project's own format). Keep it short: state, next steps as `- [ ]` items, decisions, gotchas. The next orientation then costs one script call.
+Before ending a session that changed things, update the handoff doc in the format of `references/handoff-template.md` (or the project's own format). Keep it short: state, next steps as `- [ ]` items, decisions, gotchas. The next onboarding then costs one script call.

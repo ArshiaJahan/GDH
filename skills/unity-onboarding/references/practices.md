@@ -1,4 +1,4 @@
-# Why the orientation works this way
+# Why the onboarding works this way
 
 Sources, checked 2026-11-25:
 - Claude Code memory docs (code.claude.com/docs/en/memory)
@@ -38,7 +38,7 @@ Sources, checked 2026-11-25:
 
 A Unity handover is real only when the project opens and builds on another machine: required packages, LFS assets, no `Library/` dependence.
 
-## What the cache holds (`<project>/.gdw/orientation.json`, git-ignored)
+## What the cache holds (`<project>/.gdw/onboarding.json`, git-ignored)
 - The fingerprint, Unity facts, folder counts, doc paths, headings and hashes.
 - The parsed to-dos with their sources, and the newest session-log entry.
 - Never scene or prefab contents, and nothing from `Library/`.
