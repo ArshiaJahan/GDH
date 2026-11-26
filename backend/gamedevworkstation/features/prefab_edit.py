@@ -363,6 +363,15 @@ def _commit(project: Project, originals: dict[Path, str], history: dict) -> None
         raise
 
 
+def _same(a: str, b: str) -> bool:
+    if a == b:
+        return True
+    try:
+        return float(a) == float(b)
+    except ValueError:
+        return False
+
+
 def edit_many(project: Project, edits: list[dict], summary: str | None) -> tuple[int, dict]:
     history = load_history(project.root)
     steps = history["steps"]
@@ -370,6 +379,10 @@ def edit_many(project: Project, edits: list[dict], summary: str | None) -> tuple
     originals = {}
     records = []
     for edit in edits:
+        prefab_path(project, edit["path"])
+    # Bases before their variants: a variant that inherits the field then sees the base's new value and needs no
+    # override of its own (a bulk edit of a base and its variants keeps the variants inheriting).
+    for edit in sorted(edits, key=lambda e: len(project.lineage(e["path"]))):
         path, fid, key, part = (edit[k] for k in ("path", "file_id", "key", "part"))
         slot = _slot(project, path, fid, key, part)
         file = prefab_path(project, path)
@@ -377,6 +390,8 @@ def edit_many(project: Project, edits: list[dict], summary: str | None) -> tuple
         raw = _replacement(slot, edit["value"])
         current = slot.value_token
         variant = slot.inspector.prefab.instance is not None
+        if variant and slot.modification is None and _same(current.value, token(raw, 0).value):
+            continue  # already inherits this value
         layout = {}
         if variant and slot.modification is None:
             text, layout = _insert(slot, raw)
@@ -390,6 +405,8 @@ def edit_many(project: Project, edits: list[dict], summary: str | None) -> tuple
             "before": _state(current.value, current.raw, **layout),
             "after": _state(token(raw, 0).value, raw),
         })
+    if not records:
+        raise HTTPException(400, "Nothing to change: every prefab already has that value")
     active = _active(history)
     active.append({
         "id": step_id, "at": time.time(), "summary": summary or f"Edit {label(edits[0]['key'])}",

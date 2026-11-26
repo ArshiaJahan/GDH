@@ -12,7 +12,7 @@ vi.mock("../lib/api", () => ({ get, post, put, ApiError, getConn: () => ({ base:
 vi.mock("../lib/store", () => ({ actions: { toast } }));
 
 import { PrefabsTab } from "./PrefabsTab";
-import { tabsFor } from "../lib/prefabs";
+import { tabsFor, type PrefabDetail } from "../lib/prefabs";
 
 const session = { id: "s1", settings: { unity_project: true } } as unknown as Session;
 
@@ -22,7 +22,7 @@ const brute = { ...grunt, path: "Assets/Game/Enemies/Brute.prefab", name: "Brute
   variant_of: { guid: "g1", name: "Grunt", path: grunt.path } };
 const bullet = { ...grunt, path: "Assets/Game/Projectiles/Bullet.prefab", name: "Bullet", guid: "g3", group: "Projectiles", components: ["Transform", "Projectile"] };
 
-const detail = (maxHealth = "80", edited: { was: string; step: number } | null = { was: "60", step: 1 }) => ({
+const detail = (maxHealth = "80", edited: { was: string; step: number } | null = { was: "60", step: 1 }): PrefabDetail => ({
   path: brute.path, name: "Brute", guid: "g2", variant_of: brute.variant_of, overrides: [],
   objects: [{ file_id: "100", name: "Brute", parent_file_id: null, components: [
     { file_id: "200", type: "Health", namespace: "Game", builtin: false, script_path: "Assets/Game/Health.cs", enabled: true, fields: [
@@ -37,6 +37,13 @@ const detail = (maxHealth = "80", edited: { was: string; step: number } | null =
   ] }],
 });
 
+const gruntDetail = (maxHealth = "60") => {
+  const d = detail(maxHealth, null);
+  const [root] = d.objects;
+  return { ...d, ...grunt, objects: [{ ...root, file_id: "101", name: grunt.name,
+    components: root.components.map((c, i) => ({ ...c, file_id: String(201 + 100 * i) })) }] };
+};
+
 let history: any;
 
 beforeEach(() => {
@@ -47,7 +54,7 @@ beforeEach(() => {
       return { root: "/p", scanned_at: 1, group_by: "category", groups: [{ name: "Enemies", count: 2 }, { name: "Projectiles", count: 1 }],
         prefabs: [brute, grunt, bullet] };
     }
-    if (p.startsWith("/sessions/s1/prefabs/detail")) return detail();
+    if (p.startsWith("/sessions/s1/prefabs/detail")) return p.endsWith(encodeURIComponent(grunt.path)) ? gruntDetail() : detail();
     if (p === "/sessions/s1/prefabs/history") return history;
     if (p === "/sessions/s1/prefabs/categories") return { categories: { Enemies: ["Assets/Game/Enemies/**"] } };
     throw new Error(`unexpected ${p}`);
@@ -59,6 +66,170 @@ async function open() {
   render(<PrefabsTab s={session} />);
   await act(async () => {});
 }
+
+async function selectPair() {
+  const list = within(screen.getByRole("region", { name: "Prefabs" }));
+  await act(async () => {
+    fireEvent.click(list.getByText("Brute"), { metaKey: true });
+    fireEvent.click(list.getByText("Grunt"), { metaKey: true });
+  });
+  return within(screen.getByRole("region", { name: "Bulk edit" }));
+}
+
+it("shows common editable values and mixed values for two Cmd-selected prefabs", async () => {
+  await open();
+  const bulk = await selectPair();
+  expect(bulk.getByRole("heading", { name: "Bulk edit · 2 prefabs" })).toBeTruthy();
+  expect(bulk.getByText("6 fields in common")).toBeTruthy();
+  expect((bulk.getByLabelText("Aggro Range") as HTMLInputElement).value).toBe("8");
+  expect((bulk.getByLabelText("Local Scale x") as HTMLInputElement).value).toBe("1");
+  const mixed = bulk.getByPlaceholderText("mixed") as HTMLInputElement;
+  expect(mixed).toBe(bulk.getByLabelText("Max Health"));
+  expect(mixed.value).toBe("");
+  expect(bulk.queryByText("Config")).toBeNull();
+  await act(async () => { fireEvent.blur(mixed); });
+  expect(post).not.toHaveBeenCalled();
+});
+
+it.each([
+  { value: "95", targets: [[brute.path, "200"], [grunt.path, "201"]] },
+  { value: "80", targets: [[grunt.path, "201"]] },
+])("batches a bulk value of $value, skipping prefabs already at that value", async ({ value, targets }) => {
+  await open();
+  const bulk = await selectPair();
+  const mockGet = get.getMockImplementation()!;
+  post.mockImplementationOnce(async () => {
+    get.mockImplementation(async (p: string) => !p.startsWith("/sessions/s1/prefabs/detail") ? mockGet(p)
+      : p.endsWith(encodeURIComponent(grunt.path)) ? gruntDetail(value) : detail(value));
+    return { ok: true, step: 2 };
+  });
+  get.mockClear();
+  const input = bulk.getByLabelText("Max Health") as HTMLInputElement;
+  input.focus();
+  fireEvent.change(input, { target: { value } });
+  await act(async () => { fireEvent.keyDown(input, { key: "Enter" }); });
+  expect(post).toHaveBeenCalledTimes(1);
+  expect(post).toHaveBeenCalledWith("/sessions/s1/prefabs/edit_many", {
+    edits: targets.map(([path, file_id]) => ({ path, file_id, key: "maxHealth", part: null, value })),
+    summary: `${targets.length} prefabs · Max Health → ${value}`,
+  });
+  expect(get).toHaveBeenCalledWith("/sessions/s1/prefabs?group_by=category");
+  expect(get).toHaveBeenCalledWith("/sessions/s1/prefabs/history");
+  for (const p of [brute, grunt]) expect(get).toHaveBeenCalledWith(`/sessions/s1/prefabs/detail?path=${encodeURIComponent(p.path)}`);
+  expect((bulk.getByLabelText("Max Health") as HTMLInputElement).value).toBe(value);
+  expect(toast).toHaveBeenCalledWith(`Set Max Health on ${targets.length} prefabs`);
+  await act(async () => { fireEvent.blur(bulk.getByLabelText("Max Health")); });
+  expect(post).toHaveBeenCalledTimes(1);
+});
+
+it("shows a rejected bulk value inline and restores the mixed input", async () => {
+  await open();
+  const bulk = await selectPair();
+  post.mockRejectedValueOnce(new ApiError(400, "Expected a finite number"));
+  const input = bulk.getByLabelText("Max Health") as HTMLInputElement;
+  fireEvent.change(input, { target: { value: "lots" } });
+  await act(async () => { fireEvent.blur(input); });
+  expect(within(input.closest("label")!).getByRole("alert").textContent).toBe("Expected a finite number");
+  expect(input.value).toBe("");
+  expect(input.placeholder).toBe("mixed");
+});
+
+it("matches child paths, same-type component indices, and individual vector parts", async () => {
+  const withChildren = (d: PrefabDetail, variant: boolean): PrefabDetail => {
+    const [root] = d.objects;
+    const transform = root.components[1];
+    const scale = transform.fields[0];
+    const baseId = variant ? 400 : 500;
+    return { ...d, objects: [{ ...root, components: [] },
+      { file_id: String(baseId), name: "Mount", parent_file_id: root.file_id, components: [] },
+      { file_id: String(baseId + 1), name: "Muzzle", parent_file_id: String(baseId), components: [
+        { ...transform, file_id: String(baseId + 2), fields: [{ ...scale, parts: variant ? { x: "1", y: "1" } : { x: "1", z: "1" } }] },
+        { ...transform, file_id: String(baseId + 3), fields: [{ ...scale, parts: { x: variant ? "2" : "3" } }] },
+      ] },
+      { file_id: String(baseId + 4), name: variant ? "Other" : "Muzzle", parent_file_id: root.file_id, components: [transform] },
+    ] };
+  };
+  const mockGet = get.getMockImplementation()!;
+  get.mockImplementation(async (p: string) => !p.startsWith("/sessions/s1/prefabs/detail") ? mockGet(p)
+    : p.endsWith(encodeURIComponent(grunt.path)) ? withChildren(gruntDetail(), false) : withChildren(detail(), true));
+  await open();
+  const bulk = await selectPair();
+  expect(bulk.getByText("2 fields in common")).toBeTruthy();
+  expect(bulk.getAllByRole("heading", { name: "Mount/Muzzle" })).toHaveLength(2);
+  const [first, second] = bulk.getAllByLabelText<HTMLInputElement>("Local Scale x");
+  expect(first.value).toBe("1");
+  expect(second.placeholder).toBe("mixed");
+  post.mockResolvedValueOnce({ ok: true, step: 2 });
+  fireEvent.change(second, { target: { value: "4" } });
+  await act(async () => { fireEvent.blur(second); });
+  expect(post).toHaveBeenCalledWith("/sessions/s1/prefabs/edit_many", {
+    edits: [[brute.path, "403"], [grunt.path, "503"]].map(([path, file_id]) => ({ path, file_id, key: "m_LocalScale", part: "x", value: "4" })),
+    summary: "2 prefabs · Local Scale x → 4",
+  });
+});
+
+it("Shift-selects a range of shown rows and clears it on Escape or plain click", async () => {
+  await open();
+  const list = within(screen.getByRole("region", { name: "Prefabs" }));
+  await act(async () => {
+    fireEvent.click(list.getByText("Brute"));
+    fireEvent.click(list.getByText("Bullet"), { shiftKey: true });
+  });
+  expect(screen.getByRole("heading", { name: "Bulk edit · 3 prefabs" })).toBeTruthy();
+  expect(list.getAllByRole("checkbox", { checked: true })).toHaveLength(3);
+  await act(async () => { fireEvent.keyDown(list.getByText("Bullet"), { key: "Escape" }); });
+  expect(screen.queryByRole("region", { name: "Bulk edit" })).toBeNull();
+  expect(list.queryAllByRole("checkbox", { checked: true })).toHaveLength(0);
+
+  await act(async () => {
+    fireEvent.change(list.getByRole("searchbox"), { target: { value: "Health" } });
+    fireEvent.click(list.getByRole("checkbox", { name: "Select Brute" }));
+    fireEvent.click(list.getByText("Grunt"), { shiftKey: true });
+  });
+  expect(screen.getByRole("heading", { name: "Bulk edit · 2 prefabs" })).toBeTruthy();
+  await act(async () => { fireEvent.click(list.getByText("Grunt")); });
+  expect(screen.getByRole("region", { name: "Inspector: Grunt" })).toBeTruthy();
+  expect(list.queryAllByRole("checkbox", { checked: true })).toHaveLength(0);
+});
+
+it("does not fetch bulk details for more than 50 selected prefabs", async () => {
+  const mockGet = get.getMockImplementation()!;
+  const prefabs = Array.from({ length: 51 }, (_, i) => ({ ...grunt, name: `Prefab ${i}`, path: `${i}.prefab` }));
+  get.mockImplementation(async (p: string) => p.startsWith("/sessions/s1/prefabs?")
+    ? { root: "/p", scanned_at: 1, group_by: "category", groups: [], prefabs } : mockGet(p));
+  await open();
+  await act(async () => { fireEvent.click(screen.getByRole("checkbox", { name: "Select Prefab 0" })); });
+  get.mockClear();
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Select all shown" })); });
+  const bulk = within(screen.getByRole("region", { name: "Bulk edit" }));
+  expect(bulk.getByRole("heading", { name: "Bulk edit · 51 prefabs" })).toBeTruthy();
+  expect(bulk.getByText("Select 50 or fewer to bulk edit")).toBeTruthy();
+  expect(get).not.toHaveBeenCalled();
+});
+
+it("loads bulk detail at most six requests at a time", async () => {
+  const mockGet = get.getMockImplementation()!;
+  const prefabs = Array.from({ length: 8 }, (_, i) => ({ ...grunt, name: `Prefab ${i}`, path: `${i}.prefab` }));
+  const pending: (() => void)[] = [];
+  get.mockImplementation(async (p: string) => {
+    if (p.startsWith("/sessions/s1/prefabs?")) return { root: "/p", scanned_at: 1, group_by: "category", groups: [], prefabs };
+    if (p.startsWith("/sessions/s1/prefabs/detail")) return new Promise((resolve) => {
+      pending.push(() => resolve({ ...detail(), path: p.split("=")[1] }));
+    });
+    return mockGet(p);
+  });
+  await open();
+  await act(async () => {
+    fireEvent.click(screen.getByText("Prefab 0"));
+    fireEvent.click(screen.getByText("Prefab 7"), { shiftKey: true });
+  });
+  expect(screen.getByRole("status").textContent).toContain("Loading prefab details");
+  expect(pending).toHaveLength(6);
+  await act(async () => { pending.splice(0, 2).forEach((resolve) => resolve()); });
+  expect(pending).toHaveLength(6);
+  await act(async () => { pending.splice(0).forEach((resolve) => resolve()); });
+  expect(screen.getByText("6 fields in common")).toBeTruthy();
+});
 
 it("lists prefabs by group and filters them", async () => {
   await open();
@@ -166,4 +337,38 @@ it("keeps big prefabs fast: children collapsed, long components capped until exp
   expect(child.getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(child);
   expect(screen.getByLabelText("Intensity")).toBeTruthy();
+});
+
+it("renders previews with Unity in the background and refreshes thumbnails when done", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    let status: any = { running: false, result: null };
+    const base = get.getMockImplementation()!;
+    get.mockImplementation(async (p: string) => (p === "/sessions/s1/prefabs/previews/status" ? status : base(p)));
+    post.mockResolvedValueOnce({ running: true, result: null });
+    await open();
+    status = { running: true, result: null };
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Render previews/ })); });
+    expect(post).toHaveBeenCalledWith("/sessions/s1/prefabs/previews", { force: false });
+    expect(screen.getByRole("button", { name: /Rendering/ })).toHaveProperty("disabled", true);
+    status = { running: true, waiting_approval: true, result: null };
+    await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
+    expect(screen.getByRole("status").textContent).toContain("Approve the Unity card in the Chat tab");
+    const scans = get.mock.calls.filter(([p]) => p.startsWith("/sessions/s1/prefabs?")).length;
+    status = { running: false, result: { status: "pass", summary: "3 previews rendered, 0 unchanged", counts: { rendered: 3 }, actions: [] } };
+    await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
+    expect(toast).toHaveBeenCalledWith("3 previews rendered, 0 unchanged", "info");
+    expect(get.mock.calls.filter(([p]) => p.startsWith("/sessions/s1/prefabs?")).length).toBe(scans + 1);
+    expect(screen.getByRole("button", { name: /Render previews/ })).toHaveProperty("disabled", false);
+
+    post.mockResolvedValueOnce({ running: true, result: null });
+    status = { running: true, result: null };
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Render previews/ }), { altKey: true }); });
+    expect(post).toHaveBeenLastCalledWith("/sessions/s1/prefabs/previews", { force: true });
+    status = { running: false, result: { status: "skipped", summary: "needs_harness: …", counts: {}, actions: ["install_harness"] } };
+    await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
+    expect(toast).toHaveBeenLastCalledWith(expect.stringContaining("install them from the Unity status chip"), "error");
+  } finally {
+    vi.useRealTimers();
+  }
 });

@@ -29,8 +29,8 @@ the result says "on a copy of the files on disk (unsaved Editor changes not incl
 
 ## Inputs
 - Project root (folder with `ProjectSettings/ProjectVersion.txt`). `<skills>` = the folder holding this skill.
-- For `import`, `build`, `menu`, `screenshot`, `compile --force`: the HarnessCli templates installed in the project (step 2;
-  `screenshot` needs `// harness-version: 3`).
+- For `import`, `build`, `menu`, `screenshot`, `previews`, `compile --force`: the HarnessCli templates installed in the project
+  (step 2; `screenshot` needs `// harness-version: 3`, `previews` version 4).
 
 ## Procedure
 1. **Pick the path.** Read `mcpforunity://instances`. If an instance shows this project, use MCP (table below) and stop here.
@@ -49,6 +49,7 @@ the result says "on a copy of the files on disk (unsaved Editor changes not incl
    $S/unity.sh menu "Tools/Rebuild Atlas"                # a menu item, then AssetDatabase.SaveAssets
    $S/unity.sh screenshot --out Logs/harness/screenshots/a.png [--scene Assets/S.unity] [--camera "Main Camera"] \
        [--cam-pos x,y,z] [--cam-rot x,y,z] [--fov 50] [--width 1920 --height 1080]   # one PNG, scene never saved
+   $S/unity.sh previews --out .gdw/prefab-previews [--size 128] [--force]   # <guid>.png per prefab, changed ones only
    $S/unity.sh exec <Ns.Class.Method> [-yourArg value ...] [--no-quit]
    ```
    Common flags (anywhere): `--project DIR`, `--timeout SEC` (defaults: compile/menu/screenshot 900, test/import/exec 1800, build 3600),

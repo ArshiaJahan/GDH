@@ -224,7 +224,7 @@ def test_detail_fields_and_hierarchy(env):
     health = result["objects"][0]["components"][1]
     assert {key: value for key, value in health.items() if key != "fields"} == {
         "file_id": "114", "type": "Health", "namespace": "Game.Enemies", "builtin": False,
-        "script_path": "Assets/Game/Enemies/Health.cs", "enabled": False,
+        "script_path": "Assets/Game/Enemies/Health.cs", "package": None, "enabled": False,
     }
     own = fields(result)
     assert own["_maxHealth"] == {
@@ -462,3 +462,20 @@ def test_session_without_unity_project(env, tmp_path):
     assert result["root"] is None
     assert result["error"] == "no Unity project in this session's folder"
     assert result["groups"] == result["prefabs"] == []
+
+
+def test_bulk_edit_of_a_base_and_its_variant_keeps_the_variant_inheriting(env):
+    client, root, url, _ = env
+    variant = asset(root, BRUTE, VARIANT, BRUTE_GUID)
+    # The variant is listed first; the base is still written first, so the variant inherits the new value.
+    body = {"edits": [change("aggressive", "1", path=BRUTE), change("aggressive", "1")], "summary": "2 prefabs · Aggressive → 1"}
+    response = client.post(url + "/edit_many", json=body)
+    assert response.status_code == 200, response.text
+    assert variant.read_bytes() == VARIANT.encode("utf-8")
+    assert fields(client.get(url + "/detail", params={"path": BRUTE}).json())["aggressive"] == {
+        **fields(client.get(url + "/detail", params={"path": BRUTE}).json())["aggressive"], "value": "1", "inherited": True}
+    step = client.get(url + "/history").json()["steps"][-1]
+    assert [(e["path"], e["before"], e["after"]) for e in step["edits"]] == [(GRUNT, "0", "1")]
+    # Setting a variant to the value it already inherits changes nothing.
+    response = client.post(url + "/edit_many", json={"edits": [change("aggressive", "true", path=BRUTE)]})
+    assert response.status_code == 400 and "Nothing to change" in response.json()["detail"]

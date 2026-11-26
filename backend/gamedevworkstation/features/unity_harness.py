@@ -41,7 +41,9 @@ PREVIOUS: dict[str, set[str]] = {
     # harness-version 1 (no marker line; before MenuItem and -buildOutput)
     "HarnessCli.cs": {"46a5acc318daed2733610213a48a510426d851241740941fea858be93ec1999f",
                       # harness-version 2 (MenuItem, -buildOutput; before Screenshot)
-                      "75c0042c3e2b1e30a9fc70e8c19607c60b4756e2be50cdc7db2a358937ac0379"},
+                      "75c0042c3e2b1e30a9fc70e8c19607c60b4756e2be50cdc7db2a358937ac0379",
+                      # harness-version 3 (Screenshot; before PrefabPreviews)
+                      "918f379ae77714537a38156f331b3064e0a84aaa7c90af1c13a6873a1432c895"},
 }
 EXCLUDE_HEADER = "# GameDevWorkstation: headless-ops harness editor scripts (local only)"
 _VERSION = re.compile(rb"\A(?:\xef\xbb\xbf)?//\s*harness-version:\s*(\d+)")

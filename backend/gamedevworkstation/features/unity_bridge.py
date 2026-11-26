@@ -103,6 +103,7 @@ OP_ROUTES: dict[str, tuple[str, ...]] = {
     "menu": ("cli_live", "raw_batch"),
     "command": ("cli_live",),
     "screenshot": ("mcp", "cli_live", "cli_batch", "raw_batch"),  # batch: unity.sh → HarnessCli.Screenshot
+    "previews": ("cli_live", "raw_batch"),  # prefab thumbnails: HarnessCli.RenderPrefabPreviews (eval) / unity.sh previews
     "play": ("cli_live",),
     # record/stop/status are live only (contract §7): they drive ReplayCommands in the open Editor.
     "record": ("mcp", "cli_live"),
@@ -128,6 +129,8 @@ REPLAY_OPS = {"record", "stop", "status", "replay", "verify", "render"}
 CLONE_OPS = {"compile", "test", "screenshot"}  # ops that may run on a copy of the project while the Editor holds it
 CLONE_ACTION_OPS = {"compile", "test"}  # the chip's use_clone action (it compiles on the copy)
 SHOT_HARNESS_VERSION = 3  # HarnessCli.Screenshot
+PREVIEWS_HARNESS_VERSION = 4  # HarnessCli.PrefabPreviews / RenderPrefabPreviews
+PREVIEWS_MENU = "Tools/GameDevWorkstation/Render Prefab Previews"
 SHOT_DIR = "Logs/harness/screenshots"  # git-ignored by Unity's default .gitignore (/[Ll]ogs/)
 HARNESS_METHOD = "Harness.Headless.HarnessCli."
 PROJECT_BACKEND_KEY = "unity.backend:"
@@ -521,6 +524,8 @@ class UnityBridge:
                 "change": "Can change the project or the open scene.",
                 "code": "Runs this C# inside the Unity Editor (full Editor access).",
                 "setup": "Changes the project setup or the Editor process."}[cls]
+        if op == "previews":
+            risk = "Renders prefab thumbnails in preview scenes; writes only .gdw/prefab-previews, Library/ and Logs/."
         md = [f"**Route:** {ROUTE_LABELS.get(route, route)}", risk]
         if detail:
             md.append(detail)
@@ -1372,6 +1377,59 @@ class UnityBridge:
                                                        label=f"Unity menu · {item} · unity.sh", cancel=cancel)
         return _raw_result("menu", code, body, res, refused, t0)
 
+    async def prefab_previews(self, session: dict, out: Path, *, size: int = 128, force: bool = False,
+                              consent: dict | None = None, cancel: asyncio.Event | None = None) -> BridgeResult:
+        """Render a <guid>.png thumbnail of every prefab under Assets/ into `out` (inside the project's .gdw/), only
+        the ones changed since their PNG unless `force`. Each prefab is instantiated in its own preview scene, so no
+        scene or asset changes. Routes: cli_live = an eval of HarnessCli.RenderPrefabPreviews (the card shows it);
+        raw_batch = unity.sh previews (Editor closed, with graphics). Both need HarnessCli version 4. With only MCP
+        live, the result names the menu item the user can run in Unity. evidence: route, counts (rendered, skipped,
+        empty, failed)."""
+        session = self.app.store.get(session["id"])
+        if session is None:
+            return BridgeResult("error", "The session no longer exists.")
+        if session.get("mode") == "plan":
+            return BridgeResult("error", "Plan only mode: rendering prefab previews is refused.")
+        st, root = await self._route(session, "previews")
+        out = Path(out).resolve()
+        if not out.is_relative_to(root / ".gdw"):
+            return BridgeResult("error", f"prefab previews must go inside {root / '.gdw'}")
+        size = max(32, min(int(size), 1024))
+        if st.mode not in ("cli_live", "raw_batch"):
+            if st.mode == "unavailable" and not st.editor_open:
+                return self._skip(st)
+            return BridgeResult("skipped", f"Prefab previews need the Unity CLI live route or the Editor closed "
+                                           f"(now {st.mode}). In Unity, run {PREVIEWS_MENU}.", st.mode,
+                                evidence={"route": st.mode, "menu": PREVIEWS_MENU, "state": st.to_dict()})
+        if nh := await self._needs_harness(root, "prefab previews (HarnessCli.PrefabPreviews)", st.mode,
+                                           min_version=PREVIEWS_HARNESS_VERSION):
+            return nh
+        detail = f"Renders prefab thumbnails into `{out.relative_to(root)}`; no scene or prefab is changed."
+        if st.mode == "cli_live":
+            code = (f"return Harness.Headless.HarnessCli.RenderPrefabPreviews({json.dumps(str(out))}, {size}, "
+                    f"{'true' if force else 'false'});")
+            r = await self.editor_command(session, "eval", {"code": code}, consent=consent, op="previews",
+                                          key="previews", code=code, label="Prefab previews · CLI live",
+                                          timeout_s=uc.cfg_int(self.cfg(), "batch_timeout_s", 30, 4 * 3600),
+                                          cancel=cancel)
+            text = r.report or ""
+        else:
+            if not self.unity_sh():
+                return BridgeResult("skipped", "headless-ops unity.sh not found", st.mode)
+            args = ["previews", "--out", str(out), "--size", str(size)] + (["--force"] if force else [])
+            code_, body, res, refused, t0 = await self._raw(session, "previews", args, consent, source="tool",
+                                                            key="previews", label="Prefab previews · unity.sh",
+                                                            detail=detail, cancel=cancel)
+            r = _raw_result("previews", code_, body, res, refused, t0)
+            text = res
+        counts = {k: int(v) for k, v in re.findall(r"\b(rendered|skipped|empty|failed)=(\d+)", text)}
+        r.evidence.update({"route": st.mode, "counts": counts, "out": str(out)})
+        if r.status == "pass" and counts:
+            r.summary = (f"{counts.get('rendered', 0)} previews rendered, {counts.get('skipped', 0)} unchanged"
+                         + (f", {counts['empty']} with nothing to show" if counts.get("empty") else "")
+                         + (f", {counts['failed']} failed" if counts.get("failed") else ""))
+        return r
+
     async def editor_command(self, session: dict, name: str, params: dict | None = None, *,
                              consent: dict | None = None, timeout_s: int | None = None, op: str = "command",
                              key: str | None = None, code: str | None = None, label: str | None = None,
@@ -2022,8 +2080,10 @@ class FakeUnityBridge(UnityBridge):
     def __init__(self, app: "AppState", *, compile: list | None = None, tests: list | None = None,
                  state: EditorState | None = None, route: str | None = None, build: list | None = None,
                  exec: list | None = None, eval: list | None = None, command: list | None = None,
-                 shots: list | None = None):
+                 shots: list | None = None, previews: list | None = None):
         super().__init__(app)
+        self._previews = list(previews or [BridgeResult("pass", "previews ok", "fake")])
+        self.preview_calls: list[dict] = []
         self._compile = list(compile or [BridgeResult("pass", "0 compile errors", "fake")])
         self._tests = list(tests or [BridgeResult("pass", "1 tests passed", "fake")])
         self._build = list(build or [BridgeResult("pass", "build succeeded", "fake")])
@@ -2081,6 +2141,11 @@ class FakeUnityBridge(UnityBridge):
                              **kw: Any) -> BridgeResult:
         self.calls.append(("command", session["id"], kw.get("consent")))
         return self._next(self._command)
+
+    async def prefab_previews(self, session: dict, out: Path, **kw: Any) -> BridgeResult:  # type: ignore[override]
+        self.calls.append(("previews", session["id"], kw.get("consent")))
+        self.preview_calls.append({"out": str(out), **{k: v for k, v in kw.items() if k != "cancel"}})
+        return self._next(self._previews)
 
     async def screenshot(self, session: dict, out: Path, **kw: Any) -> BridgeResult:  # type: ignore[override]
         self.calls.append(("screenshot", session["id"], kw.get("consent")))

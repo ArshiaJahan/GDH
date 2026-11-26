@@ -7,10 +7,15 @@ import json
 import os
 from pathlib import Path
 import re
+import struct
 
 from .unity_scene import _DOC, _field, _fid, _NUM
 
 SKIP_FOLDERS = {"Library", "Packages", "Temp"}
+PACKAGE_SKIP_FOLDERS = {"Tests", "Samples~", "Documentation~"}
+PACKAGE_FINGERPRINT_PATHS = (
+    "Packages/manifest.json", "Packages/packages-lock.json", "Library/PackageCache", "Packages",
+)
 CLASS_NAMES = {
     4: "Transform", 23: "MeshRenderer", 33: "MeshFilter", 50: "Rigidbody2D",
     54: "Rigidbody", 58: "CircleCollider2D", 61: "BoxCollider2D", 65: "BoxCollider",
@@ -211,6 +216,133 @@ def _cached(reader, path: Path):
     return reader(path, stat.st_mtime_ns, stat.st_size)
 
 
+def _meta_guid(path: Path) -> str | None:
+    meta = path.with_name(path.name + ".meta")
+    if not meta.is_symlink():
+        try:
+            return _cached(_cached_guid, meta)
+        except OSError:
+            pass
+    return None
+
+
+def _mtime(path: Path) -> int:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
+def _package_folder(name: str) -> bool:
+    return not (name.startswith(".") or name.endswith("~") or name in PACKAGE_SKIP_FOLDERS)
+
+
+def _package_dirs(parent: Path) -> list[Path]:
+    if parent.is_symlink():
+        return []
+    try:
+        return sorted(path for path in parent.iterdir()
+                      if _package_folder(path.name) and not path.is_symlink() and path.is_dir())
+    except OSError:
+        return []
+
+
+def _local_packages(packages: Path, root: Path):
+    manifest = packages / "manifest.json"
+    if packages.is_symlink() or manifest.is_symlink():
+        return
+    try:
+        data = json.loads(_read_text(manifest))
+    except (OSError, ValueError):
+        return
+    dependencies = data.get("dependencies") if isinstance(data, dict) else None
+    if not isinstance(dependencies, dict):
+        return
+    for name, value in sorted(dependencies.items()):
+        if not name or "/" in name or "\\" in name or not _package_folder(name):
+            continue
+        if not isinstance(value, str) or not value.startswith("file:") or len(value) == 5:
+            continue
+        path = packages / value[5:]
+        try:
+            if path.is_symlink() or any(parent.is_symlink() for parent in path.parents):
+                continue
+            folder = path.resolve(strict=True)
+            if folder.is_dir() and not folder.is_relative_to(root) and _package_folder(folder.name):
+                yield folder, Path("Packages") / name, name
+        except (OSError, ValueError, RuntimeError):
+            continue
+
+
+@lru_cache(maxsize=8)
+def _package_index(root: Path, fingerprint: tuple[int, ...]) -> tuple[dict[str, tuple[str, str]], dict[str, Path]]:
+    packages = root / "Packages"
+    sources = [(path, path.relative_to(root), path.name) for path in _package_dirs(packages)]
+    sources.extend(_local_packages(packages, root))
+    if not (root / "Library").is_symlink():
+        sources.extend((path, path.relative_to(root), path.name.partition("@")[0])
+                       for path in _package_dirs(root / "Library/PackageCache"))
+    scripts = {}
+    files = {}
+    for folder, display, package in sources:
+        for directory, dirs, names in os.walk(folder):
+            directory = Path(directory)
+            dirs[:] = sorted(d for d in dirs if _package_folder(d) and not (directory / d).is_symlink())
+            for name in sorted(names):
+                path = directory / name
+                if path.suffix.lower() != ".cs" or path.is_symlink() or not path.is_file():
+                    continue
+                rel = (display / path.relative_to(folder)).as_posix()
+                if rel not in files and (guid := _meta_guid(path)):
+                    scripts.setdefault(guid, (rel, package))
+                    files[rel] = path
+    return scripts, files
+
+
+def _md4(data: bytes) -> bytes:
+    """MD4 (RFC 1320): Unity's script fileID hash. hashlib often lacks it (OpenSSL 3 disables md4)."""
+    rol = lambda v, n: ((v << n) | (v >> (32 - n))) & 0xFFFFFFFF
+    msg = data + b"\x80" + b"\x00" * ((55 - len(data)) % 64) + struct.pack("<Q", len(data) * 8)
+    state = [0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476]
+    rounds = (
+        (lambda x, y, z: (x & y) | (~x & z), 0, range(16), (3, 7, 11, 19)),
+        (lambda x, y, z: (x & y) | (x & z) | (y & z), 0x5A827999, (0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15),
+         (3, 5, 9, 13)),
+        (lambda x, y, z: x ^ y ^ z, 0x6ED9EBA1, (0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15), (3, 9, 11, 15)),
+    )
+    for i in range(0, len(msg), 64):
+        words = struct.unpack("<16I", msg[i:i + 64])
+        a, b, c, d = state
+        for fn, add, order, shifts in rounds:
+            for k, shift in zip(order, shifts * 4):
+                a, b, c, d = d, rol((a + fn(b, c, d) + words[k] + add) & 0xFFFFFFFF, shift), b, c
+        state = [(x + y) & 0xFFFFFFFF for x, y in zip(state, (a, b, c, d))]
+    return struct.pack("<4I", *state)
+
+
+def script_file_id(namespace: str, name: str) -> int:
+    """The m_Script fileID Unity gives a MonoBehaviour class compiled into a DLL."""
+    return struct.unpack("<i", _md4(b"s\x00\x00\x00" + (namespace + name).encode())[:4])[0]
+
+
+# Classes that older projects reference inside DLLs (the built-in UnityEngine.UI.dll before ugui became a package,
+# TextMesh Pro's DLL): their m_Script is {fileID: <hash of namespace + name>, guid: <the DLL>}, so no .cs.meta matches.
+DLL_CLASSES = {
+    "UnityEngine.UI": "Image RawImage Text Button Toggle ToggleGroup Slider Scrollbar ScrollRect InputField Dropdown "
+                      "Mask RectMask2D CanvasScaler GraphicRaycaster Outline Shadow PositionAsUV1 ContentSizeFitter "
+                      "AspectRatioFitter HorizontalLayoutGroup VerticalLayoutGroup GridLayoutGroup LayoutElement "
+                      "Selectable",
+    "UnityEngine.EventSystems": "EventSystem StandaloneInputModule TouchInputModule EventTrigger PhysicsRaycaster "
+                                "Physics2DRaycaster",
+    "TMPro": "TextMeshPro TextMeshProUGUI TMP_InputField TMP_Dropdown TMP_SubMesh TMP_SubMeshUI TMP_SpriteAnimator",
+}
+
+
+@lru_cache(maxsize=1)
+def dll_classes() -> dict[int, tuple[str, str]]:
+    return {script_file_id(ns, name): (ns, name) for ns, names in DLL_CLASSES.items() for name in names.split()}
+
+
 def _block_kind(value: str, continuation: str) -> str | None:
     lines = [line.lstrip() for line in continuation.splitlines()
              if line.strip() and not line.lstrip().startswith("#")]
@@ -303,7 +435,7 @@ def _sequence(text: str) -> str:
 
 
 class Project:
-    """Index the safe Assets paths once for each request, sharing parsed file caches."""
+    """Index Assets per request and look up package scripts on demand."""
 
     def __init__(self, root: Path, pending: dict[Path, str] | None = None):
         self.root = root
@@ -311,6 +443,7 @@ class Project:
         self.prefabs: dict[str, str | None] = {}
         self.by_guid: dict[str, str] = {}
         self.scripts: dict[str, str] = {}
+        self._packages: tuple[dict[str, tuple[str, str]], dict[str, Path]] | None = None
         assets = root / "Assets"
         if assets.is_symlink():
             return
@@ -322,13 +455,7 @@ class Project:
                 if suffix not in {".prefab", ".cs"} or path.is_symlink() or not path.is_file():
                     continue
                 rel = path.relative_to(root).as_posix()
-                meta = path.with_name(name + ".meta")
-                guid = None
-                if not meta.is_symlink():
-                    try:
-                        guid = _cached(_cached_guid, meta)
-                    except OSError:
-                        pass
+                guid = _meta_guid(path)
                 if suffix == ".prefab":
                     self.prefabs[rel] = guid
                     if guid:
@@ -354,28 +481,42 @@ class Project:
 
     def declarations(self, script: str | None) -> dict[str, str]:
         if script:
+            path = self._packages[1].get(script) if self._packages is not None else None
             try:
-                return _cached(_script_fields, self.root / script)
+                return _cached(_script_fields, path or self.root / script)
             except (OSError, UnicodeError):
                 pass
         return {}
 
     def component(self, doc: Document) -> dict:
         mono = doc.class_id == 114
-        script = None
+        script = package = None
         namespace = ""
         if mono:
-            guid = GUID.search(_field(doc.body, "m_Script") or "")
-            script = self.scripts.get(guid[1].lower()) if guid else None
+            if match := GUID.search(_field(doc.body, "m_Script") or ""):
+                guid = match[1].lower()
+                script = self.scripts.get(guid)
+                if script is None:
+                    if self._packages is None:
+                        root = self.root.resolve()
+                        fingerprint = tuple(_mtime(root / path) for path in PACKAGE_FINGERPRINT_PATHS)
+                        self._packages = _package_index(root, fingerprint)
+                    if found := self._packages[0].get(guid):
+                        script, package = found
             identifier = token(_field(doc.body, "m_EditorClassIdentifier") or "", 0).value
             qualified = identifier.partition("::")[2]
             namespace, _, typename = qualified.rpartition(".")
+            if not script and not typename and (fid := FILE_ID.search(_field(doc.body, "m_Script") or "")):
+                namespace, typename = dll_classes().get(int(fid[1]), ("", ""))
+                if not typename and fid[1] != "0" and match:
+                    typename = "Unknown script"  # no .cs in Assets or packages has this GUID (a DLL of its own, or missing)
             typename = Path(script).stem if script else typename or qualified or "MonoBehaviour"
         else:
             typename = CLASS_NAMES.get(doc.class_id, f"Component{doc.class_id}")
         return {
             "file_id": doc.file_id, "type": typename, "namespace": namespace, "builtin": not mono,
-            "script_path": script, "enabled": (_field(doc.body, "m_Enabled") or "1").lower() not in {"0", "false"},
+            "script_path": script, "package": package,
+            "enabled": (_field(doc.body, "m_Enabled") or "1").lower() not in {"0", "false"},
         }
 
     def objects(self, prefab: Prefab) -> list[dict]:

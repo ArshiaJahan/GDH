@@ -829,9 +829,9 @@ def test_scene_reader_on_fixture(proj):
 # ------------------------------------------------------------------ the HarnessCli template
 
 
-def test_harness_v3_has_screenshot_and_v2_is_an_older_version():
+def test_harness_v3_plus_has_screenshot_and_v2_is_an_older_version():
     data = (uh.templates_dir() / "HarnessCli.cs").read_text()
-    assert uh.version_of(data.encode()) == 3
+    assert uh.version_of(data.encode()) >= 3
     assert "public static void Screenshot()" in data and "EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single)" in data
     assert "HideFlags.HideAndDontSave" in data and "EncodeToPNG" in data and "ReadPixels" in data
     assert "SaveScene" not in data and "MarkSceneDirty" not in data

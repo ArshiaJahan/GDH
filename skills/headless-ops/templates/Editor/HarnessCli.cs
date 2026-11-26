@@ -1,4 +1,4 @@
-// harness-version: 3
+// harness-version: 4
 // Harness.Headless: batchmode entry points for headless-ops/scripts/unity.sh (Unity 6000.3).
 // (Keep the version line first: GameDevWorkstation reads it to offer upgrades. Edited copies are never overwritten.)
 //   -executeMethod Harness.Headless.HarnessCli.Compile      [-forceRecompile]
@@ -10,6 +10,10 @@
 //   -executeMethod Harness.Headless.HarnessCli.Screenshot   -out <png> [-scene Assets/...unity] [-camera <name>]
 //                                                           [-camPos x,y,z] [-camRot x,y,z] [-camFov f] [-width 1920 -height 1080]
 //                                                           (needs a graphics device: never pass -nographics; never saves the scene)
+//   -executeMethod Harness.Headless.HarnessCli.PrefabPreviews -out <folder> [-size 128] [-force]
+//                                                           one <guid>.png per prefab under Assets/ (only changed ones unless
+//                                                           -force), rendered in a preview scene: nothing in the project changes.
+//                                                           Also the menu Tools/GameDevWorkstation/Render Prefab Previews.
 // Every entry point ends with a deferred EditorApplication.Exit(code): 0 ok, 1 failed, 2 bad arguments/setup.
 // Run them WITHOUT -quit (see Exit). Called from an interactive editor (MCP execute_code) they log but never exit.
 // Progress lines are logged as "[HARNESS] ..." so unity.sh can grep them from the -logFile.
@@ -474,6 +478,211 @@ namespace Harness.Headless
         {
             var ci = System.Globalization.CultureInfo.InvariantCulture;
             return v.x.ToString("0.###", ci) + "," + v.y.ToString("0.###", ci) + "," + v.z.ToString("0.###", ci);
+        }
+
+        // ------------------------------------------------------------------ Prefab previews
+
+        public const string PreviewsMenu = "Tools/GameDevWorkstation/Render Prefab Previews";
+
+        /// <summary>Batch entry: -out folder [-size 128] [-force]. Logs "PREVIEWS OK ..." and exits.</summary>
+        public static void PrefabPreviews()
+        {
+            string outArg = HarnessArgs.Get("out");
+            if (string.IsNullOrEmpty(outArg))
+            {
+                Say("PREVIEWS FAIL missing -out <folder>");
+                Exit(2);
+                return;
+            }
+            int code = 1;
+            try
+            {
+                Say(RenderPrefabPreviews(outArg, HarnessArgs.GetInt("size", 128), HarnessArgs.Has("force")));
+                code = 0;
+            }
+            catch (Exception e)
+            {
+                Say("PREVIEWS FAIL exception " + FirstLine(e.Message));
+            }
+            finally
+            {
+                Exit(code);
+            }
+        }
+
+        [MenuItem(PreviewsMenu)]
+        static void PrefabPreviewsMenu()
+        {
+            string folder = Path.Combine(Path.GetDirectoryName(Application.dataPath), ".gdw", "prefab-previews");
+            Say(RenderPrefabPreviews(folder, 128, false));
+        }
+
+        /// <summary>
+        /// Renders every prefab under Assets/ to outDir/&lt;guid&gt;.png (transparent background, size x size). Skips a
+        /// prefab whose PNG is newer than the .prefab unless force. Each prefab is instantiated in its own preview scene,
+        /// so the open scenes and the prefab assets are never touched. Safe in batchmode and in an open editor.
+        /// </summary>
+        public static string RenderPrefabPreviews(string outDir, int size, bool force)
+        {
+            size = Mathf.Clamp(size, 32, 1024);
+            outDir = Path.GetFullPath(outDir);
+            Directory.CreateDirectory(outDir);
+            int rendered = 0, skipped = 0, empty = 0, failed = 0;
+            var rt = new RenderTexture(size, size, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB) { antiAliasing = 4 };
+            rt.Create();
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            var prevActive = RenderTexture.active;
+            try
+            {
+                string[] guids = AssetDatabase.FindAssets("t:Prefab", new[] { "Assets" });
+                for (int i = 0; i < guids.Length; i++)
+                {
+                    string path = AssetDatabase.GUIDToAssetPath(guids[i]);
+                    if (!path.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase)) continue;
+                    string file = Path.Combine(outDir, guids[i] + ".png");
+                    if (!force && File.Exists(file) && File.GetLastWriteTimeUtc(file) >= File.GetLastWriteTimeUtc(path))
+                    {
+                        skipped++;
+                        continue;
+                    }
+                    if (Application.isBatchMode && i % 25 == 0) Say("PREVIEWS progress " + i + "/" + guids.Length);
+                    try
+                    {
+                        if (RenderPrefab(path, rt, tex, size))
+                        {
+                            File.WriteAllBytes(file, tex.EncodeToPNG());
+                            rendered++;
+                        }
+                        else
+                        {
+                            empty++;  // nothing visible (no renderers and no UI)
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        failed++;
+                        Say("PREVIEWS note " + path + ": " + FirstLine(e.Message));
+                    }
+                }
+            }
+            finally
+            {
+                RenderTexture.active = prevActive;
+                UnityEngine.Object.DestroyImmediate(tex);
+                rt.Release();
+                UnityEngine.Object.DestroyImmediate(rt);
+            }
+            return "PREVIEWS OK rendered=" + rendered + " skipped=" + skipped + " empty=" + empty + " failed=" + failed
+                + " size=" + size + " out=" + outDir;
+        }
+
+        static bool RenderPrefab(string path, RenderTexture rt, Texture2D tex, int size)
+        {
+            var asset = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+            if (asset == null) return false;
+            var scene = EditorSceneManager.NewPreviewScene();
+            try
+            {
+                var inst = PrefabUtility.InstantiatePrefab(asset, scene) as GameObject;
+                if (inst == null) return false;
+                bool ui = inst.GetComponent<RectTransform>() != null && inst.GetComponentInChildren<Renderer>(true) == null;
+                var camGo = new GameObject("GDW Preview Camera", typeof(Camera));
+                UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(camGo, scene);
+                var cam = camGo.GetComponent<Camera>();
+                cam.enabled = false;
+                cam.scene = scene;
+                cam.clearFlags = CameraClearFlags.SolidColor;
+                cam.backgroundColor = new Color(0f, 0f, 0f, 0f);
+                var lightGo = new GameObject("GDW Preview Light", typeof(Light));
+                UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(lightGo, scene);
+                var light = lightGo.GetComponent<Light>();
+                light.type = LightType.Directional;
+                light.intensity = 1.2f;
+                lightGo.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
+
+                Bounds bounds;
+                bool flat;
+                if (ui)
+                {
+                    var canvasGo = new GameObject("GDW Preview Canvas", typeof(Canvas));
+                    UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(canvasGo, scene);
+                    var canvas = canvasGo.GetComponent<Canvas>();
+                    canvas.renderMode = RenderMode.WorldSpace;
+                    canvas.worldCamera = cam;
+                    inst.transform.SetParent(canvasGo.transform, false);
+                    Canvas.ForceUpdateCanvases();
+                    if (!UiBounds(inst, out bounds)) return false;
+                    flat = true;
+                }
+                else
+                {
+                    if (!RendererBounds(inst, out bounds, out flat)) return false;
+                }
+                Frame(cam, bounds, flat);
+                RenderCamera(cam, rt);
+                RenderTexture.active = rt;
+                tex.ReadPixels(new Rect(0, 0, size, size), 0, 0);
+                tex.Apply();
+                return true;
+            }
+            finally
+            {
+                EditorSceneManager.ClosePreviewScene(scene);
+            }
+        }
+
+        static bool RendererBounds(GameObject root, out Bounds bounds, out bool flat)
+        {
+            bounds = default;
+            flat = true;
+            bool any = false;
+            foreach (var r in root.GetComponentsInChildren<Renderer>())
+            {
+                if (!r.enabled || r is ParticleSystemRenderer || r is TrailRenderer || r is LineRenderer) continue;
+                if (!(r is SpriteRenderer) && !r.GetType().Name.StartsWith("Tilemap", StringComparison.Ordinal)) flat = false;
+                if (any) bounds.Encapsulate(r.bounds);
+                else { bounds = r.bounds; any = true; }
+            }
+            return any && bounds.size.sqrMagnitude > 1e-8f;
+        }
+
+        static bool UiBounds(GameObject root, out Bounds bounds)
+        {
+            bounds = default;
+            bool any = false;
+            var corners = new Vector3[4];
+            foreach (var rt in root.GetComponentsInChildren<RectTransform>())
+            {
+                rt.GetWorldCorners(corners);
+                foreach (var c in corners)
+                {
+                    if (any) bounds.Encapsulate(c);
+                    else { bounds = new Bounds(c, Vector3.zero); any = true; }
+                }
+            }
+            return any && bounds.size.x * bounds.size.y > 1e-8f;
+        }
+
+        /// <summary>Fits the bounds into a square view: orthographic and straight on for 2D, a 3/4 view otherwise.</summary>
+        static void Frame(Camera cam, Bounds b, bool flat)
+        {
+            float radius = Mathf.Max(b.extents.magnitude, 0.001f);
+            if (flat)
+            {
+                cam.orthographic = true;
+                cam.orthographicSize = Mathf.Max(b.extents.x, b.extents.y, 0.001f) * 1.08f;
+                cam.transform.SetPositionAndRotation(b.center - Vector3.forward * (radius * 4f + 1f), Quaternion.identity);
+            }
+            else
+            {
+                cam.orthographic = false;
+                cam.fieldOfView = 30f;
+                var rot = Quaternion.Euler(20f, -30f, 0f);
+                float distance = radius / Mathf.Sin(cam.fieldOfView * 0.5f * Mathf.Deg2Rad) * 1.05f;
+                cam.transform.SetPositionAndRotation(b.center - rot * Vector3.forward * distance, rot);
+            }
+            cam.nearClipPlane = Mathf.Max(0.001f, radius * 0.01f);
+            cam.farClipPlane = radius * 10f + 10f;
         }
 
         // ------------------------------------------------------------------ Build

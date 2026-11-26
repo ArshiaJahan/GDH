@@ -1,6 +1,7 @@
 """Session routes for the Unity Prefabs tab."""
 from __future__ import annotations
 
+import asyncio
 from collections import Counter, deque
 from fnmatch import fnmatchcase
 from functools import lru_cache
@@ -45,6 +46,11 @@ class Batch(BaseModel):
 
 class Move(BaseModel):
     force: bool = False
+
+
+class Render(BaseModel):
+    force: bool = False
+    size: int = Field(128, ge=32, le=1024)
 
 
 def _root(folder: str | None) -> Path | None:
@@ -140,6 +146,8 @@ def register(app_: FastAPI, api: APIRouter, S: AppState) -> None:
 
     lock = Lock()
 
+    renders: dict[str, dict] = {}  # project root -> {running, started_at, finished_at, result}
+
     def session_root(sid: str) -> Path | None:
         session = S.store.get(sid)
         if not session:
@@ -209,6 +217,45 @@ def register(app_: FastAPI, api: APIRouter, S: AppState) -> None:
     def history(sid: str) -> dict:
         with lock:
             return prefab_edit.public_history(prefab_edit.load_history(need_root(sid)))
+
+    @api.post(PREFIX + "/previews")
+    async def render_previews(sid: str, body: Render) -> dict:
+        """Render prefab thumbnails with Unity in the background (an approval card asks first); poll /previews/status."""
+        from .unity_bridge import get_bridge
+
+        root = need_root(sid)
+        session = S.store.get(sid)
+        if Path(session["folder"]).expanduser().resolve() != root:
+            raise HTTPException(400, f"Rendering previews needs a session opened in the Unity project folder ({root})")
+        key = str(root)
+        if (job := renders.get(key)) and job["running"]:
+            return {k: v for k, v in job.items() if k != "task"}
+        job = renders[key] = {"running": True, "started_at": time.time(), "finished_at": None, "result": None}
+
+        async def run() -> None:
+            try:
+                r = await get_bridge(S).prefab_previews(session, prefab_edit.metadata_path(root, "prefab-previews"),
+                                                        size=body.size, force=body.force)
+                job["result"] = {"status": r.status, "summary": r.summary, "route": r.mode,
+                                 "counts": r.evidence.get("counts") or {}, "actions": r.evidence.get("actions") or [],
+                                 "menu": r.evidence.get("menu")}
+            except Exception as e:  # noqa: BLE001 - reported to the tab, never raised into the event loop
+                job["result"] = {"status": "error", "summary": str(e)[:500], "counts": {}, "actions": []}
+            finally:
+                job["running"], job["finished_at"] = False, time.time()
+
+        job["task"] = asyncio.create_task(run())
+        return {k: v for k, v in job.items() if k != "task"}
+
+    @api.get(PREFIX + "/previews/status")
+    def previews_status(sid: str) -> dict:
+        job = renders.get(str(need_root(sid)))
+        if not job:
+            return {"running": False, "result": None}
+        # The Unity approval card shows in the Chat tab; the Prefabs tab says so while it waits.
+        waiting = job["running"] and any(a.get("kind") == "unity" and (a.get("payload") or {}).get("op") == "previews"
+                                         for a in S.approvals.pending(sid))
+        return {**{k: v for k, v in job.items() if k != "task"}, "waiting_approval": waiting}
 
     @api.get(PREFIX + "/preview")
     def preview(sid: str, path: str) -> FileResponse:

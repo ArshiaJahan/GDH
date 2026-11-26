@@ -27,6 +27,11 @@ commands
                                           default scene = first enabled build scene; a temporary camera unless
                                           --camera names one (and no --cam-pos/--cam-rot); the scene is never saved.
                                           Always runs WITH graphics (never -nographics). Needs HarnessCli version 3.
+  previews --out DIR [--size 128] [--force]
+                                          render a <guid>.png thumbnail of every prefab under Assets/ into DIR
+                                          (HarnessCli.PrefabPreviews; only prefabs changed since their PNG unless
+                                          --force; preview scenes only, the project is not changed). Always WITH
+                                          graphics. Needs HarnessCli version 4.
   exec <Ns.Class.Method> [unity args...] [--no-quit]
                                           run a static editor method with -quit; extra args go to Unity verbatim.
                                           --no-quit for methods that end with a deferred EditorApplication.Exit
@@ -35,7 +40,7 @@ commands
 
 common flags (anywhere before a literal --)
   --project DIR      Unity project root (default: $UNITY_PROJECT, else walk up from the current directory)
-  --timeout SEC      watchdog; default compile 900, import 1800, test 1800, build 3600, exec 1800, menu 900, screenshot 900
+  --timeout SEC      watchdog; default compile 900, import 1800, test 1800, build 3600, exec 1800, menu 900, screenshot 900, previews 1800
   --log FILE         Unity log file (default <project>/Logs/harness/<command>-<timestamp>.log)
   --unity PATH       editor binary (default: $UNITY_PATH, else from ProjectSettings/ProjectVersion.txt)
   --accept-apiupdate pass -accept-apiupdate (lets the API updater rewrite obsolete API in your scripts)
@@ -74,7 +79,7 @@ CMD="${POS[0]}"
 ARGS=("${POS[@]:1}")
 
 case "$CMD" in
-  compile|test|import|build|exec|menu|screenshot) ;;
+  compile|test|import|build|exec|menu|screenshot|previews) ;;
   *) echo "unknown command: $CMD" >&2; usage >&2; result 3 FAIL "usage unknown command $CMD" ;;
 esac
 
@@ -378,6 +383,34 @@ screenshot)
   [ -n "$LINE" ] && [ -s "$OUT" ] || result 1 FAIL "screenshot did not report SHOT OK or wrote no file (log $LOG)"
   echo "ARTIFACT: $OUT"
   result 0 OK "screenshot $LINE (log $LOG)"
+  ;;
+
+previews)
+  : "${TIMEOUT:=1800}"
+  need_harness_cli
+  grep -rqs --include='HarnessCli.cs' 'public static void PrefabPreviews()' "$ROOT/Assets" "$ROOT/Packages" 2>/dev/null \
+    || result 3 FAIL "setup HarnessCli.cs has no PrefabPreviews entry point (harness-version 4): update Assets/Harness/Headless/Editor"
+  OUT=""; P=(-executeMethod Harness.Headless.HarnessCli.PrefabPreviews)
+  set -- ${ARGS[@]+"${ARGS[@]}"}
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --out) OUT="${2:?--out needs a value}"; shift 2 ;;
+      --size) case "${2:-}" in ''|*[!0-9]*) result 3 FAIL "usage previews: --size needs a number" ;; esac
+              P+=(-size "$2"); shift 2 ;;
+      --force) P+=(-force); shift ;;
+      *) result 3 FAIL "usage previews: unknown arg $1" ;;
+    esac
+  done
+  [ -n "$OUT" ] || result 3 FAIL "usage previews --out DIR"
+  case "$OUT" in /*) ;; *) OUT="$PWD/$OUT" ;; esac
+  mkdir -p "$OUT"
+  P+=(-out "$OUT")
+  # Rendering needs a graphics device: no -nographics. No -quit (deferred Exit).
+  run_unity "$TIMEOUT" ${API[@]+"${API[@]}"} "${P[@]}"
+  finish_generic previews
+  LINE="$(grep -F '[HARNESS] PREVIEWS OK' "$LOG" 2>/dev/null | tail -1 | sed 's/^.*\[HARNESS\] PREVIEWS OK //' || true)"
+  [ -n "$LINE" ] || result 1 FAIL "previews did not report PREVIEWS OK (log $LOG)"
+  result 0 OK "previews $LINE (log $LOG)"
   ;;
 
 exec)
