@@ -1,22 +1,24 @@
-"""Gallery: the media a session produced (images, videos, audio), newest first, plus Unity screenshot requests.
+"""Gallery: a session's images, videos, audio and Unity screenshot requests, newest first.
 
 Sources of entries (GET /api/gallery?session_id=):
 - indexed items of kind `media` for the session (items.py): files the agent or its tools wrote
   (features/items_routes.py), commands that announced `TRAILER_OUTPUT:` / `ARTIFACT:` lines (features/media_out.py)
-  and tool results. User attachments (source `user`) are left out: this is what the session *generated*.
+  and tool results, plus user attachments (source `user`).
 - screenshot requests (POST /api/gallery/screenshot), kept in the `kv` table under `gallery:<session_id>` as a small
   JSON object {entry_id: entry}. Pending and failed entries live only there; a finished one points at its item.
+- media found in default capture folders and folders imported via /api/gallery/folders. Imports are a JSON list
+  in `kv` under `gallery_folders:<session_id>`. Indexed items take precedence over these files.
 
 Entry: {id, kind: image|video|audio, path, url, title, prompt?, created_at, source, status, reason?}.
 `url` is a path relative to the backend (`/api/gallery/file/<item id>?session_id=<sid>`); the UI adds the origin and token.
 `status` is `done` for ordinary media, and `pending` / `failed` / `done` for screenshot requests.
-`source` is the item's source (`agent`, `tool`, ...) or `screenshot`.
+`source` is the item's source (`agent`, `tool`, `user`, ...), `screenshot`, or `folder` (with its scan root in `folder`).
 
-Files are served only through GET /api/gallery/file/<id>?session_id=: <id> must be a live media item of that
-session (never a free path), and the file must still be at the path that was indexed.
+GET /api/gallery/file/<id>?session_id= serves live media items. /api/gallery/folder-file/<id>?session_id=
+looks up scan IDs and serves regular files within the session's gallery folders.
 
 Event: `gallery.updated` {session_id, id, status, reason?} (session-scoped, persisted) whenever media for a
-session is indexed (an item is added) or a screenshot entry changes state.
+session is indexed, a screenshot entry changes state, or the set of imported folders changes.
 
 Screenshot (request_screenshot): the prompt goes to a short side agent tied to the session.
 - Before any model call: the folder must be a Unity project and the session not in Plan only mode; the route comes
@@ -37,13 +39,21 @@ Screenshot (request_screenshot): the prompt goes to a short side agent tied to t
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import heapq
 import json
 import logging
 import mimetypes
+import os
 import re
+import stat
+import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from threading import Lock
+from typing import TYPE_CHECKING, Any, Iterator, Literal
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Body, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -654,22 +664,142 @@ def _item_entry(it: dict, extra: dict | None = None) -> dict:
     return e
 
 
-def list_gallery(app: "AppState", session_id: str, limit: int = 200, kinds: set[str] | None = None) -> list[dict]:
+GallerySource = Literal["generated", "folders", "user"]
+DEFAULT_FOLDERS = (SHOT_DIR, "Logs/harness/replay", "Recordings", "Screenshots", "Captures", "Assets/Screenshots")
+SKIP_DIRS = {"Library", "Temp", "node_modules"}
+MEDIA_KINDS = {f".{ext}": kind for kind, extensions in (
+    ("image", "png jpg jpeg gif webp bmp"), ("video", "mp4 mov webm m4v"), ("audio", "wav mp3 ogg m4a flac"),
+) for ext in extensions.split()}
+MAX_FOLDERS = 20
+MAX_FOLDER_FILES = 4000
+SCAN_TTL = 10
+_scan_cache: OrderedDict[Path, tuple[int, float, dict[str, tuple[Path, float]]]] = OrderedDict()
+_scan_lock = Lock()
+
+
+def _folder_key(sid: str) -> str:
+    return f"gallery_folders:{sid}"
+
+
+def _imported_folders(app: "AppState", sid: str) -> list[str]:
+    stored = app.db.kv_get(_folder_key(sid), [])
+    return [path for path in stored if isinstance(path, str)] if isinstance(stored, list) else []
+
+
+def _visible_dir(name: str) -> bool:
+    return not name.startswith(".") and name not in SKIP_DIRS
+
+
+def _resolve(path: Path, *, strict: bool = True) -> Path | None:
+    try:
+        return path.resolve(strict=strict)
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
+def _default_folders(session: dict) -> list[Path]:
+    if not session.get("folder"):
+        return []
+    root = _resolve(Path(session["folder"]).expanduser())
+    if root is None:
+        return []
+    roots = [root]
+    try:
+        if not is_unity_project(root):
+            with os.scandir(root) as children:
+                roots.extend(Path(child.path) for child in children if _visible_dir(child.name)
+                             and child.is_dir(follow_symlinks=False) and is_unity_project(child.path))
+    except OSError:
+        pass
+    return [folder for project in roots for rel in DEFAULT_FOLDERS
+            if (folder := project / rel).is_dir() and _resolve(folder) == folder]
+
+
+def _media_files(folder: Path, depth: int = 0) -> Iterator[tuple[Path, float]]:
+    try:
+        with os.scandir(folder) as entries:
+            for entry in entries:
+                if entry.name.startswith("."):
+                    continue
+                try:
+                    if depth < 6 and _visible_dir(entry.name) and entry.is_dir(follow_symlinks=False):
+                        yield from _media_files(Path(entry.path), depth + 1)
+                    elif Path(entry.name).suffix.lower() in MEDIA_KINDS:
+                        info = entry.stat(follow_symlinks=False)
+                        if stat.S_ISREG(info.st_mode):
+                            yield Path(entry.path), info.st_mtime
+                except OSError:
+                    continue
+    except OSError:
+        return
+
+
+def _scan_folder(folder: Path, *, refresh: bool = False) -> dict[str, tuple[Path, float]] | None:
+    try:
+        info = folder.lstat()
+        if not stat.S_ISDIR(info.st_mode) or _resolve(folder) != folder:
+            return None
+    except OSError:
+        return None
+    with _scan_lock:
+        cached = _scan_cache.get(folder)
+        if not refresh and cached and cached[0] == info.st_mtime_ns and time.monotonic() < cached[1]:
+            _scan_cache.move_to_end(folder)
+            return cached[2]
+    files = heapq.nlargest(MAX_FOLDER_FILES, _media_files(folder), key=lambda file: (file[1], file[0]))
+    found = {"f_" + hashlib.sha1(os.fsencode(path)).hexdigest()[:16]: (path, mtime) for path, mtime in files}
+    with _scan_lock:
+        _scan_cache[folder] = (info.st_mtime_ns, time.monotonic() + SCAN_TTL, found)
+        _scan_cache.move_to_end(folder)
+        if len(_scan_cache) > 128:
+            _scan_cache.popitem(last=False)
+    return found
+
+
+def _gallery_folders(app: "AppState", session: dict) -> dict[str, list[Path]]:
+    return {"default": _default_folders(session),
+            "imported": [Path(path) for path in _imported_folders(app, session["id"])]}
+
+
+def _folder_entries(app: "AppState", session: dict, kinds: set[str], refresh: bool) -> list[dict]:
+    query = urlencode({"session_id": session["id"]})
+    out = {}
+    for folder in dict.fromkeys(p for paths in _gallery_folders(app, session).values() for p in paths):
+        for fid, (path, mtime) in (_scan_folder(folder, refresh=refresh) or {}).items():
+            kind = MEDIA_KINDS[path.suffix.lower()]
+            if kind in kinds and fid not in out:
+                out[fid] = {"id": fid, "kind": kind, "path": str(path), "title": path.name, "created_at": mtime,
+                            "url": f"/api/gallery/folder-file/{fid}?{query}", "source": "folder", "folder": str(folder),
+                            "status": "done"}
+    return list(out.values())
+
+
+def list_gallery(app: "AppState", session_id: str, limit: int = 200, kinds: set[str] | None = None,
+                 source: GallerySource | None = None, *, refresh: bool = False) -> list[dict]:
     kinds = kinds or {"image", "video", "audio"}
-    rows = app.db.all("SELECT id FROM items WHERE session_id=? AND kind='media' AND deleted=0 AND source != 'user' "
-                      "ORDER BY created_at DESC LIMIT ?", [session_id, MAX_LIMIT * 2])
-    entries = _load(app, session_id)
+    session = app.store.get(session_id)
+    folders = _folder_entries(app, session, kinds, refresh) if session and (refresh or source in (None, "folders")) else []
+    rows = app.db.all("SELECT id, path, source FROM items WHERE session_id=? AND kind='media' AND deleted=0 "
+                      "ORDER BY created_at DESC", [session_id])
+    entries = _load(app, session_id) if source in (None, "generated") else {}
     by_item = {e["item_id"]: e for e in entries.values() if e.get("item_id")}
     out: list[dict] = []
     for r in rows:
+        if source == "folders" or (source is not None and (source == "user") != (r["source"] == "user")):
+            continue
         it = app.items.get(r["id"])
         if not it:
             continue
         linked = by_item.get(it["id"])
-        out.append(_item_entry(it, {"id": linked["id"], "prompt": linked.get("prompt"), "item_id": it["id"],
-                                    **({"meta": linked["meta"]} if linked.get("meta") else {})} if linked else None))
+        item = _item_entry(it, {"id": linked["id"], "prompt": linked.get("prompt"), "item_id": it["id"],
+                                **({"meta": linked["meta"]} if linked.get("meta") else {})} if linked else None)
+        if item["kind"] in kinds:
+            out.append(item)
+            if len(out) >= limit:
+                break
+    linked_items = {o.get("item_id") for o in out}
     for e in entries.values():
-        if e.get("item_id") and e["item_id"] in {o.get("item_id") for o in out}:
+        if "image" not in kinds or (e.get("item_id") and e["item_id"] in linked_items):
             continue
         if e["status"] == "done" and e.get("item_id"):
             continue  # its item was deleted
@@ -678,7 +808,9 @@ def list_gallery(app: "AppState", session_id: str, limit: int = 200, kinds: set[
                     "status": e["status"], **({"reason": e["reason"]} if e.get("reason") else {}),
                     **({"meta": e["meta"]} if e.get("meta") else {}),
                     **({"actions": e["actions"]} if e.get("actions") else {})})
-    out = [o for o in out if o["kind"] in kinds]
+    if folders and source in (None, "folders"):
+        indexed = {str(p) for r in rows if r["path"] and (p := _resolve(Path(r["path"]), strict=False)) is not None}
+        out.extend(e for e in folders if e["path"] not in indexed)
     out.sort(key=lambda o: o["created_at"], reverse=True)
     return out[:limit]
 
@@ -692,7 +824,7 @@ def _hook_item_events(app: "AppState") -> None:
     def add(*a: Any, **kw: Any):
         iid = orig(*a, **kw)
         try:
-            if iid and kw.get("kind") == "media" and kw.get("session_id") and kw.get("source") != "user":
+            if iid and kw.get("kind") == "media" and kw.get("session_id"):
                 _publish(app, kw["session_id"], iid, "done")
         except Exception:  # noqa: BLE001  (never break indexing)
             log.info("gallery: couldn't publish", exc_info=True)
@@ -713,10 +845,70 @@ def register(app_: FastAPI, api: APIRouter, S: "AppState") -> None:
         return s
 
     @api.get("/gallery")
-    async def gallery(session_id: str, limit: int = Query(200, ge=1, le=MAX_LIMIT), kinds: str | None = None) -> list[dict]:
+    async def gallery(session_id: str, limit: int = Query(200, ge=1, le=MAX_LIMIT), kinds: str | None = None,
+                      source: GallerySource | None = None, refresh: bool = False) -> list[dict]:
         need_session(session_id)
         ks = {k for k in (kinds or "").split(",") if k in ("image", "video", "audio")} or None
-        return list_gallery(S, session_id, limit, ks)
+        return await asyncio.to_thread(list_gallery, S, session_id, limit, ks, source, refresh=refresh)
+
+    @api.get("/gallery/folders")
+    def gallery_folders(session_id: str) -> dict:
+        session = need_session(session_id)
+        return {source: [
+            {"path": str(folder), "exists": scan is not None, "count": len(scan or {})}
+            for folder in folders for scan in [_scan_folder(folder)]
+        ] for source, folders in _gallery_folders(S, session).items()}
+
+    @api.post("/gallery/folders")
+    async def add_gallery_folder(body: dict = Body(...)) -> dict:
+        sid = need_session(str(body.get("session_id") or ""))["id"]
+        raw = body.get("path")
+        try:
+            path = Path(raw).expanduser() if isinstance(raw, str) else Path()
+            if not path.is_absolute():
+                raise HTTPException(400, "Use an absolute folder path")
+            if path.is_symlink():
+                raise HTTPException(400, "Choose a folder that is not a symlink")
+            folder = _resolve(path)
+            if folder is None or not folder.is_dir():
+                raise HTTPException(400, "Choose an existing directory")
+            if folder == Path(folder.anchor) or folder == Path.home().resolve():
+                raise HTTPException(400, "Choose a folder other than the filesystem root or your home directory")
+        except (OSError, RuntimeError, ValueError):
+            raise HTTPException(400, "Choose an existing directory") from None
+        folders = _imported_folders(S, sid)
+        canonical = str(folder)
+        if canonical not in folders:
+            if len(folders) >= MAX_FOLDERS:
+                raise HTTPException(400, f"Up to {MAX_FOLDERS} folders can be imported per session")
+            S.db.kv_set(_folder_key(sid), [*folders, canonical])
+            _publish(S, sid, canonical, "added")
+        return {"path": canonical}
+
+    @api.delete("/gallery/folders")
+    async def remove_gallery_folder(session_id: str, path: str) -> dict:
+        need_session(session_id)
+        folders = _imported_folders(S, session_id)
+        if path not in folders:
+            raise HTTPException(404, "Folder is not imported in this session")
+        S.db.kv_set(_folder_key(session_id), [folder for folder in folders if folder != path])
+        _publish(S, session_id, path, "removed")
+        return {"path": path}
+
+    @api.get("/gallery/folder-file/{fid}")
+    def gallery_folder_file(fid: str, session_id: str) -> FileResponse:
+        from ..server import file_headers
+
+        session = need_session(session_id)
+        for paths in _gallery_folders(S, session).values():
+            for folder in paths:
+                file = (_scan_folder(folder) or {}).get(fid)
+                if file is None:
+                    continue
+                path = file[0]
+                if path.is_relative_to(folder) and _resolve(path) == path and path.is_file():
+                    return FileResponse(path, headers=file_headers(path), filename=path.name, content_disposition_type="inline")
+        raise HTTPException(404, "Gallery media file not found in this session")
 
     @api.get("/gallery/file/{item_id}")
     async def gallery_file(item_id: str, session_id: str) -> FileResponse:

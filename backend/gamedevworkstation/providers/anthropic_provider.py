@@ -44,6 +44,7 @@ if TYPE_CHECKING:
 
 TEXTLIKE = ("text/", "application/json", "application/xml", "application/x-yaml", "application/toml",
             "application/javascript", "application/x-sh", "application/sql")
+NONSTREAMING_MAX_TOKENS = 16_000  # above this complete() streams (the SDK's 10-minute limit is ~21,333 tokens)
 STOP_MAP = {"end_turn": "end_turn", "tool_use": "tool_use", "max_tokens": "max_tokens",
             "stop_sequence": "stop_sequence", "refusal": "refusal", "pause_turn": "pause_turn",
             "model_context_window_exceeded": "context_window"}
@@ -292,11 +293,19 @@ class AnthropicProvider(ChatProvider):
                        session_id=req.metadata.get("session_id"), run_id=req.metadata.get("run_id")) as span:
             t0 = time.monotonic()
             try:
-                raw = await self.client.messages.with_raw_response.create(**params)
-                msg = await raw.parse()
+                if params["max_tokens"] > NONSTREAMING_MAX_TOKENS:
+                    # The SDK refuses a non-streaming request that may run past 10 minutes (about 21k output
+                    # tokens), so a large one streams and only the final message is used.
+                    async with self.client.messages.stream(**params) as s:
+                        msg = await s.get_final_message()
+                        headers = getattr(getattr(s, "response", None), "headers", None)
+                else:
+                    raw = await self.client.messages.with_raw_response.create(**params)
+                    msg = await raw.parse()
+                    headers = raw.headers
             except Exception as e:  # noqa: BLE001
                 raise _wrap_error(e) from e
-            resp = response_from_wire(msg, m, int((time.monotonic() - t0) * 1000), raw.headers)
+            resp = response_from_wire(msg, m, int((time.monotonic() - t0) * 1000), headers)
             chat_result(span, model=msg.model, finish=resp.stop_reason,
                         usage=resp.usage if msg.usage is not None else None)
             return resp

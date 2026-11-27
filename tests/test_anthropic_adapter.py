@@ -103,6 +103,18 @@ async def test_complete_parses_tool_use_usage_cost_and_rate_limits(cfg):
     assert r.rate_limits.requests_remaining == 3999 and r.rate_limits.reset == "2026-11-05T22:40:00Z"
 
 
+async def test_complete_streams_large_requests(cfg):
+    """A non-streaming request with max_tokens above ~21k is refused by the SDK ("Streaming is required for
+    operations that may take longer than 10 minutes"); complete() streams those and returns the final message."""
+    text = (FIXTURES / "anthropic/stream_text.sse").read_text(encoding="utf-8")
+    api = MockAPI().add("POST", "/v1/messages", sse(text))
+    r = await provider(cfg, api).complete(ChatRequest(model="claude-sonnet-5-5", messages=[Message.user("hi")],
+                                                      effort="low", max_tokens=64_000))
+    assert api.json_body(0)["stream"] is True and api.json_body(0)["max_tokens"] > 21_333
+    assert r.content[0].signature == "SIG_stream" and r.content[2].input == {"text": "hi"}
+    assert r.usage.output_tokens == 42
+
+
 async def test_stream_events(cfg):
     text = (FIXTURES / "anthropic/stream_text.sse").read_text()
     api = MockAPI().add("POST", "/v1/messages", sse(text))

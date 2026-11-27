@@ -89,6 +89,7 @@ export function fileUrl(path: string, download = false): string {
 export type GalleryEntry = {
   id: string; kind: "image" | "video" | "audio"; path: string | null; url: string | null; title: string | null;
   prompt?: string | null; created_at: number; source: string; status: "done" | "pending" | "failed"; reason?: string;
+  folder?: string;
   /** Screenshot requests: how it was (or is being) captured. */
   meta?: GalleryShotMeta; actions?: string[];
 };
@@ -110,7 +111,13 @@ export function galleryMediaUrl(e: Pick<GalleryEntry, "url">): string | null {
 }
 
 export const galleryApi = {
-  list: (sessionId: string) => get<GalleryEntry[]>(`/gallery?session_id=${encodeURIComponent(sessionId)}`),
+  list: (sessionId: string, source?: "generated" | "folders" | "user", refresh = false) =>
+    get<GalleryEntry[]>(`/gallery?${new URLSearchParams({ session_id: sessionId, ...(source && { source }), ...(refresh && { refresh: "true" }) })}`),
+  folders: (sessionId: string) => get<Record<"default" | "imported", { path: string; exists: boolean; count: number }[]>>(
+    `/gallery/folders?session_id=${encodeURIComponent(sessionId)}`),
+  addFolder: (sessionId: string, path: string) => post<{ path: string }>("/gallery/folders", { session_id: sessionId, path }),
+  removeFolder: (sessionId: string, path: string) =>
+    del<{ path: string }>(`/gallery/folders?${new URLSearchParams({ session_id: sessionId, path })}`),
   screenshot: (sessionId: string, prompt: string) => post<GalleryEntry>("/gallery/screenshot", { session_id: sessionId, prompt }),
 };
 

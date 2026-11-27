@@ -1,12 +1,17 @@
 import { AlertTriangle, ChevronLeft, ChevronRight, FolderOpen, Loader2, Play, X } from "lucide-react";
-import { createContext, useContext, useEffect, useState } from "react";
-import { galleryApi, galleryMediaUrl, type GalleryEntry, type GalleryShotMeta } from "../lib/api";
-import { revealInFinder } from "../lib/native";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { galleryApi, galleryMediaUrl, inTauri, post, type GalleryEntry, type GalleryShotMeta } from "../lib/api";
+import { pickFolder, revealInFinder } from "../lib/native";
 import { actions, type Session } from "../lib/store";
 import { Empty } from "./ui";
 
 const GALLERY_EVENTS = ["gallery.updated", "item.updated", "item.deleted"];
 const MAX_ROWS = 3;
+const FILTERS = [
+  ["all", "All"], ["generated", "Generated"], ["folders", "Screenshots & folders"], ["user", "Your uploads"],
+] as const;
+type Filter = (typeof FILTERS)[number][0];
+const folderName = (path: string) => path.split(/[\\/]/).pop() || path;
 
 const vec = (v?: number[]) => (v && v.length === 3 ? v.map((n) => Math.round(n * 100) / 100).join(", ") : null);
 
@@ -29,7 +34,16 @@ function shotLine(m?: GalleryShotMeta): string | null {
   return parts.join(" · ");
 }
 
-function Thumb({ e, onOpen }: { e: GalleryEntry; onOpen: () => void }) {
+/** Fixes a failed screenshot can offer (the same Unity actions as the Unity chip). */
+const FIX_LABEL: Record<string, string> = {
+  install_harness: "Install harness scripts",
+  install_pipeline: "Install Pipeline package",
+  use_clone: "Use a copy of the files",
+};
+
+function Thumb({ e, onOpen, onFix, onRetry }: {
+  e: GalleryEntry; onOpen: () => void; onFix?: (action: string) => void; onRetry?: () => void;
+}) {
   const box = "w-full aspect-[4/3] rounded border border-line bg-sunken overflow-hidden relative";
   if (e.status === "pending") {
     return (
@@ -42,9 +56,15 @@ function Thumb({ e, onOpen }: { e: GalleryEntry; onOpen: () => void }) {
   }
   if (e.status === "failed") {
     return (
-      <div className={`${box} p-2 flex flex-col gap-1 border-bad`} role="alert" title={e.prompt ?? undefined}>
+      <div className={`${box} p-2 flex flex-col gap-1 border-bad`} role="alert" title={[e.prompt, e.reason].filter(Boolean).join("\n\n")}>
         <span className="flex items-center gap-1 text-bad text-[11.5px] font-medium"><AlertTriangle size={13} />Failed</span>
-        <span className="text-[11.5px] text-muted line-clamp-4">{e.reason ?? "Screenshot failed."}</span>
+        <span className="text-[11.5px] text-muted line-clamp-3">{e.reason ?? "Screenshot failed."}</span>
+        <span className="mt-auto flex flex-wrap gap-1">
+          {(e.actions ?? []).filter((a) => a in FIX_LABEL).map((a) => (
+            <button key={a} className="btn py-0.5 text-[11.5px]" onClick={() => onFix?.(a)}>{FIX_LABEL[a]}</button>
+          ))}
+          {e.prompt && onRetry && <button className="btn btn-ghost py-0.5 text-[11.5px]" onClick={onRetry}>Retry</button>}
+        </span>
       </div>
     );
   }
@@ -119,9 +139,19 @@ export const useGalleryEntries = () => useContext(GalleryEntriesContext);
 /** A session's gallery entries, kept fresh from the live events (the tab strip shows the count). */
 export function useGallery(sessionId: string) {
   const [entries, setEntries] = useState<GalleryEntry[]>([]);
-  const load = () => galleryApi.list(sessionId).then(setEntries).catch(() => {});
-  useEffect(() => { setEntries([]); load(); }, [sessionId]);
-  useEffect(() => actions.onEvent((e) => { if (GALLERY_EVENTS.includes(e.type) && (e.session_id === sessionId || e.type === "item.deleted")) load(); }), [sessionId]);
+  useEffect(() => {
+    let version = 0;
+    const load = () => {
+      const request = ++version;
+      galleryApi.list(sessionId).then((result) => { if (request === version) setEntries(result); }).catch(() => {});
+    };
+    setEntries([]);
+    load();
+    const unsubscribe = actions.onEvent((e) => {
+      if (GALLERY_EVENTS.includes(e.type) && (e.session_id === sessionId || e.type === "item.deleted")) load();
+    });
+    return () => { version++; unsubscribe(); };
+  }, [sessionId]);
   return { entries, setEntries };
 }
 
@@ -130,6 +160,60 @@ export function GalleryTab({ s, entries, setEntries }: { s: Session; entries: Ga
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
+  const [source, setSource] = useState<Filter>("all");
+  const [filtered, setFiltered] = useState<{ sessionId: string; source: Filter; entries: GalleryEntry[] }>();
+  const [folders, setFolders] = useState<Awaited<ReturnType<typeof galleryApi.folders>>>();
+  const [updating, setUpdating] = useState(false);
+  const refresh = useCallback(async (force = false) => {
+    setEntries(await galleryApi.list(s.id, undefined, force));
+    setFolders(await galleryApi.folders(s.id));
+  }, [s.id, setEntries]);
+  useEffect(() => {
+    const loadFolders = () => galleryApi.folders(s.id).then(setFolders).catch(() => {});
+    const onFocus = () => { refresh(true).catch(() => {}); };
+    refresh().catch(() => {});
+    window.addEventListener("focus", onFocus);
+    const unsubscribe = actions.onEvent((e) => {
+      if (e.type === "gallery.updated" && e.session_id === s.id && ["added", "removed"].includes(e.data?.status)) loadFolders();
+    });
+    return () => { window.removeEventListener("focus", onFocus); unsubscribe(); };
+  }, [refresh, s.id]);
+  useEffect(() => {
+    if (source === "all") return;
+    let active = true;
+    galleryApi.list(s.id, source).then((result) => {
+      if (active) setFiltered({ sessionId: s.id, source, entries: result });
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [s.id, source, entries]);
+  const updateFolders = async (update: () => Promise<void>) => {
+    setUpdating(true);
+    try { await update(); } catch (err: any) { actions.toast(err.message, "error"); } finally { setUpdating(false); }
+  };
+  const importFolder = () => updateFolders(async () => {
+    const picked = await pickFolder();
+    const path = (picked ?? (!inTauri() ? window.prompt("Folder path") : null))?.trim();
+    if (!path) return;
+    await galleryApi.addFolder(s.id, path);
+    await refresh();
+  });
+  const removeFolder = (path: string) => updateFolders(async () => {
+    await galleryApi.removeFolder(s.id, path);
+    await refresh();
+  });
+  const fix = async (action: string) => {
+    try {
+      const r = await post<{ status: string; message?: string }>(`/unity/actions/${action}`, { session_id: s.id });
+      actions.toast(r?.message || (r?.status === "pending" ? "Approve it in the Chat tab, then retry the screenshot" : `Unity: ${r?.status ?? "done"}`),
+        r?.status === "error" ? "error" : undefined);
+    } catch (err: any) { actions.toast(err.message, "error"); }
+  };
+  const retry = async (p: string) => {
+    try {
+      const e = await galleryApi.screenshot(s.id, p);
+      setEntries((cur) => (cur.some((x) => x.id === e.id) ? cur : [e, ...cur]));
+    } catch (err: any) { actions.toast(err.message, "error"); }
+  };
   const submit = async () => {
     const p = prompt.trim();
     if (!p || busy) return;
@@ -141,7 +225,19 @@ export function GalleryTab({ s, entries, setEntries }: { s: Session; entries: Ga
     } catch (err: any) { actions.toast(err.message, "error"); } finally { setBusy(false); }
   };
   const rows = Math.min(MAX_ROWS, Math.max(1, prompt.split("\n").length, Math.ceil(prompt.length / 80)));
-  const viewing = entries.find((x) => x.id === open);
+  let visible = entries;
+  if (source !== "all") {
+    visible = filtered?.sessionId === s.id && filtered.source === source ? filtered.entries : entries.filter((e) => (
+      source === "generated" ? e.source !== "user" && e.source !== "folder" : e.source === (source === "folders" ? "folder" : "user")
+    ));
+    if (source === "folders") {
+      visible = [...visible, ...entries.filter((e) => e.source === "screenshot")].sort((a, b) => b.created_at - a.created_at);
+    }
+  }
+  const viewing = visible.find((e) => e.id === open);
+  const root = s.folder?.replace(/[\\/]+$/, "");
+  const defaultLabel = (path: string) => root && (path.startsWith(`${root}/`) || path.startsWith(`${root}\\`))
+    ? path.slice(root.length + 1) : path;
   return (
     <div className="h-full overflow-y-auto scroll-thin p-4 text-[13px]">
       <form className="flex flex-col gap-1.5 mb-3 max-w-xl" onSubmit={(e) => { e.preventDefault(); submit(); }}>
@@ -150,9 +246,34 @@ export function GalleryTab({ s, entries, setEntries }: { s: Session; entries: Ga
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(); } }} />
         <button type="submit" className="btn btn-primary self-end" disabled={!prompt.trim() || busy}>Take screenshot</button>
       </form>
-      {entries.length === 0 ? <Empty>No media yet.</Empty> : (
+      <div className="flex flex-wrap items-center gap-1.5 mb-2">
+        <div role="group" aria-label="Gallery source" className="flex flex-wrap gap-1">
+          {FILTERS.map(([value, label]) => (
+            <button key={value} className={`btn ${source === value ? "btn-primary" : "btn-ghost"} px-2 py-1`}
+              aria-pressed={source === value} onClick={() => { setSource(value); setOpen(null); }}>{label}</button>
+          ))}
+        </div>
+        <button className="btn btn-ghost ml-auto" disabled={updating} onClick={importFolder}><FolderOpen size={14} />Import folder…</button>
+        <button className="btn btn-ghost" disabled={updating} onClick={() => updateFolders(() => refresh(true))}>Refresh</button>
+      </div>
+      {!!folders?.imported.length && <div className="flex flex-wrap gap-1.5 mb-2">
+        {folders.imported.map(({ path, exists, count }) => (
+          <div key={path} title={path} className="inline-flex items-center gap-1 rounded border border-line bg-sunken pl-2 text-[12px] text-muted">
+            <span>{folderName(path)} ({exists ? count : "unavailable"})</span>
+            <button className="btn btn-ghost p-1" aria-label={`Remove folder ${folderName(path)}`} disabled={updating}
+              onClick={() => removeFolder(path)}><X size={13} /></button>
+          </div>
+        ))}
+      </div>}
+      {!!folders?.default.length && <div className="mb-3 text-[12px] text-muted">
+        Also showing: {folders.default.map(({ path, count }) => `${defaultLabel(path)} (${count})`).join(", ")}
+      </div>}
+      {visible.length === 0 ? <Empty>No media yet.</Empty> : (
         <div data-testid="gallery-grid" aria-label="Gallery" role="list" className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(180px,1fr))]">
-          {entries.map((e) => <div key={e.id} role="listitem"><Thumb e={e} onOpen={() => setOpen(e.id)} /></div>)}
+          {visible.map((e) => <div key={e.id} role="listitem">
+            <Thumb e={e} onOpen={() => setOpen(e.id)} onFix={fix} onRetry={e.prompt ? () => retry(e.prompt!) : undefined} />
+            {e.folder && <div className="truncate text-[11.5px] text-muted" title={e.folder}>{folderName(e.folder)}</div>}
+          </div>)}
         </div>
       )}
       {viewing && <Lightbox e={viewing} onClose={() => setOpen(null)} />}

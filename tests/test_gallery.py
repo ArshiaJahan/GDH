@@ -32,18 +32,20 @@ def test_list_is_session_scoped_newest_first_and_media_only(env):
     time.sleep(0.01)
     i3 = _media(s, tmp, a, "three.mp3", data=b"ID3")
     _media(s, tmp, b, "other.png")
-    _media(s, tmp, a, "upload.png", source="user")
+    upload = _media(s, tmp, a, "upload.png", source="user")
     (tmp / "doc.txt").write_text("x")
     s.items.add_file(tmp / "doc.txt", source="agent", session_id=a, provider=None, model=None)
     r = c.get("/api/gallery", params={"session_id": a}, headers=H)
     assert r.status_code == 200
     got = r.json()
-    assert [e["id"] for e in got] == [i3, i2, i1]
-    assert [e["kind"] for e in got] == ["audio", "video", "image"]
-    e = got[2]
+    # User uploads are listed too (source "user"); the Gallery shows any media in the session.
+    assert [e["id"] for e in got] == [upload, i3, i2, i1]
+    assert got[0]["source"] == "user"
+    assert [e["kind"] for e in got] == ["image", "audio", "video", "image"]
+    e = got[3]
     assert {"id", "kind", "path", "url", "title", "created_at", "source"} <= set(e)
     assert e["url"] == f"/api/gallery/file/{i1}?session_id={a}" and e["path"].endswith("one.png")
-    assert [e["id"] for e in c.get("/api/gallery", params={"session_id": a, "kinds": "image"}, headers=H).json()] == [i1]
+    assert [e["id"] for e in c.get("/api/gallery", params={"session_id": a, "kinds": "image"}, headers=H).json()] == [upload, i1]
     assert c.get("/api/gallery", params={"session_id": "nope"}, headers=H).status_code == 404
     assert c.get("/api/gallery", params={"session_id": a}).status_code == 401
 
