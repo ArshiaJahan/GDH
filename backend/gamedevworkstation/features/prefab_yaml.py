@@ -22,7 +22,7 @@ CLASS_NAMES = {
     82: "AudioSource", 95: "Animator", 135: "SphereCollider", 198: "ParticleSystem",
     212: "SpriteRenderer", 222: "CanvasRenderer", 224: "RectTransform",
     # More built-ins seen in real projects (class ids from Unity's YAML class ID reference).
-    20: "Camera", 25: "Renderer", 56: "CapsuleCollider", 60: "PolygonCollider2D", 64: "MeshCollider",
+    20: "Camera", 25: "Renderer", 136: "CapsuleCollider", 60: "PolygonCollider2D", 64: "MeshCollider",
     66: "CompositeCollider2D", 68: "EdgeCollider2D", 70: "CapsuleCollider2D", 96: "TrailRenderer", 108: "Light",
     120: "LineRenderer", 137: "SkinnedMeshRenderer", 195: "NavMeshAgent", 199: "ParticleSystemRenderer",
     210: "SortingGroup", 223: "Canvas", 225: "CanvasGroup", 320: "PlayableDirector", 331: "SpriteMask",
@@ -571,4 +571,7 @@ class Project:
     def root_components(self, path: str) -> list[str]:
         prefab = self.lineage(path)[-1][1]
         objects = self.objects(prefab)
-        return [comp["type"] for comp in objects[0]["components"]] if objects else []
+        if not objects:
+            return []
+        comps = objects[0]["components"]  # scripts first: they say what the prefab is (Enemy, Pickup, ...)
+        return [c["type"] for c in comps if not c["builtin"]] + [c["type"] for c in comps if c["builtin"]]

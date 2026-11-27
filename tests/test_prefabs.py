@@ -177,7 +177,7 @@ def test_scan_and_grouping(env):
     assert set(prefabs) == {GRUNT, BRUTE, BULLET}
     assert prefabs[GRUNT] == {
         "path": GRUNT, "name": "Grunt", "guid": GRUNT_GUID, "group": "Enemies",
-        "folder": "Assets/Game/Enemies", "components": ["Transform", "Health", "Rigidbody2D", "SpriteRenderer"],
+        "folder": "Assets/Game/Enemies", "components": ["Health", "Transform", "Rigidbody2D", "SpriteRenderer"],
         "variant_of": None, "edited": 0, "preview": False,
     }
     assert prefabs[BRUTE]["variant_of"] == {"path": GRUNT, "guid": GRUNT_GUID, "name": "Grunt"}

@@ -32,6 +32,7 @@ def _feature_modules() -> list:
         "media_out",
         "prefabs",
         "gallery",  # /api/gallery: the session's media strip and Unity screenshot requests
+        "session_tabs",  # the agent's `gallery` and `prefabs` tools (what the user sees in those tabs)
     )]
     mods = []
     for n in names:

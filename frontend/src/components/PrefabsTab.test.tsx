@@ -62,6 +62,11 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+/** Built-in components (Transform, …) fold away behind one button when the prefab has scripts. */
+function showBuiltins() {
+  for (const b of screen.queryAllByRole("button", { name: /^Show \d+ built-in component/ })) fireEvent.click(b);
+}
+
 async function open() {
   render(<PrefabsTab s={session} />);
   await act(async () => {});
@@ -82,6 +87,8 @@ it("shows common editable values and mixed values for two Cmd-selected prefabs",
   expect(bulk.getByRole("heading", { name: "Bulk edit · 2 prefabs" })).toBeTruthy();
   expect(bulk.getByText("6 fields in common")).toBeTruthy();
   expect((bulk.getByLabelText("Aggro Range") as HTMLInputElement).value).toBe("8");
+  expect(bulk.queryByLabelText("Local Scale x")).toBeNull();
+  showBuiltins();
   expect((bulk.getByLabelText("Local Scale x") as HTMLInputElement).value).toBe("1");
   const mixed = bulk.getByPlaceholderText("mixed") as HTMLInputElement;
   expect(mixed).toBe(bulk.getByLabelText("Max Health"));
@@ -256,6 +263,8 @@ it("shows a prefab's values with edited, inherited and read-only fields", async 
   expect(within(insp).getByText("edited · was 60")).toBeTruthy();
   expect(within(insp).getByText("from Grunt")).toBeTruthy();
   expect(within(insp).getByTitle(/fileID: 11400000/).textContent).toBe("asset abcdef01…");
+  expect(within(insp).queryByLabelText("Local Scale y")).toBeNull();
+  showBuiltins();
   expect((within(insp).getByLabelText("Local Scale y") as HTMLInputElement).value).toBe("1");
 });
 
@@ -278,6 +287,7 @@ it("writes an edit on Enter and shows a bad value inline", async () => {
   expect((screen.getByLabelText("Max Health") as HTMLInputElement).value).toBe("95");
 
   post.mockResolvedValueOnce({ ok: true, step: 3, detail: detail() });
+  showBuiltins();
   await act(async () => { fireEvent.click(screen.getByLabelText("Local Scale x")); });
   const sx = screen.getByLabelText("Local Scale x") as HTMLInputElement;
   fireEvent.change(sx, { target: { value: "1.5" } });

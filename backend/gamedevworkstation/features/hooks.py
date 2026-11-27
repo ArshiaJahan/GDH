@@ -1335,7 +1335,10 @@ def _unity_section(app: "AppState", session: dict, unity: dict | None) -> str:
     how = ('Call the `unity` tool with op="status" for the route.' if unity.get("route") == "unknown" else
            'Checked at session start; after the Editor opens or closes, call the `unity` tool with op="status".')
     return ("## Unity\n" + unity_line(unity) + "\n" + how + " Use the `unity` tool for compile / test / build / exec / "
-            "eval on every route; MCP for Unity tools only when route=mcp.")
+            "eval on every route; MCP for Unity tools only when route=mcp.\n"
+            "The user also sees a Prefabs tab (prefab values they can edit and undo) and a Gallery tab (screenshots, "
+            "renders and other media): read them with the `prefabs` and `gallery` tools; `prefabs` op=history shows "
+            "edits the user made there by hand.")
 
 
 def build_context_pack(app: "AppState", session: dict, *, unity: dict | None = None) -> dict | None:

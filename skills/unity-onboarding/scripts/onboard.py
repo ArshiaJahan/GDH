@@ -374,7 +374,12 @@ def write_categories(root: Path, info: dict, write: bool) -> str:
         return "kept"
     if old is not None and old.get("generated_by") != "onboarding":
         return "kept"
-    cats = {category_name(f): [f"{f}/*.prefab"] for f in info["folders"]}
+    folders = list(info["folders"])
+    shared = os.path.commonpath(folders) if len(folders) > 1 else ""
+    if shared in folders:  # a folder holding prefabs keeps its own name
+        shared = os.path.dirname(shared)
+    cats = {(f[len(shared):].strip("/") if shared and f != shared else category_name(f)) or category_name(f):
+            [f"{f}/*.prefab"] for f in folders}
     data = {"categories": cats, "generated_by": "onboarding"}
     if old == data:
         return "unchanged"

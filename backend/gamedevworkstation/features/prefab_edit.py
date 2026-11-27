@@ -372,7 +372,7 @@ def _same(a: str, b: str) -> bool:
         return False
 
 
-def edit_many(project: Project, edits: list[dict], summary: str | None) -> tuple[int, dict]:
+def edit_many(project: Project, edits: list[dict], summary: str | None, by: str = "tab") -> tuple[int, dict]:
     history = load_history(project.root)
     steps = history["steps"]
     step_id = steps[-1]["id"] + 1 if steps else 1
@@ -409,7 +409,7 @@ def edit_many(project: Project, edits: list[dict], summary: str | None) -> tuple
         raise HTTPException(400, "Nothing to change: every prefab already has that value")
     active = _active(history)
     active.append({
-        "id": step_id, "at": time.time(), "summary": summary or f"Edit {label(edits[0]['key'])}",
+        "id": step_id, "at": time.time(), "summary": summary or f"Edit {label(edits[0]['key'])}", "by": by,
         "edits": records,
     })
     history = {"position": min(len(active), LIMIT), "steps": active[-LIMIT:]}

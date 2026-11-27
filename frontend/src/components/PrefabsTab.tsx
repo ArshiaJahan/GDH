@@ -1,5 +1,5 @@
 import { History, Image as ImageIcon, Loader2, Plus, Redo2, RefreshCw, Undo2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { ApiError } from "../lib/api";
 import {
   commonPrefabFields, conflictsOf, prefabBool, prefabPreviewUrl, prefabsApi, type Conflict, type GroupBy, type HistoryStep, type PrefabDetail,
@@ -362,6 +362,7 @@ function BulkFields({ sid, paths, version, onEdited }: {
 }) {
   const [result, setResult] = useState<{ sid: string; paths: string[]; version: number; details?: PrefabDetail[]; error?: string }>();
   const [busy, setBusy] = useState(false);
+  const [showBuiltins, setShowBuiltins] = useState(false);
   const workers = useRef<Promise<void>[]>([]);
   useEffect(() => {
     if (paths.length < 2 || paths.length > BULK_LIMIT) return;
@@ -396,12 +397,17 @@ function BulkFields({ sid, paths, version, onEdited }: {
   if (!groups) return <p role="status" className="m-0 flex items-center gap-2 text-muted"><Loader2 size={14} className="animate-spin" /> Loading prefab details…</p>;
 
   const count = [...groups.values()].reduce((n, group) => n + group.slots.length, 0);
+  const all = [...groups];
+  const scriptGroups = all.filter(([, g]) => !g.component.builtin);
+  const builtinGroups = all.filter(([, g]) => g.component.builtin);
+  const fold = scriptGroups.length > 0 && builtinGroups.length > 0;
+  const bulkOrdered = [...scriptGroups, ...(!fold || showBuiltins ? builtinGroups : [])];
   return (
     <fieldset disabled={busy} className="flex flex-col gap-3 border-0 p-0 m-0 min-w-0">
       <p className="m-0 text-muted">{count} {count === 1 ? "field" : "fields"} in common</p>
       {!count && <p className="m-0 text-muted">These prefabs share no editable fields</p>}
-      {[...groups].map(([key, { component, objectPath, slots }]) => (
-        <div key={key} className="border border-line rounded-md">
+      {bulkOrdered.map(([key, { component, objectPath, slots }], i) => (<Fragment key={key}>
+        <div className="border border-line rounded-md">
           <ComponentHeading c={component} objectPath={objectPath} />
           <div className="grid gap-3 p-3" style={FIELD_GRID}>
             {slots.map(({ key: fieldKey, label, kind, value, edits }) => {
@@ -430,7 +436,9 @@ function BulkFields({ sid, paths, version, onEdited }: {
             })}
           </div>
         </div>
-      ))}
+      </Fragment>))}
+      {fold && <BuiltinToggle names={[...new Set(builtinGroups.map(([, g]) => g.component.type))]} open={showBuiltins}
+        onToggle={() => setShowBuiltins((x) => !x)} />}
     </fieldset>
   );
 }
@@ -443,11 +451,30 @@ const FIELD_GRID = { gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))
 function ObjectComponents({ sid, detail, o, onEdited }: {
   sid: string; detail: PrefabDetail; o: PrefabDetail["objects"][number]; onEdited: (d: PrefabDetail) => void;
 }) {
+  // Script values are what people tune, so scripts come first; built-in components fold away behind one button.
+  const scripts = o.components.filter((c) => !c.builtin);
+  const builtins = o.components.filter((c) => c.builtin);
+  const fold = scripts.length > 0 && builtins.length > 0;
+  const [showBuiltins, setShowBuiltins] = useState(!fold);
+  const card = (c: PrefabDetail["objects"][number]["components"][number]) =>
+    <ComponentCard key={c.file_id} sid={sid} detail={detail} c={c} onEdited={onEdited} />;
   return (
     <div className="flex flex-col gap-3">
-      {o.components.map((c) => <ComponentCard key={c.file_id} sid={sid} detail={detail} c={c} onEdited={onEdited} />)}
+      {scripts.map(card)}
+      {fold && <BuiltinToggle names={builtins.map((c) => c.type)} open={showBuiltins} onToggle={() => setShowBuiltins((x) => !x)} />}
+      {showBuiltins && builtins.map(card)}
       {!o.components.length && <div className="text-muted">No components.</div>}
     </div>
+  );
+}
+
+function BuiltinToggle({ names, open, onToggle }: { names: string[]; open: boolean; onToggle: () => void }) {
+  return (
+    <button className="btn btn-ghost justify-start text-left text-muted" aria-expanded={open} onClick={onToggle}
+      title={names.join(", ")}>
+      {open ? "Hide" : "Show"} {names.length} built-in component{names.length === 1 ? "" : "s"}
+      <span className="truncate text-faint">· {names.join(", ")}</span>
+    </button>
   );
 }
 

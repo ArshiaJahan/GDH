@@ -7,6 +7,7 @@ from fnmatch import fnmatchcase
 from functools import lru_cache
 import json
 from pathlib import Path
+import threading
 import time
 from typing import TYPE_CHECKING, Literal
 
@@ -25,6 +26,7 @@ PREFIX = "/sessions/{sid}/prefabs"
 CATEGORIES = "prefab-categories.json"
 NO_PROJECT = "no Unity project in this session's folder"
 GroupBy = Literal["category", "folder", "component"]
+LOCK = threading.Lock()  # one writer at a time for the tab's routes and the agent's `prefabs` tool
 
 
 class Categories(BaseModel):
@@ -141,10 +143,9 @@ def _scan(root: Path | None, group_by: GroupBy) -> dict:
 
 
 def register(app_: FastAPI, api: APIRouter, S: AppState) -> None:
-    # A session is not a write lock. Multiple sessions can point at the same project.
-    from threading import Lock
-
-    lock = Lock()
+    # A session is not a write lock. Multiple sessions can point at the same project (and the agent's
+    # `prefabs` tool shares this lock and journal).
+    lock = LOCK
 
     renders: dict[str, dict] = {}  # project root -> {running, started_at, finished_at, result}
 
