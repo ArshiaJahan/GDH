@@ -33,13 +33,13 @@ over MCP, and the app, not the model, decides when a task is done.**
 
 ![A real task in a small Unity project: Codex generates the textures, Claude Code applies them in the Unity Editor over MCP, then a seeded run is recorded, replayed in batch with every frame hash matching, and rendered to video](docs/media/hero-unity-task.gif)
 
-<sub>One real session on 2026-11-19, cut for length: Claude Code (claude.ai subscription) driving Unity 6000.3.21f1 through MCP for Unity 10.3, in a copy of the bundled <a href="examples/unity-sample">sample project</a>, with tool calls going through GameDevWorkstation's approval cards. Codex CLI (<code>codex exec</code> with image generation) made the three textures. The gameplay clip is the <code>replay_render</code> export of a seed-42 recording whose batch replay matched all 1,968 frame hashes; a demo-only autopilot script (not part of the sample) steers the player.</sub>
+<sub>One real session on 2026-11-19, cut for length: Claude Code (claude.ai subscription) driving Unity 6000.3.21f1 through MCP for Unity 10.3, in a copy of the bundled <a href="examples/unity-sample">sample project</a>, with tool calls going through GameDevWorkstation's approval cards. Codex CLI (<code>codex exec</code> with image generation) made the three textures. The gameplay clip is the <code>replay_render</code> export of a seed-42 recording whose batch replay matched all 1,968 frame hashes (a check run by hand that day and recorded in commit <a href="https://github.com/ArshiaJahan/GDH/commit/2316b11">2316b11</a>); a demo-only autopilot script (not part of the sample) steers the player.</sub>
 
-**Checked in CI** ([latest run on `main`](https://github.com/ArshiaJahan/GDH/actions/workflows/ci.yml?query=branch%3Amain), 2026-11-19):
+**Checked in CI** ([run on `main`](https://github.com/ArshiaJahan/GDH/actions/runs/45738539164), v0.8.1, 2026-11-26):
 
-- **1,866 backend and 186 frontend tests** pass on every push (macOS runner); a Windows runner builds the installer and smoke-tests its backend.
+- **2,503 backend and 222 frontend tests** pass on every push (macOS runner); a Windows runner builds the installer and smoke-tests its backend.
 - **CI failure triage** sorts 26 of 26 labelled failed CI logs into the right category ([`tests/test_triage_fixtures.py`](tests/test_triage_fixtures.py); 24/26 before the rules were tuned, see the [guide](docs/GUIDE.md#ci-failure-triage)).
-- **4 releases** so far ([v0.6.0 to v0.7.2](https://github.com/ArshiaJahan/GDH/releases)), each with a macOS app and a Windows installer, published by CI.
+- **6 releases** so far ([v0.6.0 to v0.8.1](https://github.com/ArshiaJahan/GDH/releases)), each with a macOS app and a Windows installer, published by CI.
 
 <p align="center"><a href="https://github.com/ArshiaJahan/GDH/releases/latest"><b>⬇ Download the latest release</b></a> · macOS 13+ (Apple Silicon) · Windows x64 (experimental)</p>
 
@@ -124,8 +124,20 @@ the Skills & MCP page.
 
 ![Adding tasks to the Backlog, To do and In progress columns of the task board](docs/media/demo-task-board.gif)
 
+**Prefabs tab.** Every prefab in the project with a Unity-rendered thumbnail, grouped by folder. Values are read
+from the `.prefab` files by scripts, with no model calls: edit one, or select several and set a shared value in one
+step, then undo it from the history.
+
+![The Prefabs tab: the Enemies category, a Brute variant's script values, an edit, a three-prefab bulk edit and the undo history](docs/media/demo-prefabs.gif)
+
+**Gallery tab.** The session's screenshots, renders and media in one grid: Unity captures from
+`Logs/harness/screenshots`, generated media, your uploads and any folder you import.
+
+![The Gallery tab: a screenshot request, importing an art folder, and filtering to screenshots and folders](docs/media/demo-gallery.gif)
+
 <sub>Recorded from this repository's own UI in a browser, against a small demo Unity folder; the Claude
-Code reply is a real run.</sub>
+Code reply is a real run. The Prefabs and Gallery clips use a demo Unity 6000.3 project whose thumbnails and
+screenshots Unity rendered in batchmode (`unity.sh previews` and `unity.sh screenshot`).</sub>
 
 > [!IMPORTANT]
 > **Built for macOS.** GameDevWorkstation targets macOS 13 or later on Apple Silicon. A
@@ -140,7 +152,7 @@ The eight that matter most; [all 22 features](docs/GUIDE.md#all-features) are in
 | | |
 |---|---|
 | **Orchestrator + subagents** | Claude plans the job and delegates units to Claude and OpenAI subagents (API or Codex CLI), choosing model tier and effort per unit, with parallel git worktrees for code. |
-| **Unity skill pack** | 18 Unity 6 skills behind a router: compile/fix loops, Play Mode verification, record and replay, headless builds, safe scene/prefab edits, perf and game-feel passes, trailers, shipping. |
+| **Unity skill pack** | 20 Unity 6 skills behind a router: compile/fix loops, Play Mode verification, record and replay, headless builds, safe scene/prefab edits, perf and game-feel passes, trailers, shipping. |
 | **Quality ladder L1-L4** | Stories reach `done` only with fresh, app-observed evidence: compile, tests, play evidence and screenshots, design critique. |
 | **Record and replay** | Record instrumented Unity sessions in the open Editor, replay them with frame-by-frame checkpoint verification (SHA-256 state hashes), and export silent gameplay GIF/MP4. Input System only; the guarantee is same-environment repeatability for the state you register, and a mismatch is reported, not refused. |
 | **CI failure triage** | `gdw triage <run-id\|log>` sorts a failed CI run's failures into compile, test, flaky, infra, dependency and timeout, and names the file and line. It reads GitHub Actions, pytest, vitest, tsc, cargo, npm and uv logs, plus Unity Editor.log and NUnit XML. Rules come first, and a model handles only what the rules can't place. A GitHub Action posts the report on failed PRs. On 26 labelled failed logs the rules got 24/26 categories right before tuning and 26/26 after. See [CI failure triage](docs/GUIDE.md#ci-failure-triage). |
@@ -179,6 +191,8 @@ and whether to work through the Editor (MCP) or batchmode.
 | Skill | Purpose |
 |---|---|
 | [`unity-router`](skills/unity-router/SKILL.md) | Routes a task to the right Unity skills; ships the Unity gates preset |
+| [`unity-onboarding`](skills/unity-onboarding/SKILL.md) | One cached scan of a project's docs, tools, git state and prefabs, then asks which open to-do to take; fills the Prefabs tab by folder |
+| [`unity-practices`](skills/unity-practices/SKILL.md) | Unity 6 practices for code, enemies, pooling, textures, performance and tuning, with a C# linter, a texture audit and ready-made kits |
 | [`compile-fix-loop`](skills/compile-fix-loop) | Compile, read the console, fix, repeat, with stop conditions |
 | [`play-verify`](skills/play-verify) | Play Mode checks with `[VERIFY]` signals, screenshots and scripted input |
 | [`headless-ops`](skills/headless-ops) | Batchmode compile, tests and builds when the Editor is closed |
@@ -287,13 +301,28 @@ needs the Editor open, because the Recorder doesn't run in batchmode.
 
 ### Gallery
 
-The **Gallery** card (side panel, under Outputs) shows the images, videos and audio a session made. Type what a
-screenshot should show ("player at the cave entrance, night, low angle") and a short side agent frames the shot in
-Unity and captures it: through MCP for Unity or the Unity CLI with the Editor open, or a batch render
-(`unity.sh screenshot`) with the Editor closed. Captures only write into `Logs/harness/screenshots/`;
-the agent never edits project source files or saves a scene. Approval cards depend on the route, Play Mode
-exit is best effort, and switching to Plan only mode refuses further captures and play calls. Details:
+The **Gallery** tab shows the session's images, videos and audio: what its tools generated, your uploads, Unity
+captures in `Logs/harness/screenshots/`, replay renders, and any folder you import (**Import folder…**; files are
+served only from those folders). Filters split generated media, screenshots and folders, and uploads.
+
+Type what a screenshot should show ("player at the cave entrance, night, low angle") and a short side agent frames
+the shot in Unity and captures it: through MCP for Unity or the Unity CLI with the Editor open, or a batch render
+(`unity.sh screenshot`) with the Editor closed. Captures only write into `Logs/harness/screenshots/`; the agent never
+edits project source files or saves a scene. A failed capture says why and offers the fix (for example installing
+the harness editor scripts) and a retry. The agent sees the same list through its `gallery` tool. Details:
 [Gallery](docs/GUIDE.md#gallery).
+
+### Prefabs
+
+The **Prefabs** tab lists every prefab in a Unity project by category, folder or main component, with search and
+Variants / Edited filters. [`unity-onboarding`](skills/unity-onboarding/SKILL.md) fills the categories one per folder.
+The inspector reads values straight from the `.prefab` YAML by script (no model calls, no tokens): script components
+first, built-in ones folded away, and on a variant each value says whether it is inherited or overridden. Edits are
+line patches written atomically; selecting several prefabs edits a shared value on all of them in one step, writing
+bases before their variants so the variants keep inheriting. Undo, redo and history work per project, and an undo
+warns when the file changed since. **Render previews** has Unity draw a thumbnail of each changed prefab in preview
+scenes, with the Editor open or closed, after an approval card. The agent reads and edits the same data through its
+`prefabs` tool, and its edits land in the same history, so you can undo them in the tab.
 
 ## Campaigns and workflows
 

@@ -43,7 +43,7 @@ Every feature at a glance; the sections below have the details. The README lists
 | | |
 |---|---|
 | **Orchestrator + subagents** | Claude plans the job and delegates units to Claude and OpenAI subagents (API or Codex CLI), choosing model tier and effort per unit, with parallel git worktrees for code. |
-| **Unity skill pack** | 18 Unity 6 skills behind a router: compile/fix loops, Play Mode verification, record and replay, headless builds, safe scene/prefab edits, perf and game-feel passes, trailers, shipping. |
+| **Unity skill pack** | 20 Unity 6 skills behind a router: compile/fix loops, Play Mode verification, record and replay, headless builds, safe scene/prefab edits, perf and game-feel passes, trailers, shipping. |
 | **Unity: MCP or CLI** | Drive Unity through MCP for Unity or the official Unity CLI (live Editor via `com.unity.pipeline`, or batch when it's closed), switchable per project and session, with a status chip and one `unity` tool for the agent. |
 | **Hooks and gates** | A hooks engine runs checks at fixed points of a turn: compile before finishing, tests in verify phases, blocked edits to generated files. |
 | **Quality ladder L1-L4** | Stories reach `done` only with fresh, app-observed evidence: compile, tests, play evidence and screenshots, design critique. |
@@ -297,11 +297,15 @@ windows at least 1200 px wide and closed in narrower ones:
 
 ### Gallery
 
-The **Gallery** tab sits at the top of the session, next to **Chat** and **Subagents**. It shows what
-the session *generated* (media items from the agent, its tools and commands that announce
-`ARTIFACT:` / `TRAILER_OUTPUT:` lines; your own attachments are left out) as a grid, newest first,
-with every item shown. Click an image or a video to open it larger, with its prompt, how it was captured
-and **Open in Finder**. Videos and audio show a play badge.
+The **Gallery** tab sits at the top of the session, next to **Chat**, **Subagents** and **Prefabs**. It shows,
+as a grid newest first: media the session generated (from the agent, its tools and commands that announce
+`ARTIFACT:` / `TRAILER_OUTPUT:` lines), your own uploads, and every image, video and audio file in the project's
+capture folders (`Logs/harness/screenshots`, `Logs/harness/replay`, `Recordings`, `Screenshots`, `Captures`,
+`Assets/Screenshots`) and in folders you import with **Import folder…** (up to 20 per session; remove one with its ×).
+Folder files are served only by id from those folders, never by a free path. The chips filter to **Generated**,
+**Screenshots & folders** or **Your uploads**; **Refresh** rescans the folders (they are also rescanned when the window
+regains focus). Click an image or a video to open it larger, with its prompt, how it was captured and **Open in
+Finder**. Videos and audio show a play badge. The agent lists the same entries with its `gallery` tool.
 
 Images a tool generates (ComfyPlug, screenshots, MCP tools) also appear in the **Chat** itself, inline
 at the tool call that made them. A reply (everything the agent does between two of your messages) that
@@ -322,7 +326,9 @@ Approval depends on the route: MCP uses an **MCP tool** card; live captures with
 card with **Always allow `screenshot` in this project**. Plan only mode refuses screenshots, including
 further captures and play calls if you switch modes during a request. Screenshots only write into
 `<project>/Logs/harness/screenshots/` (Unity's default `.gitignore` already ignores `Logs/`), and the
-gallery entry keeps your prompt as its caption, the route and the camera it used.
+gallery entry keeps your prompt as its caption, the route and the camera it used. A failed capture shows its reason
+(hover for the full text) with the fix it needs, for example **Install harness scripts** when a batch capture needs
+the headless-ops editor scripts, and a **Retry** button.
 
 How each route captures:
 
